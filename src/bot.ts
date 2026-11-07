@@ -73,10 +73,18 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     await ctx.reply('❎ Conversation cancelled. No records were created.');
   });
 
-  // --- inline button callbacks (View / Mark as received / Payback) ---------
-  bot.on('callback_query:data', (ctx) =>
-    new PaymentCallbackHandler(conversation(ctx), repository).handleCallback(ctx)
-  );
+  // --- inline button callbacks --------------------------------------------
+  // Callbacks are dispatched by prefix. `init_*` flows to the init handler;
+  // everything else falls through to PaymentCallbackHandler (which owns
+  // view / mark_received / payback / pb_sent).
+  bot.on('callback_query:data', async (ctx) => {
+    const data = ctx.callbackQuery?.data ?? '';
+    if (data.startsWith('init_confirm:') || data.startsWith('init_cancel:')) {
+      await new InitCommandHandler(conversation(ctx), repository).handleCallback(ctx);
+      return;
+    }
+    await new PaymentCallbackHandler(conversation(ctx), repository).handleCallback(ctx);
+  });
 
   // --- free-text conversation routing --------------------------------------
   // Exactly one flow is active per chat (DO FSM `flow` field); each handler
