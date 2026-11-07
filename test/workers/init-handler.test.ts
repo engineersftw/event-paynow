@@ -1,7 +1,6 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createBot } from '../../src/bot';
-import { D1Repository, D1EventRepository } from '../../src/db/drizzle-repository';
 import type { Env as WorkerEnv } from '../../src/env';
 import {
   applyTestSchema,
@@ -15,7 +14,7 @@ beforeAll(async () => {
   await applyTestSchema(env.paynow_db);
 });
 
-const T0 = '2024-01-01T00:00:00Z';
+const _T0 = '2024-01-01T00:00:00Z';
 const stub = new TelegramStub();
 
 beforeEach(() => {
@@ -48,8 +47,9 @@ describe('init handler (Workers pool)', () => {
     const keyboard = confirmMsg.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
-    const confirmData = keyboard.inline_keyboard.flat().find((b) => b.text.startsWith('✅'))!
-      .callback_data;
+    const confirmData = keyboard.inline_keyboard
+      .flat()
+      .find((b) => b.text.startsWith('✅'))!.callback_data;
     await bot.handleUpdate(callbackUpdate(userId, confirmData));
 
     expect(stub.editedMessages).toHaveLength(1);
@@ -70,8 +70,9 @@ describe('init handler (Workers pool)', () => {
     const keyboard = confirmMsg.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
-    const confirmData = keyboard.inline_keyboard.flat().find((b) => b.text.startsWith('✅'))!
-      .callback_data;
+    const confirmData = keyboard.inline_keyboard
+      .flat()
+      .find((b) => b.text.startsWith('✅'))!.callback_data;
     await bot.handleUpdate(callbackUpdate(userId, confirmData));
 
     expect(stub.editedMessages[0]!.text).toContain('Event created');
@@ -100,8 +101,9 @@ describe('init handler (Workers pool)', () => {
     const keyboard = confirmMsg.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
-    const cancelData = keyboard.inline_keyboard.flat().find((b) => b.text.startsWith('❌'))!
-      .callback_data;
+    const cancelData = keyboard.inline_keyboard
+      .flat()
+      .find((b) => b.text.startsWith('❌'))!.callback_data;
     await bot.handleUpdate(callbackUpdate(userId, cancelData));
 
     expect(stub.editedMessages[0]!.text).toContain('Cancelled');

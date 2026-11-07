@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createBot } from '../../src/bot';
-import { D1Repository, D1EventRepository } from '../../src/db/drizzle-repository';
+import { D1EventRepository } from '../../src/db/drizzle-repository';
 import type { Env as WorkerEnv } from '../../src/env';
 import {
   applyTestSchema,
@@ -48,7 +48,7 @@ describe('end_event handler (Workers pool)', () => {
   it('closes an open event', async () => {
     const userId = 910000001;
     const { bot } = makeWiredBot();
-    const event = await seedEvent(userId);
+    const _event = await seedEvent(userId);
 
     await bot.handleUpdate(textUpdate(userId, '/end_event'));
     // With 1 event, auto-advances to confirm step
@@ -58,8 +58,9 @@ describe('end_event handler (Workers pool)', () => {
     const keyboard = confirmMsg.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
-    const confirmData = keyboard.inline_keyboard.flat().find((b) => b.text.startsWith('✅'))!
-      .callback_data;
+    const confirmData = keyboard.inline_keyboard
+      .flat()
+      .find((b) => b.text.startsWith('✅'))!.callback_data;
     await bot.handleUpdate(callbackUpdate(userId, confirmData));
 
     expect(stub.editedMessages).toHaveLength(1);
@@ -78,15 +79,16 @@ describe('end_event handler (Workers pool)', () => {
   it('double-tap shows already closed', async () => {
     const userId = 910000003;
     const { bot } = makeWiredBot();
-    const event = await seedEvent(userId);
+    const _event = await seedEvent(userId);
 
     await bot.handleUpdate(textUpdate(userId, '/end_event'));
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     const keyboard = confirmMsg.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
-    const confirmData = keyboard.inline_keyboard.flat().find((b) => b.text.startsWith('✅'))!
-      .callback_data;
+    const confirmData = keyboard.inline_keyboard
+      .flat()
+      .find((b) => b.text.startsWith('✅'))!.callback_data;
 
     // First close
     await bot.handleUpdate(callbackUpdate(userId, confirmData));
@@ -101,15 +103,16 @@ describe('end_event handler (Workers pool)', () => {
   it('cancel does not close event', async () => {
     const userId = 910000004;
     const { bot } = makeWiredBot();
-    const event = await seedEvent(userId);
+    const _event = await seedEvent(userId);
 
     await bot.handleUpdate(textUpdate(userId, '/end_event'));
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     const keyboard = confirmMsg.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
-    const cancelData = keyboard.inline_keyboard.flat().find((b) => b.text.startsWith('❌'))!
-      .callback_data;
+    const cancelData = keyboard.inline_keyboard
+      .flat()
+      .find((b) => b.text.startsWith('❌'))!.callback_data;
     await bot.handleUpdate(callbackUpdate(userId, cancelData));
 
     expect(stub.editedMessages[0]!.text).toContain('Cancelled');
