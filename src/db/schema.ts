@@ -14,10 +14,24 @@ export const users = sqliteTable('users', {
   updatedAt: text('updated_at').notNull(),
 });
 
+export const events = sqliteTable('events', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  ref: text('ref').notNull().unique(),
+  chatId: integer('chat_id').notNull(),
+  topicId: integer('topic_id').notNull().default(0),
+  name: text('name').notNull(),
+  payeeType: text('payee_type').notNull(), // 'mobile' | 'uen'
+  payeeValue: text('payee_value').notNull(),
+  status: text('status').notNull().default('open'), // 'open' | 'closed'
+  createdAt: text('created_at').notNull(),
+  closedAt: text('closed_at'),
+});
+
 export const payments = sqliteTable('payments', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   ref: text('ref').notNull().unique(),
   userId: integer('user_id').notNull(),
+  eventId: integer('event_id').notNull(),
   description: text('description').notNull(),
   amountCents: integer('amount_cents').notNull(),
   payeeType: text('payee_type').notNull(),

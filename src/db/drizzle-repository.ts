@@ -2,6 +2,10 @@ import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreatePaybackBoundedResult,
+  Event,
+  EventRepository,
+  EventStats,
+  EventStatus,
   Payback,
   PaybackStatus,
   Payment,
@@ -94,6 +98,7 @@ export class D1Repository implements Repository {
     const {
       ref,
       userId,
+      eventId,
       description,
       amountCents,
       payeeType,
@@ -104,20 +109,25 @@ export class D1Repository implements Repository {
       timestamp,
     } = input;
 
+    const values: Record<string, unknown> = {
+      ref,
+      userId,
+      description,
+      amountCents,
+      payeeType,
+      payeeValue,
+      status,
+      source,
+      qrPayload,
+      createdAt: timestamp,
+    };
+    if (eventId !== undefined) {
+      values.eventId = eventId;
+    }
+
     const created = await this.db
       .insert(schema.payments)
-      .values({
-        ref,
-        userId,
-        description,
-        amountCents,
-        payeeType,
-        payeeValue,
-        status,
-        source,
-        qrPayload,
-        createdAt: timestamp,
-      })
+      .values(values as any)
       .returning()
       .get();
 
@@ -366,8 +376,127 @@ export class D1Repository implements Repository {
 }
 
 // ============================================================================
+// D1EventRepository (implements EventRepository)
+// ============================================================================
+
+export class D1EventRepository implements EventRepository {
+  private db: ReturnType<typeof drizzle>;
+  private d1: D1Database;
+
+  constructor(d1: D1Database) {
+    this.db = drizzle(d1, { schema });
+    this.d1 = d1;
+  }
+
+  async createEvent(
+    input: Omit<Event, 'id' | 'createdAt' | 'closedAt'> & { timestamp: string }
+  ): Promise<Event> {
+    const { ref, chatId, topicId, name, payeeType, payeeValue, status, timestamp } = input;
+
+    const created = await this.db
+      .insert(schema.events)
+      .values({
+        ref,
+        chatId,
+        topicId,
+        name,
+        payeeType,
+        payeeValue,
+        status,
+        createdAt: timestamp,
+      })
+      .returning()
+      .get();
+
+    return toEvent(created!);
+  }
+
+  async listOpenEventsByChat(chatId: number, topicId: number): Promise<Event[]> {
+    const results = await this.db
+      .select()
+      .from(schema.events)
+      .where(
+        and(
+          eq(schema.events.chatId, chatId),
+          eq(schema.events.topicId, topicId),
+          eq(schema.events.status, 'open')
+        )
+      )
+      .all();
+
+    return results.map(toEvent);
+  }
+
+  async listAllEventsByChat(chatId: number, topicId: number): Promise<Event[]> {
+    const results = await this.db
+      .select()
+      .from(schema.events)
+      .where(
+        and(eq(schema.events.chatId, chatId), eq(schema.events.topicId, topicId))
+      )
+      .all();
+
+    return results.map(toEvent);
+  }
+
+  async getEventByRef(ref: string): Promise<Event | null> {
+    const result = await this.db
+      .select()
+      .from(schema.events)
+      .where(eq(schema.events.ref, ref))
+      .get();
+
+    return result ? toEvent(result) : null;
+  }
+
+  async closeEvent(ref: string, timestamp: string): Promise<boolean> {
+    const result = await this.db
+      .update(schema.events)
+      .set({ status: 'closed', closedAt: timestamp })
+      .where(and(eq(schema.events.ref, ref), eq(schema.events.status, 'open')))
+      .returning()
+      .get();
+
+    return !!result;
+  }
+
+  async getEventStats(eventId: number): Promise<EventStats> {
+    const result = await this.db
+      .select({
+        paymentCount: sql<number>`COUNT(*)`,
+        collectedCents: sql<number>`COALESCE(SUM(CASE WHEN status = 'received' THEN amount_cents ELSE 0 END), 0)`,
+        pendingCents: sql<number>`COALESCE(SUM(CASE WHEN status = 'pending' THEN amount_cents ELSE 0 END), 0)`,
+      })
+      .from(schema.payments)
+      .where(eq(schema.payments.eventId, eventId))
+      .get();
+
+    return {
+      paymentCount: result?.paymentCount ?? 0,
+      collectedCents: result?.collectedCents ?? 0,
+      pendingCents: result?.pendingCents ?? 0,
+    };
+  }
+}
+
+// ============================================================================
 // Conversion helpers (Drizzle row → plain types)
 // ============================================================================
+
+function toEvent(row: typeof schema.events.$inferSelect): Event {
+  return {
+    id: row.id,
+    ref: row.ref,
+    chatId: row.chatId,
+    topicId: row.topicId,
+    name: row.name,
+    payeeType: row.payeeType as Event['payeeType'],
+    payeeValue: row.payeeValue,
+    status: row.status as Event['status'],
+    createdAt: row.createdAt,
+    closedAt: row.closedAt,
+  };
+}
 
 function toUser(row: typeof schema.users.$inferSelect): User {
   return {
@@ -385,6 +514,7 @@ function toPayment(row: typeof schema.payments.$inferSelect): Payment {
     id: row.id,
     ref: row.ref,
     userId: row.userId,
+    eventId: row.eventId,
     description: row.description,
     amountCents: row.amountCents,
     payeeType: row.payeeType as Payment['payeeType'],

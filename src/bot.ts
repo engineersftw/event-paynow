@@ -5,7 +5,7 @@ import { PaybackCommandHandler } from './commands/payback-handler';
 import { PaymentCallbackHandler } from './commands/payment-callback-handler';
 import { PaymentsCommandHandler } from './commands/payments-handler';
 import { StartCommandHandler } from './commands/start-handler';
-import { D1Repository } from './db/drizzle-repository';
+import { D1Repository, D1EventRepository } from './db/drizzle-repository';
 import type { Env } from './env';
 import type { ConversationDO } from './worker/conversation-do';
 
@@ -29,6 +29,7 @@ const HELP_TEXT =
 export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   const bot = new Bot(env.TELEGRAM_BOT_TOKEN, config);
   const repository = new D1Repository(env.paynow_db);
+  const eventRepository = new D1EventRepository(env.paynow_db);
 
   /** Per-chat conversation DO stub (keyed exactly like the webhook design). */
   const conversation = (ctx: Context): ConversationDO => {

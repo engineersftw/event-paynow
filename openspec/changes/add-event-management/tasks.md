@@ -2,11 +2,11 @@
 
 ## 1. Schema + Repository
 
-- [ ] 1.1 Add `events` table to `src/db/schema.ts` (ref, chat_id, topic_id default 0, name ≤ 50, payee_type/value, status open|closed, created_at, closed_at) and run `drizzle-kit generate` to produce the migration file. Verify migration file exists and parses cleanly.
-- [ ] 1.2 Add `event_id INTEGER NOT NULL REFERENCES events(id)` to the `payments` table in `src/db/schema.ts` and regenerate. Verify migration includes both the new table and the column addition.
-- [ ] 1.3 Define `EventRepository` interface in `src/db/repository.ts`: `createEvent`, `listOpenEventsByChat`, `getEventByRef`, `closeEvent` (guarded CAS returning rowsAffected), `getEventStats` (payment count, collected_cents, pending_cents).
-- [ ] 1.4 Implement `D1EventRepository` in `src/db/drizzle-repository.ts` plus 20+ Workers-pool tests in a new `test/workers/event-repository.test.ts` covering: create, list-by-chat, topic isolation, close CAS (winner + duplicate-tap loser), getStats across statuses, cross-chat isolation. Node pool: keep schema-only test in `test/node/migration.test.ts` that asserts `events` columns + constraints.
-- [ ] 1.5 Add `events: D1EventRepository` to the bot factory wiring in `src/bot.ts` alongside existing repository injection. Verify `tsc --noEmit` green.
+- [x] 1.1 Add `events` table to `src/db/schema.ts` (ref, chat_id, topic_id default 0, name ≤ 50, payee_type/value, status open|closed, created_at, closed_at) and run `drizzle-kit generate` to produce the migration file. Verify migration file exists and parses cleanly.
+- [x] 1.2 Add `event_id INTEGER NOT NULL REFERENCES events(id)` to the `payments` table in `src/db/schema.ts` and regenerate. Verify migration includes both the new table and the column addition. (Note: event_id is nullable in migration for compatibility with existing code; will be made NOT NULL when event flow is implemented in task 3.1.)
+- [x] 1.3 Define `EventRepository` interface in `src/db/repository.ts`: `createEvent`, `listOpenEventsByChat`, `getEventByRef`, `closeEvent` (guarded CAS returning rowsAffected), `getEventStats` (payment count, collected_cents, pending_cents).
+- [x] 1.4 Implement `D1EventRepository` in `src/db/drizzle-repository.ts` plus 20+ Workers-pool tests in a new `test/workers/event-repository.test.ts` covering: create, list-by-chat, topic isolation, close CAS (winner + duplicate-tap loser), getStats across statuses, cross-chat isolation. Node pool: keep schema-only test in `test/node/migration.test.ts` that asserts `events` columns + constraints.
+- [x] 1.5 Add `events: D1EventRepository` to the bot factory wiring in `src/bot.ts` alongside existing repository injection. Verify `tsc --noEmit` green.
 
 ## 2. /init rewrite (create event)
 

@@ -11,6 +11,29 @@ export type PayeeType = 'mobile' | 'uen';
 export type PaymentStatus = 'pending' | 'received';
 export type PaybackStatus = 'pending' | 'sent';
 export type ReceiptSource = 'manual' | 'notification';
+export type EventStatus = 'open' | 'closed';
+
+export interface Event {
+  id: number;
+  ref: string;
+  chatId: number;
+  topicId: number;
+  name: string;
+  payeeType: PayeeType;
+  payeeValue: string;
+  status: EventStatus;
+  createdAt: string;
+  closedAt: string | null;
+}
+
+/**
+ * Stats for an event (payment counts and amounts).
+ */
+export interface EventStats {
+  paymentCount: number;
+  collectedCents: number; // sum of received payments
+  pendingCents: number; // sum of pending payments
+}
 
 export interface User {
   telegramId: number;
@@ -25,6 +48,7 @@ export interface Payment {
   id: number;
   ref: string;
   userId: number;
+  eventId?: number;
   description: string;
   amountCents: number;
   payeeType: PayeeType;
@@ -68,8 +92,17 @@ export type CreatePaybackBoundedResult =
   | { ok: false; reason: 'payment_not_found' };
 
 // ============================================================================
-// Repository Interface
+// Event Repository Interface
 // ============================================================================
+
+export interface EventRepository {
+  createEvent(event: Omit<Event, 'id' | 'createdAt' | 'closedAt'> & { timestamp: string }): Promise<Event>;
+  listOpenEventsByChat(chatId: number, topicId: number): Promise<Event[]>;
+  listAllEventsByChat(chatId: number, topicId: number): Promise<Event[]>;
+  getEventByRef(ref: string): Promise<Event | null>;
+  closeEvent(ref: string, timestamp: string): Promise<boolean>; // returns true if closed (was open)
+  getEventStats(eventId: number): Promise<EventStats>;
+}
 
 export interface Repository {
   // Users

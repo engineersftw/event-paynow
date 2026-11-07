@@ -7,18 +7,24 @@ describe('Migration 0000_initial_schema.sql', () => {
   it('creates all tables with correct schema', () => {
     const db = new Database(':memory:');
 
-    // Read and execute the migration
-    const migration = readFileSync(
+    // Read and execute the migrations
+    const migration0000 = readFileSync(
       join(__dirname, '../../drizzle/0000_initial_schema.sql'),
+      'utf-8'
+    );
+    const migration0001 = readFileSync(
+      join(__dirname, '../../drizzle/0001_certain_albert_cleary.sql'),
       'utf-8'
     );
 
     // Split by statement-breakpoint and execute each statement
-    const statements = migration.split('--> statement-breakpoint');
-    for (const stmt of statements) {
-      const trimmed = stmt.trim();
-      if (trimmed) {
-        db.exec(trimmed);
+    for (const migration of [migration0000, migration0001]) {
+      const statements = migration.split('--> statement-breakpoint');
+      for (const stmt of statements) {
+        const trimmed = stmt.trim();
+        if (trimmed) {
+          db.exec(trimmed);
+        }
       }
     }
 
@@ -31,13 +37,25 @@ describe('Migration 0000_initial_schema.sql', () => {
 
     // Verify payments table
     const paymentsInfo = db.prepare('PRAGMA table_info(payments)').all();
-    expect(paymentsInfo).toHaveLength(12);
+    expect(paymentsInfo).toHaveLength(13);
     expect(paymentsInfo.map((c: any) => c.name)).toContain('ref');
     expect(paymentsInfo.map((c: any) => c.name)).toContain('amount_cents');
     expect(paymentsInfo.map((c: any) => c.name)).toContain('status');
     expect(paymentsInfo.map((c: any) => c.name)).toContain('source');
+    expect(paymentsInfo.map((c: any) => c.name)).toContain('event_id');
 
-    // Verify paybacks table
+    // Verify events table
+    const eventsInfo = db.prepare('PRAGMA table_info(events)').all();
+    expect(eventsInfo).toHaveLength(10);
+    expect(eventsInfo.map((c: any) => c.name)).toContain('ref');
+    expect(eventsInfo.map((c: any) => c.name)).toContain('chat_id');
+    expect(eventsInfo.map((c: any) => c.name)).toContain('topic_id');
+    expect(eventsInfo.map((c: any) => c.name)).toContain('name');
+    expect(eventsInfo.map((c: any) => c.name)).toContain('payee_type');
+    expect(eventsInfo.map((c: any) => c.name)).toContain('payee_value');
+    expect(eventsInfo.map((c: any) => c.name)).toContain('status');
+    expect(eventsInfo.map((c: any) => c.name)).toContain('created_at');
+    expect(eventsInfo.map((c: any) => c.name)).toContain('closed_at');
     const paybacksInfo = db.prepare('PRAGMA table_info(paybacks)').all();
     expect(paybacksInfo).toHaveLength(10);
     expect(paybacksInfo.map((c: any) => c.name)).toContain('ref');
