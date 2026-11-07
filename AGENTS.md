@@ -92,10 +92,31 @@ Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
 - QR rendering (BMP in Workers, PNG round-trip verified in Node)
 - Webhook secret validation
 - Project scaffolding (wrangler, vitest 2-pool, TypeScript)
+- Database schema with Drizzle ORM (users, payments, paybacks tables with CHECK constraints)
+- Repository layer with infra-neutral interfaces (D1Repository implementation, 21 passing tests)
+
+## Repository Layer
+
+The repository layer provides infra-neutral interfaces for database operations:
+
+**Key files:**
+- `src/db/types.ts` — Plain TypeScript types (User, Payment, Payback, etc.)
+- `src/db/repository.ts` — Repository interface definition
+- `src/db/drizzle-repository.ts` — D1Repository implementation using Drizzle ORM
+
+**Operations:**
+- Users: upsertUser, getUser
+- Payments: createPayment, getPaymentByRef, listPaymentsByUser, updatePaymentStatus
+- Paybacks: createPayback, listPaybacksByPayment, sumActivePaybacks
+
+**Testing:**
+- 21 tests in `test/workers/repository.test.ts` cover all operations
+- Tests verify cross-user isolation, read-back-after-write consistency, and status transitions
+- Tests run in Workers pool with real D1 bindings
 
 ## What's Next
 
-- Task 3.1: Drizzle schema + SQL migrations (can proceed without Cloudflare auth)
-- Tasks 3.2–3.5: Repository layer, proxy validation, payment service, Durable Object FSM
+- Task 3.3: Proxy validation/normalization (+65 prefix for mobile, UEN format)
+- Tasks 3.4–3.5: Payment service, Durable Object FSM
 - Tasks 4–7: Command handlers (/init, /start, /payments, /payback)
 - Tasks 8.1–8.3: Integration testing, scan validation, deploy pipeline
