@@ -1,4 +1,5 @@
 import qrcode from 'qrcode-generator';
+import { glyph } from './font5x7.js';
 import { isLogoOpaque, LOGO_COLOR, logoHeight, logoWidth } from './paynow-logo.js';
 
 /**
@@ -13,9 +14,10 @@ import { isLogoOpaque, LOGO_COLOR, logoHeight, logoWidth } from './paynow-logo.j
  * Telegram accepts BMP in sendPhoto.
  *
  * @param payload - The EMVCo/SGQR payload string to encode.
+ * @param lines - Optional detail lines drawn as black text in a white band below the QR.
  * @returns BMP image as Uint8Array.
  */
-export async function renderQrPng(payload: string): Promise<Uint8Array> {
+export async function renderQrPng(payload: string, lines: string[] = []): Promise<Uint8Array> {
   // Generate QR matrix using qrcode-generator.
   // Type 0 = auto-detect version, "H" = 30% error correction (headroom for
   // the center logo overlay).
@@ -50,10 +52,28 @@ export async function renderQrPng(payload: string): Promise<Uint8Array> {
   // Pixel data: pixelSize * pixelSize * 3 bytes (24-bit BGR)
   // Row padding: each row must be multiple of 4 bytes
 
+  // Text band below the QR (outside its quiet zone). shortcut: lines are truncated, not wrapped.
+  const textScale = 2;
+  const advance = 6 * textScale;
+  const lineH = 10 * textScale;
+  const maxChars = Math.floor((pixelSize - 2 * margin * textScale) / advance);
+  const bandLines = lines.map((l) => (l.length > maxChars ? `${l.slice(0, maxChars - 3)}...` : l));
+  const bandH = bandLines.length ? bandLines.length * lineH + lineH : 0;
+  const height = pixelSize + bandH;
+  const textOn = (x: number, y: number): boolean => {
+    const line = bandLines[Math.floor((y - lineH / 2) / lineH)];
+    if (!line) return false;
+    const gx = Math.floor((x - margin * textScale) / textScale);
+    const gy = Math.floor((((y - lineH / 2) % lineH) - textScale) / textScale);
+    if (gx < 0 || gy < 0 || gy > 7 || gx % 6 === 5) return false;
+    const ch = line[Math.floor(gx / 6)];
+    return ch !== undefined && (glyph(ch)[gx % 6]! >> gy) & 1 ? true : false;
+  };
+
   const rowBytes = pixelSize * 3;
   const padding = (4 - (rowBytes % 4)) % 4;
   const paddedRowBytes = rowBytes + padding;
-  const pixelDataSize = paddedRowBytes * pixelSize;
+  const pixelDataSize = paddedRowBytes * height;
   const fileSize = 14 + 40 + pixelDataSize;
 
   const buffer = new ArrayBuffer(fileSize);
@@ -69,7 +89,7 @@ export async function renderQrPng(payload: string): Promise<Uint8Array> {
   // DIB header (BITMAPINFOHEADER)
   view.setUint32(14, 40, true); // header size
   view.setInt32(18, pixelSize, true); // width
-  view.setInt32(22, -pixelSize, true); // height (negative = top-down)
+  view.setInt32(22, -height, true); // height (negative = top-down)
   view.setUint16(26, 1, true); // color planes
   view.setUint16(28, 24, true); // bits per pixel
   view.setUint32(30, 0, true); // compression (0 = none)
@@ -83,7 +103,17 @@ export async function renderQrPng(payload: string): Promise<Uint8Array> {
 
   // Pixel data (24-bit BGR, top-down)
   let offset = 54;
-  for (let y = 0; y < pixelSize; y++) {
+  for (let y = 0; y < height; y++) {
+    if (y >= pixelSize) {
+      for (let x = 0; x < pixelSize; x++) {
+        const c = textOn(x, y - pixelSize) ? 0 : 255;
+        view.setUint8(offset++, c);
+        view.setUint8(offset++, c);
+        view.setUint8(offset++, c);
+      }
+      offset += padding;
+      continue;
+    }
     const fy = y / scale - margin; // fractional module coordinate
     const moduleY = Math.floor(fy);
     for (let x = 0; x < pixelSize; x++) {

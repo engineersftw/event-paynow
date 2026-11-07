@@ -2,7 +2,14 @@ import type { Context } from 'grammy';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StartCommandHandler } from '../../src/commands/start-handler.js';
 import type { Event, EventRepository, Repository } from '../../src/db/repository.js';
+import { renderQrPng } from '../../src/sgqr/qr-render.js';
 import type { ConversationDO } from '../../src/worker/conversation-do.js';
+
+// Wrap the real renderer so tests can assert which detail lines are drawn on the image
+vi.mock('../../src/sgqr/qr-render.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/sgqr/qr-render.js')>();
+  return { renderQrPng: vi.fn(actual.renderQrPng) };
+});
 
 describe('StartCommandHandler', () => {
   let handler: StartCommandHandler;
@@ -58,6 +65,7 @@ describe('StartCommandHandler', () => {
         amountCents: input.amountCents,
         payeeType: input.payeeType,
         payeeValue: input.payeeValue,
+        payerName: input.payerName,
         status: input.status,
         source: input.source,
         qrPayload: input.qrPayload,
@@ -347,6 +355,10 @@ describe('StartCommandHandler', () => {
         expect.anything()
       );
       expect(mockCtx.replyWithPhoto).toHaveBeenCalledTimes(1);
+      // Image carries the details as name-only text (never the payer's number)
+      const lines = vi.mocked(renderQrPng).mock.calls.at(-1)![1]!;
+      expect(lines).toEqual(['Test Event', 'SGD 12.50', expect.any(String), 'Payer: Alice']);
+      expect(lines.join(' ')).not.toContain('91234568');
     });
 
     it('a lost claim (double tap / expired) creates nothing', async () => {

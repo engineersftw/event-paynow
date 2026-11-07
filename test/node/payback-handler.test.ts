@@ -4,7 +4,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PaybackCommandHandler } from '../../src/commands/payback-handler.js';
 import type { CreatePaybackBoundedResult, Payment, Repository } from '../../src/db/repository.js';
 import { buildPayNowPayload } from '../../src/sgqr/paynow.js';
+import { renderQrPng } from '../../src/sgqr/qr-render.js';
 import type { ConversationDO } from '../../src/worker/conversation-do.js';
+
+// Wrap the real renderer so tests can assert which detail lines are drawn on the image
+vi.mock('../../src/sgqr/qr-render.js', async (orig) => {
+  const actual = await orig<typeof import('../../src/sgqr/qr-render.js')>();
+  return { renderQrPng: vi.fn(actual.renderQrPng) };
+});
 
 describe('PaybackCommandHandler', () => {
   let handler: PaybackCommandHandler;
@@ -702,6 +709,13 @@ describe('PaybackCommandHandler', () => {
         'Payback for PAY123 / SGD 5.50 / ABCDEFGHIJ / Scan to send the money back'
       );
 
+      // Image lines: no recipient name known here, and never a number
+      expect(vi.mocked(renderQrPng).mock.calls.at(-1)![1]).toEqual([
+        'Payback for PAY123',
+        'SGD 5.50',
+        'ABCDEFGHIJ',
+      ]);
+
       // The QR photo carries Sent / Cancel actions bound to the new payback
       const keyboard = (
         photoOpts as { reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> } }
@@ -742,6 +756,12 @@ describe('PaybackCommandHandler', () => {
           'Payback for PAY123 / SGD 5.50 / ABCDEFGHIJ / To: Al_ice / Scan to send the money back'
         );
         expect(caption).not.toContain('91234567');
+        expect(vi.mocked(renderQrPng).mock.calls.at(-1)![1]).toEqual([
+          'Payback for PAY123',
+          'SGD 5.50',
+          'ABCDEFGHIJ',
+          'To: Al_ice',
+        ]);
         // Markdown message escapes the name and keeps the number (owner-facing)
         const [text] = vi.mocked(mockCtx.editMessageText).mock.calls[0]!;
         expect(text).toContain('Recipient: Al\\_ice (+6591234567)');

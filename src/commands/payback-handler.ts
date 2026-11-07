@@ -503,7 +503,12 @@ export class PaybackCommandHandler {
       }
 
       // Success: row recorded inside the transaction — deliver the QR image
-      const qrBytes = await renderQrPng(result.payback.qrPayload);
+      const qrBytes = await renderQrPng(result.payback.qrPayload, [
+        `Payback for ${paymentRef}`,
+        `SGD ${formatCents(result.payback.amountCents)}`,
+        result.payback.ref,
+        ...captionPart('To', recipient),
+      ]);
       await ctx.replyWithPhoto(new InputFile(qrBytes, 'payback-qr.bmp'), {
         // Name only (no number), segment omitted when the recipient has no known name
         caption: [
