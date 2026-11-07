@@ -218,12 +218,14 @@ export class PaymentCallbackHandler {
 
     await ctx.answerCallbackQuery({ text: '✅ Payment marked as received!' });
 
-    // Optionally update the message to reflect new status
+    // Update the photo caption to reflect the new status, remove action buttons
     if (ctx.callbackQuery?.message) {
-      await ctx.editMessageText(
-        `✅ Payment received!\n\nRef: \`${payment.ref}\`\nAmount: $${formatCents(payment.amountCents)}`,
-        { parse_mode: 'Markdown' }
-      );
+      const receivedAt = this.formatDate(timestamp);
+      const newCaption = `${payment.description} / SGD ${formatCents(payment.amountCents)} / ${payment.ref} / ✅ Received ${receivedAt}`;
+      await ctx.editMessageCaption({
+        caption: newCaption,
+        reply_markup: { inline_keyboard: [] },
+      });
     }
   }
 
