@@ -1,54 +1,55 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import { detectProxyType } from '../db/proxy-validation.js';
-import type { Repository } from '../db/repository.js';
+import { generateRef } from '../db/proxy-validation.js';
+import type { Event, EventRepository, Repository } from '../db/repository.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 
 /**
- * /init command handler - sets up user's PayNow reference
+ * /init command handler — creates an Event.
  *
- * Flow:
+ * Flow (new event model):
  * 1. User sends /init
- * 2. Bot prompts for reference
- * 3. User provides mobile number or UEN
- * 4. Bot validates and normalizes, echoes back for confirmation
- * 5. User confirms
- * 6. Bot persists to database
+ * 2. Step 1: collect event name (non-empty, ≤ 50 chars)
+ * 3. Step 2: collect mobile number or UEN (payee for this event)
+ * 4. Step 3: echo name + payee for confirmation via inline Confirm/Cancel buttons
+ * 5. On Confirm: create events row, reply with ref + summary
+ * 6. On Cancel: reset state without creating the event
+ *
+ * The event name becomes the fixed description for every payment in the event.
  */
 
 export class InitCommandHandler {
   private conversationDO: ConversationDO;
   private repository: Repository;
+  private eventRepository: EventRepository;
 
-  constructor(conversationDO: ConversationDO, repository: Repository) {
+  constructor(conversationDO: ConversationDO, repository: Repository, eventRepository: EventRepository) {
     this.conversationDO = conversationDO;
     this.repository = repository;
+    this.eventRepository = eventRepository;
   }
 
-  /**
-   * Handle /init command start
-   */
   async start(ctx: Context): Promise<void> {
     const chatId = ctx.chat!.id;
     const userId = ctx.from!.id;
+    const topicId = ctx.message?.message_thread_id ?? 0;
     const userName = ctx.from?.first_name || 'User';
 
-    // Initialize conversation state
     await this.setState({
       flow: 'init',
-      step: 1, // waiting for reference input
-      context: { userId, chatId, userName },
+      step: 1, // waiting for event name
+      context: { userId, chatId, topicId, userName },
       lastActivity: new Date().toISOString(),
     });
 
     await ctx.reply(
-      "👋 Welcome! Let's set up your PayNow reference.\n\nPlease enter your mobile number (e.g., 91234567) or UEN (e.g., 201234567A):"
+      '👋 Let\'s create a new event.\n\n' +
+        'What\'s the event name? (e.g. "Dinner split", "Birthday party")\n\n' +
+        'This will be used as the description on all payment QRs for this event.'
     );
   }
 
-  /**
-   * Handle user input during init flow
-   */
   async handleInput(ctx: Context): Promise<boolean> {
     const state = await this.getState();
 
@@ -63,11 +64,13 @@ export class InitCommandHandler {
 
     switch (state.step) {
       case 1:
-        await this.handleReferenceInput(ctx, text, state);
+        await this.handleEventNameInput(ctx, text, state);
         break;
       case 2:
-        // Step 2 is now button-driven; text input here means the user typed
-        // something after the buttons appeared. Re-show the prompt silently.
+        await this.handlePayeeInput(ctx, text, state);
+        break;
+      case 3:
+        // Step 3 is button-driven; text input gets a nudge
         await ctx.reply('⏳ Waiting for confirmation. Please tap a button above.');
         break;
     }
@@ -76,9 +79,38 @@ export class InitCommandHandler {
   }
 
   /**
-   * Step 1: Validate and echo reference with Confirm / Cancel buttons.
+   * Step 1: Collect event name.
    */
-  private async handleReferenceInput(
+  private async handleEventNameInput(
+    ctx: Context,
+    input: string,
+    state: ConversationState
+  ): Promise<void> {
+    const name = input.trim();
+    if (!name || name.length > 50) {
+      await ctx.reply(
+        '❌ Event name must be between 1 and 50 characters. Please try again:'
+      );
+      return;
+    }
+
+    await this.setState({
+      flow: 'init',
+      step: 2, // waiting for payee proxy
+      context: { ...state.context, eventName: name },
+      lastActivity: new Date().toISOString(),
+    });
+
+    await ctx.reply(
+      `📋 Event: ${name}\n\n` +
+        'Now enter the PayNow payee for this event — mobile number (e.g., 91234567) or UEN (e.g., 201234567A):'
+    );
+  }
+
+  /**
+   * Step 2: Validate payee proxy and echo for confirmation with buttons.
+   */
+  private async handlePayeeInput(
     ctx: Context,
     input: string,
     state: ConversationState
@@ -92,10 +124,9 @@ export class InitCommandHandler {
       return;
     }
 
-    // Store normalized proxy for the button callback to pick up
     await this.setState({
       flow: 'init',
-      step: 2,
+      step: 3, // waiting for button confirmation
       context: {
         ...state.context,
         pendingProxy: normalized,
@@ -109,25 +140,24 @@ export class InitCommandHandler {
       .text('❌ Cancel', `init_cancel:${state.context.userId as number}`);
 
     await ctx.reply(
-      `📱 ${typeLabel}: ${normalized.normalized}\n\nTap a button to confirm or cancel:`,
+      `📋 Event: ${state.context.eventName}\n` +
+        `📱 ${typeLabel}: ${normalized.normalized}\n\n` +
+        'Tap a button to confirm or cancel:',
       { reply_markup: keyboard }
     );
   }
 
   /**
    * Handle Confirm / Cancel inline-button taps.
-   * All outcomes update the original confirmation message in place
-   * (editMessageText with buttons cleared) — no extra chat bubbles.
    */
   async handleCallback(ctx: Context): Promise<boolean> {
     const data = ctx.callbackQuery?.data;
     if (!data || (!data.startsWith('init_confirm:') && !data.startsWith('init_cancel:'))) {
-      return false; // Not ours — let the next dispatcher try
+      return false;
     }
 
     const state = await this.getState();
-    if (state?.flow !== 'init' || state.step !== 2) {
-      // Session gone — replace the confirmation message with an expired note.
+    if (state?.flow !== 'init' || state.step !== 3) {
       await ctx.editMessageText('❌ Session expired. Run /init again.', {
         reply_markup: { inline_keyboard: [] },
       });
@@ -138,18 +168,16 @@ export class InitCommandHandler {
     const confirmed = data.startsWith('init_confirm:');
 
     if (confirmed) {
-      await this.saveUser(ctx, pendingProxy, state);
+      await this.createEvent(ctx, pendingProxy, state);
     } else {
-      // Reset state first so a double-tap sees idle.
       await this.setState({
         flow: 'idle',
         step: 0,
         context: {},
         lastActivity: new Date().toISOString(),
       });
-      const proxyLabel = pendingProxy.type === 'mobile' ? 'Mobile number' : 'UEN';
       await ctx.editMessageText(
-        `📱 ${proxyLabel}: ${pendingProxy.normalized}\n\n❌ Cancelled. Run /init again to start over.`,
+        `📋 Event: ${state.context.eventName}\n📱 ${pendingProxy.type === 'mobile' ? 'Mobile number' : 'UEN'}: ${pendingProxy.normalized}\n\n❌ Cancelled. Run /init again to start over.`,
         { reply_markup: { inline_keyboard: [] } }
       );
     }
@@ -158,30 +186,32 @@ export class InitCommandHandler {
   }
 
   /**
-   * Save user to database — outcome replaces the confirmation message in place.
+   * Create the event in D1.
    */
-  private async saveUser(
+  private async createEvent(
     ctx: Context,
     proxy: { type: string; normalized: string },
     state: ConversationState
   ): Promise<void> {
     const userId = state.context.userId as number;
+    const chatId = state.context.chatId as number;
+    const topicId = state.context.topicId as number;
+    const eventName = state.context.eventName as string;
     const userName = state.context.userName as string;
-    const isNew = !(await this.repository.getUser(userId));
-    const proxyLabel = proxy.type === 'mobile' ? 'Mobile number' : 'UEN';
+    const ref = generateRef();
 
     try {
-      await this.repository.upsertUser({
-        telegramId: userId,
+      const event = await this.eventRepository.createEvent({
+        ref,
+        chatId,
+        topicId,
+        name: eventName,
         payeeType: proxy.type as 'mobile' | 'uen',
         payeeValue: proxy.normalized,
-        displayName: userName,
+        status: 'open',
         timestamp: new Date().toISOString(),
       });
 
-      // Reset conversation state BEFORE editing the message, so a double-tap
-      // races to a non-init state and sees "Session expired" instead of a
-      // second upsert.
       await this.setState({
         flow: 'idle',
         step: 0,
@@ -189,14 +219,18 @@ export class InitCommandHandler {
         lastActivity: new Date().toISOString(),
       });
 
-      const outcome = isNew ? '✅ Reference saved.' : '✅ Reference updated.';
-      await ctx.editMessageText(`📱 ${proxyLabel}: ${proxy.normalized}\n\n${outcome}`, {
-        reply_markup: { inline_keyboard: [] },
-      });
-    } catch (error) {
-      console.error('Failed to save user:', error);
       await ctx.editMessageText(
-        `📱 ${proxyLabel}: ${proxy.normalized}\n\n❌ Failed to save your reference. Try /init again.`,
+        `✅ Event created!\n\n` +
+          `📋 Name: ${event.name}\n` +
+          `📱 Payee: ${proxy.normalized}\n` +
+          `🔗 Ref: \`${event.ref}\`\n\n` +
+          'Use /start to create payments for this event.',
+        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }
+      );
+    } catch (error) {
+      console.error('Failed to create event:', error);
+      await ctx.editMessageText(
+        `❌ Failed to create event. Please try again with /init.`,
         { reply_markup: { inline_keyboard: [] } }
       );
     }
@@ -223,7 +257,6 @@ export class InitCommandHandler {
         body: JSON.stringify(state),
       })
     );
-    // Drain the response so cross-isolate streams don't pin DO storage
     await response?.body?.cancel();
   }
 }

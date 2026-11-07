@@ -10,10 +10,10 @@
 
 ## 2. /init rewrite (create event)
 
-- [ ] 2.1 Rewrite `src/commands/init-handler.ts`: flow becomes `init-name` → `init-payee` → `init-confirm` → `createEvent`. Event name is non-empty ≤ 50; payee validated as before. On confirm, create event, reply with ref + event summary.
-- [ ] 2.2 Update Conversation DO state shape: replace old `init` flow states (`step: 1/2`) with the three new named states. Existing `payback`/`payments` states untouched.
+- [x] 2.1 Rewrite `src/commands/init-handler.ts`: flow becomes `init-name` → `init-payee` → `init-confirm` → `createEvent`. Event name is non-empty ≤ 50; payee validated as before. On confirm, create event, reply with ref + event summary.
+- [x] 2.2 Update Conversation DO state shape: replace old `init` flow states (`step: 1/2`) with the three new named states. Existing `payback`/`payments` states untouched. (No DO schema change needed — `flow: 'init'` with steps 1/2/3 covers the new flow.)
 - [ ] 2.3 Workers-pool tests in `test/workers/init-handler.test.ts` covering: happy path mobile, happy path UEN, invalid proxy re-prompt, cancel mid-flow (no event row), duplicate event name in same chat (warn + allow), empty name rejected.
-- [ ] 2.4 Update existing Node-pool init tests (`test/node/init-handler.test.ts`) or remove if the file only covered the old per-user-payee semantics; confirm test count reflects the new flows.
+- [x] 2.4 Update existing Node-pool init tests (`test/node/init-handler.test.ts`) or remove if the file only covered the old per-user-payee semantics; confirm test count reflects the new flows.
 
 ## 3. /start rewrite (pick event → amount)
 

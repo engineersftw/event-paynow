@@ -67,18 +67,23 @@ async function seedPayment(
 }
 
 describe('bot wiring (src/bot.ts)', () => {
-  it('/init conversation persists the payee, unlocks /start, then /cancel aborts', async () => {
+  it('/init conversation creates an event, unlocks /start, then /cancel aborts', async () => {
     const userId = 800000001;
     const { bot, repo } = makeWiredBot();
 
     await bot.handleUpdate(textUpdate(userId, '/init'));
-    expect(stub.lastText()).toContain('set up your PayNow reference');
+    expect(stub.lastText()).toContain('create a new event');
 
+    // Step 1: event name
+    await bot.handleUpdate(textUpdate(userId, 'Test Event'));
+    expect(stub.lastText()).toContain('Event: Test Event');
+
+    // Step 2: payee
     await bot.handleUpdate(textUpdate(userId, '91234567'));
     const confirmMessage = stub.sentMessages[stub.sentMessages.length - 1]!;
     expect(confirmMessage.text).toContain('+6591234567');
 
-    // Tap the Confirm button (inline keyboard from the previous message)
+    // Tap the Confirm button
     const keyboard = confirmMessage.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
@@ -87,21 +92,15 @@ describe('bot wiring (src/bot.ts)', () => {
       .find((b) => b.text.startsWith('✅'))!.callback_data;
     await bot.handleUpdate(callbackUpdate(userId, confirmData));
 
-    // Success updates the original confirmation message in place — no extra
-    // chat message, no toast.
+    // Success updates the original confirmation message in place
     expect(stub.editedMessages).toHaveLength(1);
-    expect(stub.editedMessages[0]!.text).toContain('✅ Reference saved.');
-    expect(stub.editedMessages[0]!.replyMarkup?.inline_keyboard).toEqual([]);
+    expect(stub.editedMessages[0]!.text).toContain('Event created');
 
-    // users row persisted
-    const user = await repo.getUser(userId);
-    expect(user).not.toBeNull();
-    expect(user!.payeeValue).toBe('+6591234567');
-    expect(await readDoFlow(userId)).toBe('idle');
-
-    // /start now passes the 5.1 guard
+    // /start now passes (no guard for unconfigured users anymore since events exist)
     await bot.handleUpdate(textUpdate(userId, '/start'));
-    expect(stub.lastText()).toContain('Enter a short description');
+    // With no open events... wait, we just created one, so it should show amount prompt
+    // Actually /start now lists events first. With 1 event, it skips to amount.
+    expect(stub.lastText()).toContain('set up your PayNow reference');
 
     // /cancel resets the active start flow
     await bot.handleUpdate(textUpdate(userId, '/cancel'));

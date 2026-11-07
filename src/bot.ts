@@ -45,7 +45,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   bot.command('ping', (ctx) => ctx.reply('pong 🏓'));
   bot.command('help', (ctx) => ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' }));
 
-  bot.command('init', (ctx) => new InitCommandHandler(conversation(ctx), repository).start(ctx));
+  bot.command('init', (ctx) => new InitCommandHandler(conversation(ctx), repository, eventRepository).start(ctx));
 
   bot.command('start', (ctx) => new StartCommandHandler(conversation(ctx), repository).start(ctx));
 
@@ -81,7 +81,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery?.data ?? '';
     if (data.startsWith('init_confirm:') || data.startsWith('init_cancel:')) {
-      await new InitCommandHandler(conversation(ctx), repository).handleCallback(ctx);
+      await new InitCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(ctx);
       return;
     }
     if (data.startsWith('payments:')) {
@@ -108,7 +108,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     const doStub = conversation(ctx);
     if (await new PaybackCommandHandler(doStub, repository).handleInput(ctx)) return;
     if (await new StartCommandHandler(doStub, repository).handleInput(ctx)) return;
-    if (await new InitCommandHandler(doStub, repository).handleInput(ctx)) return;
+    if (await new InitCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;
     await ctx.reply(
       '❓ No active conversation. Try /start, /payments, /init, /payback <ref> or /help.'
     );
