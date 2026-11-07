@@ -2,17 +2,19 @@
 
 ## Context
 
-The bot currently models a per-user PayNow reference (`users` table) and a per-payment description. The `/start` flow is `/init`-gated, then: description → amount → QR. The bot has not been deployed to production D1 yet (task 1.3 is blocked on Cloudflare auth), so schema changes are non-migratory from a running state — we are designing the *first* production schema, not evolving one.
+The bot currently models a per-user PayNow reference (`users` table) and a per-payment description. The `/start` flow is `/init`-gated, then: description → amount → QR. The bot has not been deployed to production D1 yet (task 1.3 is blocked on Cloudflare auth), so schema changes are non-migratory from a running state — we are designing the _first_ production schema, not evolving one.
 
 ## Goals / Non-Goals
 
 **Goals:**
+
 - One chat can hold many events; each event has one payee and many payments
 - `/init` creates an event (name + payee); `/start` picks an event then amount; `/end_event` closes it
 - Event name is the SGQR tag 62.01 description for every payment in the event
 - `/payments` lists events first, then drills into per-event payments
 
 **Non-Goals:**
+
 - Renaming events after creation (no edit flow)
 - Per-payment description override (event name is the fixed description)
 - Payee change after event creation (event payee is immutable at create time; new event needed for new payee)
