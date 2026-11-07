@@ -24,7 +24,7 @@
 
 ## 4. Payee configuration (/init)
 
-- [ ] 4.1 Implement the `/init` conversation on the DO-hosted state machine: prompt for reference, validate via 3.3, echo the normalized value for confirmation, then persist to `users` — verify with conversation tests covering mobile, UEN, invalid-input re-prompt, and confirmation-before-save behavior
+- [x] 4.1 Implement the `/init` conversation on the DO-hosted state machine: prompt for reference, validate via 3.3, echo the normalized value for confirmation, then persist to `users` — verify with conversation tests covering mobile, UEN, invalid-input re-prompt, and confirmation-before-save behavior
 - [ ] 4.2 Implement reference update on re-run (`/init` again replaces the stored value; cancel/alarm expiry leaves the old reference intact) and verify by test that canceling after a new input preserves the previous stored value
 
 ## 5. Payment issuance and sharing (/start)

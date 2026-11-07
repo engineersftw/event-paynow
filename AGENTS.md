@@ -94,6 +94,11 @@ Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
 - Project scaffolding (wrangler, vitest 2-pool, TypeScript)
 - Database schema with Drizzle ORM (users, payments, paybacks tables with CHECK constraints)
 - Repository layer with infra-neutral interfaces (D1Repository implementation, 21 passing tests)
+- Proxy validation and normalization (mobile → +65XXXXXXXX, UEN validation)
+- 10-char base32 reference generator using crypto.getRandomValues
+- Payment service with markPaymentReceived transition logic
+- Conversation Durable Object with FSM state, 10-min alarm expiry, eviction survival
+- /init command handler with mobile/UEN validation, confirmation flow, and user persistence
 
 ## Repository Layer
 
@@ -114,9 +119,33 @@ The repository layer provides infra-neutral interfaces for database operations:
 - Tests verify cross-user isolation, read-back-after-write consistency, and status transitions
 - Tests run in Workers pool with real D1 bindings
 
+## Command Handlers
+
+### /init Command
+**Key files:**
+- `src/commands/init-handler.ts` — /init command implementation
+- `test/node/init-handler.test.ts` — 10 tests covering all flows
+
+**Flow:**
+1. User sends /init
+2. Bot prompts for mobile number or UEN
+3. Validates input (mobile → +65XXXXXXXX, UEN format check)
+4. Echoes normalized value for confirmation
+5. On "confirm", persists to users table via repository
+6. On "cancel", resets state without saving
+
+**Testing:**
+- Mobile number validation and normalization
+- UEN validation
+- Invalid input rejection with re-prompt
+- Confirmation before save
+- Cancel operation
+- Database error handling
+- 10 tests passing
+
 ## What's Next
 
-- Task 3.3: Proxy validation/normalization (+65 prefix for mobile, UEN format)
-- Tasks 3.4–3.5: Payment service, Durable Object FSM
-- Tasks 4–7: Command handlers (/init, /start, /payments, /payback)
-- Tasks 8.1–8.3: Integration testing, scan validation, deploy pipeline
+- Task 4.2: Reference update on re-run (/init again replaces stored value)
+- Task 1.3: Cloudflare auth setup (blocked)
+- Tasks 5-7: Payment issuance, tracking, and payback commands
+- Tasks 8.1-8.3: Integration testing, scan validation, deploy pipeline
