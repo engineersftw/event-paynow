@@ -9,7 +9,7 @@
 
 export type PayeeType = 'mobile' | 'uen';
 export type PaymentStatus = 'pending' | 'received';
-export type PaybackStatus = 'pending' | 'sent';
+export type PaybackStatus = 'pending' | 'sent' | 'cancelled';
 export type ReceiptSource = 'manual' | 'notification';
 export type EventStatus = 'open' | 'closed';
 

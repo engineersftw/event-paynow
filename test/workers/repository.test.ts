@@ -60,7 +60,7 @@ beforeAll(async () => {
       payer_type TEXT NOT NULL CHECK(payer_type IN ('mobile', 'uen')),
       payer_value TEXT NOT NULL,
       amount_cents INTEGER NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('pending', 'sent')),
+      status TEXT NOT NULL CHECK(status IN ('pending', 'sent', 'cancelled')),
       qr_payload TEXT NOT NULL,
       created_at TEXT NOT NULL,
       sent_at TEXT,

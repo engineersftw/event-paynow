@@ -53,7 +53,7 @@ export const paybacks = sqliteTable('paybacks', {
   payerType: text('payer_type').notNull(),
   payerValue: text('payer_value').notNull(),
   amountCents: integer('amount_cents').notNull(),
-  status: text('status').notNull(), // 'pending' | 'sent'
+  status: text('status').notNull(), // 'pending' | 'sent' | 'cancelled'
   qrPayload: text('qr_payload').notNull(),
   createdAt: text('created_at').notNull(),
   sentAt: text('sent_at'),

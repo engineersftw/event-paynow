@@ -60,6 +60,7 @@ This project uses OpenSpec for change management. All changes are archived:
 1. `add-paynow-qr-telegram-bot` (29 tasks) — archived 2026-11-07
 2. `add-event-management` (22 tasks) — archived 2026-11-07
 3. `add-payer-details-to-start` (14 tasks) — archived 2026-11-07
+4. `add-payback-confirm-and-cancel` (12 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -84,7 +85,7 @@ This project uses OpenSpec for change management. All changes are archived:
 4. **Drizzle ORM over D1** — Schema in `src/db/schema.ts`, migrations in `drizzle/`, repository layer abstracts queries behind infra-neutral interfaces.
 5. **Secret validation before bot creation** — Webhook handler validates `X-Telegram-Bot-Api-Secret-Token` against the separate `TELEGRAM_WEBHOOK_SECRET` binding before instantiating grammY bot.
 6. **Inline-button UX pattern** — Confirm/cancel steps use `InlineKeyboard` with callback data instead of text input. Outcomes update the original message in place via `editMessageText` (no extra chat bubbles). QR photos carry action buttons (✓ Received / Payback); marking received replaces the photo with a text summary.
-7. **Payback bounds count all statuses** — `SUM(paybacks)` (pending + sent) inside a single D1 batch via compare-and-set guarded INSERT.
+7. **Payback bounds count pending + sent** — `SUM(paybacks)` excluding `cancelled`, inside a single D1 batch via compare-and-set guarded INSERT. Cancelling a pending payback releases its amount.
 8. **Biome for lint + format** — Single quotes, 2-space indent, 100-col line width, semicolons, es5 trailing commas.
 9. **npm audit: 0 vulnerabilities** — zod 4.6.7, drizzle-orm 0.45.4, vitest 5.1, wrangler 4.158, drizzle-kit 0.31, eslint 10; overrides force minimatch ≥11 and esbuild ≥0.25.
 10. **D1 binding: `paynow_db`** — renamed from `DB`; `migrations_dir = "drizzle"` in wrangler.toml.
@@ -132,7 +133,8 @@ This project uses OpenSpec for change management. All changes are archived:
   (all statuses — pending and sent) inside one D1 batch via a compare-and-set guarded
   `INSERT ... SELECT`
 - Payback QR: real SGQR payload encoding the PAYER as payee proxy, delivered via sendPhoto
-- Mark payback as sent: guarded CAS transition, duplicate taps handled, history re-render
+- Payback QR photo carries ✓ Sent / ✖ Cancel; Sent or Cancel replaces the photo with a text status line (same UX as ✓ Received); also available per payback in the payment detail view (re-render in place)
+- Mark payback sent / cancel: guarded pending-only CAS transitions, duplicate and racing taps handled; `cancelled` status added by migration 0003 (table rebuild)
 - `src/bot.ts` wires all commands (/init, /start, /payments, /payback <ref>, /cancel, /help, /ping),
   inline-button callbacks (init_*, payments:N, payback_*, view/mark_received/payback/pb_sent),
   and free-text conversation routing; bot cached per isolate
@@ -170,9 +172,10 @@ real D1 + real CHAT_SESSION DO. Non-obvious requirements discovered (keep in min
 3. Row read-back by ref
 
 Returns `{ ok, payback, remainingCents }` or `{ ok: false, reason: 'over_bound' | 'payment_not_found', ..., paidBackCents }`.
-The bound counts **all** paybacks (pending + sent): `updatePaybackStatus` marks delivery only, so
-marking a payback sent never frees room for another (decision 2026-11: "include sent in the bound";
-`sumPaybacks()` has no status filter and the guard SQL matches). The handler pre-checks the bound
+The bound counts **pending + sent** paybacks: marking a payback sent never frees room for another
+(decision 2026-11: "include sent in the bound"), but **cancelling** a pending payback does
+(`status != 'cancelled'` in `sumPaybacks()` and the guard/totals SQL). `updatePaybackStatus` is a
+pending-only compare-and-set for both `sent` and `cancelled`, so Sent vs Cancel taps have one winner. The handler pre-checks the bound
 for UX; the transaction re-check is authoritative. Per-chat DO serialization covers same-chat writes;
 this CAS guard closes cross-chat races (design §5). Tests: `test/workers/payback-bounds.test.ts`
 (spec scenarios 5+3 of 12.50 → remaining 4.50, blocked-over, concurrent races via `Promise.all`,
@@ -192,7 +195,7 @@ The repository layer provides infra-neutral interfaces for database operations:
 
 - Users: upsertUser, getUser
 - Payments: createPayment, getPaymentByRef, listPaymentsByUser, updatePaymentStatus
-- Paybacks: createPayback, createPaybackBounded (transactional bound enforcement), getPaybackByRef, updatePaybackStatus (guarded pending→sent CAS, task 7.4), listPaybacksByPayment, sumPaybacks (all statuses — the bounded quantity)
+- Paybacks: createPayback, createPaybackBounded (transactional bound enforcement), getPaybackByRef, updatePaybackStatus (guarded pending→sent CAS, task 7.4), listPaybacksByPayment, sumPaybacks (pending + sent — the bounded quantity; cancelled excluded)
 
 **Testing:**
 

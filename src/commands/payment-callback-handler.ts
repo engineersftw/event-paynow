@@ -69,13 +69,19 @@ export class PaymentCallbackHandler {
         case 'payback':
           await this.handlePayback(ctx, payment);
           break;
-        case 'pb_sent': {
+        case 'pb_sent':
+        case 'pb_cancel': {
           const paybackRef = parts[2];
           if (!paybackRef) {
             await ctx.answerCallbackQuery({ text: '❌ Invalid callback data' });
             return;
           }
-          await this.handleMarkPaybackSent(ctx, payment, paybackRef);
+          await this.handlePaybackTransition(
+            ctx,
+            payment,
+            paybackRef,
+            action === 'pb_sent' ? 'sent' : 'cancelled'
+          );
           break;
         }
         default:
@@ -146,14 +152,19 @@ export class PaymentCallbackHandler {
       lines.push('');
       lines.push('💸 *Paybacks:*');
 
-      const totalPayback = paybacks.reduce((sum, pb) => sum + pb.amountCents, 0);
+      // Cancelled paybacks are history only: they don't count toward the totals
+      const totalPayback = paybacks
+        .filter((pb) => pb.status !== 'cancelled')
+        .reduce((sum, pb) => sum + pb.amountCents, 0);
       const remaining = payment.amountCents - totalPayback;
 
       for (const payback of paybacks) {
-        const icon = payback.status === 'pending' ? '⏳' : '✅';
+        const icon = { pending: '⏳', sent: '✅', cancelled: '❌' }[payback.status];
         let line = `${icon} $${formatCents(payback.amountCents)} to ${payback.payerValue} — \`${payback.ref}\``;
         if (payback.status === 'sent' && payback.sentAt) {
           line += ` (sent ${this.formatDate(payback.sentAt)})`;
+        } else if (payback.status === 'cancelled') {
+          line += ' (cancelled)';
         }
         lines.push(line);
       }
@@ -166,7 +177,7 @@ export class PaymentCallbackHandler {
       lines.push('💸 *Paybacks:* None');
     }
 
-    // Mark-sent buttons for each pending payback
+    // Mark-sent / Cancel buttons for each pending payback
     const pendingPaybacks = paybacks.filter((pb) => pb.status === 'pending');
     let keyboard: InlineKeyboard | undefined;
     if (pendingPaybacks.length > 0) {
@@ -176,6 +187,10 @@ export class PaymentCallbackHandler {
           .text(
             `✅ Mark sent: $${formatCents(payback.amountCents)}`,
             `pb_sent:${payment.ref}:${payback.ref}`
+          )
+          .text(
+            `✖ Cancel: $${formatCents(payback.amountCents)}`,
+            `pb_cancel:${payment.ref}:${payback.ref}`
           )
           .row();
       }
@@ -239,14 +254,18 @@ export class PaymentCallbackHandler {
   }
 
   /**
-   * Handle "Mark payback as sent" callback (task 7.4).
-   * The repository transition is compare-and-set, so duplicate or concurrent
-   * taps resolve to exactly one winner; the loser sees "already marked".
+   * Mark a payback sent or cancel it (task 7.4 + cancel). The repository transition is
+   * compare-and-set from `pending`, so duplicate or concurrent taps (including Sent vs
+   * Cancel) resolve to exactly one winner; the loser sees the state that won.
+   *
+   * Tapped on the payback QR photo, the photo is replaced by a text status line (like
+   * ✓ Received on a payment); tapped in the detail view, the view re-renders in place.
    */
-  private async handleMarkPaybackSent(
+  private async handlePaybackTransition(
     ctx: Context,
     payment: Payment,
-    paybackRef: string
+    paybackRef: string,
+    target: 'sent' | 'cancelled'
   ): Promise<void> {
     const payback = await this.repository.getPaybackByRef(paybackRef);
     if (!payback || payback.paymentId !== payment.id) {
@@ -254,29 +273,56 @@ export class PaymentCallbackHandler {
       return;
     }
 
-    if (payback.status === 'sent') {
-      await ctx.answerCallbackQuery({ text: '⚠️ Payback already marked as sent' });
+    if (payback.status !== 'pending') {
+      await ctx.answerCallbackQuery({ text: this.alreadyText(payback.status, target) });
       return;
     }
 
     const timestamp = new Date().toISOString();
-    const updated = await this.repository.updatePaybackStatus(paybackRef, 'sent', timestamp);
+    const updated = await this.repository.updatePaybackStatus(paybackRef, target, timestamp);
 
     if (!updated) {
       // Lost the race against a concurrent tap — distinguish the states.
       const current = await this.repository.getPaybackByRef(paybackRef);
-      if (current?.status === 'sent') {
-        await ctx.answerCallbackQuery({ text: '⚠️ Payback already marked as sent' });
-      } else {
-        await ctx.answerCallbackQuery({ text: '❌ Failed to update payback status' });
+      await ctx.answerCallbackQuery({
+        text:
+          current && current.status !== 'pending'
+            ? this.alreadyText(current.status, target)
+            : '❌ Failed to update payback status',
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({
+      text: target === 'sent' ? '✅ Payback marked as sent' : '❌ Payback cancelled',
+    });
+
+    const message = ctx.callbackQuery?.message;
+    if (message && 'photo' in message) {
+      const label = target === 'sent' ? `✅ Sent ${this.formatDate(timestamp)}` : '❌ Cancelled';
+      await ctx.reply(
+        `Payback for ${payment.ref} / SGD ${formatCents(payback.amountCents)} / ${payback.ref} / ${label}`
+      );
+      try {
+        await ctx.api.deleteMessage(message.chat.id, message.message_id);
+      } catch (error) {
+        // The transition and summary are already committed; a stale QR photo is harmless.
+        console.error('Failed to delete payback QR message:', error);
       }
       return;
     }
 
-    await ctx.answerCallbackQuery({ text: '✅ Payback marked as sent' });
-
-    // Re-render the detail: button removed, sent timestamp shown, totals fresh
+    // Re-render the detail: buttons removed, status shown, totals fresh
     await this.renderDetails(ctx, payment);
+  }
+
+  private alreadyText(current: Payback['status'], target: 'sent' | 'cancelled'): string {
+    if (current === target) {
+      return target === 'sent' ? '⚠️ Payback already marked as sent' : '⚠️ Payback already cancelled';
+    }
+    return current === 'sent'
+      ? '⚠️ Payback was already sent — it can’t be cancelled'
+      : '⚠️ Payback was cancelled';
   }
 
   /**

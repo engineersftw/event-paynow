@@ -65,7 +65,7 @@ const TEST_SCHEMA_STATEMENTS = [
     payer_type TEXT NOT NULL CHECK(payer_type IN ('mobile', 'uen')),
     payer_value TEXT NOT NULL,
     amount_cents INTEGER NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('pending', 'sent')),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'sent', 'cancelled')),
     qr_payload TEXT NOT NULL,
     created_at TEXT NOT NULL,
     sent_at TEXT,
@@ -393,7 +393,8 @@ export function callbackUpdate(
   userId: number,
   data: string,
   sourceMessageId = 500,
-  updateId = 2
+  updateId = 2,
+  sourceIsPhoto = false
 ): Update {
   return {
     update_id: updateId,
@@ -407,7 +408,9 @@ export function callbackUpdate(
         date: Math.floor(Date.now() / 1000),
         chat: { id: userId, type: 'private' },
         from: { id: userId, is_bot: false, first_name: 'Test User' },
-        text: 'source message',
+        ...(sourceIsPhoto
+          ? { photo: [{ file_id: 'f', file_unique_id: 'u', width: 1, height: 1 }] }
+          : { text: 'source message' }),
       },
     },
   } as unknown as Update;
