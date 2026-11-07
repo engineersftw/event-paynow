@@ -7,7 +7,7 @@ import QRCode from 'qrcode';
 export async function renderQrPngBuffer(payload: string): Promise<Buffer> {
   return await QRCode.toBuffer(payload, {
     type: 'png',
-    errorCorrectionLevel: 'M',
+    errorCorrectionLevel: 'H',
     scale: 10,
     margin: 2,
   });

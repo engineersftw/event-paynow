@@ -81,12 +81,8 @@ describe('PaymentCallbackHandler', () => {
         text: '✅ Payment marked as received!',
       });
       // QR photo replaced with text message
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('✅ Received')
-      );
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('PAY123')
-      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('✅ Received'));
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('PAY123'));
       // Original QR photo message deleted
       expect(mockCtx.api.deleteMessage).toHaveBeenCalledWith(123456789, 42);
     });

@@ -75,8 +75,8 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
 
   // --- inline button callbacks --------------------------------------------
   // Callbacks are dispatched by prefix. `init_*` flows to the init handler;
-  // `payments:N` re-renders the list at page N; everything else falls through
-  // to PaymentCallbackHandler (which owns view / mark_received / payback / pb_sent).
+  // `payments:N` re-renders the list at page N; `payback_*` flows to the payback
+  // handler; everything else falls through to PaymentCallbackHandler.
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery?.data ?? '';
     if (data.startsWith('init_confirm:') || data.startsWith('init_cancel:')) {
@@ -86,6 +86,15 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     if (data.startsWith('payments:')) {
       const page = data.split(':')[1];
       await new PaymentsCommandHandler(repository).handle(ctx, page);
+      return;
+    }
+    if (
+      data.startsWith('payback_confirm_payer:') ||
+      data.startsWith('payback_cancel:') ||
+      data.startsWith('payback_confirm_amount:') ||
+      data.startsWith('payback_cancel_amount:')
+    ) {
+      await new PaybackCommandHandler(conversation(ctx), repository).handleCallback(ctx);
       return;
     }
     await new PaymentCallbackHandler(conversation(ctx), repository).handleCallback(ctx);
