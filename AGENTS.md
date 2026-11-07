@@ -62,6 +62,8 @@ This project uses OpenSpec for change management. All changes are archived:
 3. `add-payer-details-to-start` (14 tasks) — archived 2026-11-07
 4. `add-payback-confirm-and-cancel` (12 tasks) — archived 2026-11-08
 5. `show-payer-name-in-messages` (11 tasks) — archived 2026-11-08
+6. `add-start-confirmation-step` (9 tasks) — archived 2026-11-08
+7. `add-void-payment-request` (13 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 

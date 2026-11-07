@@ -38,6 +38,11 @@ The system SHALL let the owning user mark a pending payment as `received`, and S
 - **WHEN** the user attempts to mark a payment as received that is already `received`
 - **THEN** the system responds that the payment is already marked and changes nothing
 
+#### Scenario: Mark a voided payment
+
+- **WHEN** the user attempts to mark a `voided` payment as received
+- **THEN** the system responds that the payment was voided and changes nothing
+
 ### Requirement: Records support automated receipt updates later
 
 The payment record SHALL carry a stable, unique payment reference that is encoded in the issued QR, so a future automated payment notification can correlate a bank-side transaction to the record; the system SHALL in this version change `pending` to `received` only via the owner's manual action.
@@ -74,3 +79,27 @@ The system SHALL include the payer's display name, when stored, in the text line
 
 - **WHEN** the owner opens the payments list for an event containing a payment from "Alice"
 - **THEN** that entry shows "Alice"; an entry without a name shows nothing extra
+
+### Requirement: Pending payment can be voided
+
+The system SHALL let the owning user void a `pending` payment, setting its status to `voided`, replacing its QR image message with a text status line (`🚫 Voided` and the time; QR removed), and keeping the record. A payment that is `received`, already `voided`, or has pending/sent paybacks SHALL NOT be voidable, and concurrent ✓ Received and ✖ Void taps SHALL resolve to exactly one outcome.
+
+#### Scenario: Void a pending payment
+
+- **WHEN** the owner taps ✖ Void on a pending payment's QR image message
+- **THEN** the payment becomes `voided`, the QR image message is replaced by a text message showing it as voided, and the record is retained
+
+#### Scenario: Void a received payment
+
+- **WHEN** the owner attempts to void a payment that is already `received`
+- **THEN** the system refuses, states it was already received, and changes nothing
+
+#### Scenario: Void twice
+
+- **WHEN** the owner taps ✖ Void on a payment that is already `voided`
+- **THEN** the system answers that it is already voided and changes nothing
+
+#### Scenario: Void with active paybacks
+
+- **WHEN** the owner attempts to void a payment that has a pending or sent payback
+- **THEN** the system refuses and changes nothing
