@@ -63,7 +63,7 @@ beforeAll(async () => {
   ];
 
   for (const stmt of statements) {
-    await env.DB.prepare(stmt).run();
+    await env.paynow_db.prepare(stmt).run();
   }
 });
 
@@ -75,7 +75,7 @@ describe('createPaybackBounded (task 7.2)', () => {
   let refSeq = 0;
 
   beforeEach(() => {
-    repo = new D1Repository(env.DB);
+    repo = new D1Repository(env.paynow_db);
   });
 
   /** Seed a distinct received payment and return its id. */
@@ -287,8 +287,8 @@ describe('createPaybackBounded (task 7.2)', () => {
     const paymentId = await seedPayment(1250);
 
     // Two separate repository instances simulate two worker isolates / chats
-    const repoA = new D1Repository(env.DB);
-    const repoB = new D1Repository(env.DB);
+    const repoA = new D1Repository(env.paynow_db);
+    const repoB = new D1Repository(env.paynow_db);
 
     const [a, b] = await Promise.all([
       repoA.createPaybackBounded(paybackInput(paymentId, 800)),
@@ -311,8 +311,8 @@ describe('createPaybackBounded (task 7.2)', () => {
   it('two concurrent paybacks that both fit are both accepted', async () => {
     const paymentId = await seedPayment(1250);
 
-    const repoA = new D1Repository(env.DB);
-    const repoB = new D1Repository(env.DB);
+    const repoA = new D1Repository(env.paynow_db);
+    const repoB = new D1Repository(env.paynow_db);
 
     const [a, b] = await Promise.all([
       repoA.createPaybackBounded(paybackInput(paymentId, 450)),

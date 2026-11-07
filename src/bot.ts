@@ -28,7 +28,7 @@ const HELP_TEXT =
  */
 export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   const bot = new Bot(env.TELEGRAM_BOT_TOKEN, config);
-  const repository = new D1Repository(env.DB);
+  const repository = new D1Repository(env.paynow_db);
 
   /** Per-chat conversation DO stub (keyed exactly like the webhook design). */
   const conversation = (ctx: Context): ConversationDO => {

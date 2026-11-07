@@ -112,11 +112,6 @@ export class ConversationDO {
     const url = new URL(request.url);
     const method = request.method;
 
-    // Handle alarm trigger (idle expiry)
-    if (url.pathname === '/alarm') {
-      return this.handleAlarm();
-    }
-
     // Get current state
     if (method === 'GET' && url.pathname === '/state') {
       return this.getState();
@@ -233,14 +228,14 @@ export class ConversationDO {
   }
 
   /**
-   * Handle alarm trigger (idle expiry).
+   * workerd lifecycle callback — invoked when a scheduled alarm fires.
    * Clears conversation state after 10 minutes of inactivity.
    */
-  private async handleAlarm(): Promise<Response> {
+  async alarm(): Promise<void> {
     const stateJson = await this.state.storage.get<string>('conversation');
 
     if (!stateJson) {
-      return new Response('No state to clear', { status: 200 });
+      return;
     }
 
     const state = this.serializer.deserialize(stateJson);
@@ -248,10 +243,9 @@ export class ConversationDO {
     if (!state) {
       // Corrupted state - clear it
       await this.state.storage.delete('conversation');
-      return new Response('Corrupted state cleared', { status: 200 });
+      return;
     }
 
-    // Check if state is still idle
     if (state.lastActivity) {
       const lastActivity = new Date(state.lastActivity).getTime();
       const now = Date.now();
@@ -259,11 +253,8 @@ export class ConversationDO {
       if (now - lastActivity >= this.alarmTimeoutMs) {
         // Clear state after 10 minutes of inactivity
         await this.state.storage.delete('conversation');
-        return new Response('State cleared due to inactivity', { status: 200 });
       }
     }
-
-    return new Response('State still active', { status: 200 });
   }
 
   /**

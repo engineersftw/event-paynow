@@ -13,7 +13,7 @@ export default {
     // Telegram webhook endpoint
     if (url.pathname === '/webhook' && request.method === 'POST') {
       // Validate secret BEFORE creating bot (avoids "Empty token" error in tests)
-      if (!validateSecret(request, env.TELEGRAM_BOT_TOKEN)) {
+      if (!validateSecret(request, env.TELEGRAM_WEBHOOK_SECRET)) {
         return new Response('Unauthorized', { status: 403 });
       }
       return handleWebhook(request, env);
