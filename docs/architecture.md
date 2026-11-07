@@ -129,6 +129,9 @@
 **`/payments` handler** (implemented):
 - Lists all payments for the user with inline buttons (View / Mark as received / Payback)
 - Payment detail view shows status, timestamps, source, and payback summary
+- Detail view renders a "Mark payback as sent" button per pending payback (task 7.4);
+  tapping performs a guarded `pending → sent` transition and re-renders the history with
+  sent timestamps and the refreshed remaining total
 
 **`/payback` handler** (implemented):
 - 4-step conversation: payer proxy → confirm → amount → confirm
@@ -146,7 +149,12 @@
 - `createPayment`: Create pending payment record
 - `updatePaymentStatus`: Transition payment status (pending → received)
 - `createPayback`: Create payback record
-- `sumActivePaybacks`: Calculate total active paybacks for bounding
+- `createPaybackBounded`: Create payback inside a D1 batch with in-transaction
+  `SUM(active paybacks) <= amount` compare-and-set re-check (task 7.2)
+- `getPaybackByRef`: Look up a payback by its unique ref
+- `updatePaybackStatus`: Guarded `pending → sent` transition (compare-and-set);
+  duplicate/concurrent taps yield exactly one winner (task 7.4)
+- `sumActivePaybacks`: Calculate total active (pending) paybacks for bounding
 
 ### Drizzle ORM (src/db/drizzle-repository.ts)
 **Role**: Type-safe database queries

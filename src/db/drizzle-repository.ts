@@ -7,6 +7,7 @@ import type {
   Payment,
   Payback,
   PaymentStatus,
+  PaybackStatus,
   ReceiptSource,
   CreatePaybackBoundedResult,
 } from './repository';
@@ -291,6 +292,42 @@ export class D1Repository implements Repository {
       activeSumCents: totalsRow.activeSumCents,
       remainingCents: Math.max(0, totalsRow.paymentAmountCents - totalsRow.activeSumCents),
     };
+  }
+
+  async getPaybackByRef(ref: string): Promise<Payback | null> {
+    const result = await this.db
+      .select()
+      .from(schema.paybacks)
+      .where(eq(schema.paybacks.ref, ref))
+      .get();
+
+    return result ? toPayback(result) : null;
+  }
+
+  /**
+   * Task 7.4: payback status transition. `pending → sent` is compare-and-set —
+   * the UPDATE only matches rows still `pending`, so duplicate or concurrent
+   * taps yield exactly one winner; everyone else gets null.
+   */
+  async updatePaybackStatus(
+    ref: string,
+    status: PaybackStatus,
+    timestamp: string
+  ): Promise<Payback | null> {
+    const sentAt = status === 'sent' ? timestamp : null;
+
+    const where = status === 'sent'
+      ? and(eq(schema.paybacks.ref, ref), eq(schema.paybacks.status, 'pending'))
+      : eq(schema.paybacks.ref, ref);
+
+    const updated = await this.db
+      .update(schema.paybacks)
+      .set({ status, sentAt })
+      .where(where)
+      .returning()
+      .get();
+
+    return updated ? toPayback(updated) : null;
   }
 
   async listPaybacksByPayment(paymentId: number): Promise<Payback[]> {

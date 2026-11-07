@@ -230,4 +230,59 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(stub.lastText()).toContain('/payback');
     expect(stub.lastText()).toContain('/payments');
   });
+
+  it('detail view renders Mark-sent buttons; tapping transitions the payback and re-renders (task 7.4)', async () => {
+    const userId = 800000010;
+    const { bot, repo } = makeWiredBot();
+    await repo.upsertUser({
+      telegramId: userId,
+      payeeType: 'mobile',
+      payeeValue: '+6591234567',
+      displayName: 'Wiring User',
+      timestamp: T0,
+    });
+    const payment = await seedPayment(repo, userId, 'WIRE-010', 10000, 'received');
+    await repo.createPayback({
+      ref: 'WIRE-PB-010',
+      paymentId: payment.id,
+      payerType: 'mobile',
+      payerValue: '+6598765432',
+      amountCents: 2500,
+      status: 'pending',
+      qrPayload: 'payback-payload',
+      timestamp: T0,
+    });
+
+    // 1. Open the detail view — pending payback gets a Mark-sent button
+    await bot.handleUpdate(callbackUpdate(userId, 'view:WIRE-010'));
+    const view = stub.editedMessages[0]!;
+    expect(view.text).toContain('💸 *Paybacks:*');
+    expect(view.text).toContain('⏳ $25.00 to +6598765432');
+    const buttons = view.replyMarkup?.inline_keyboard.flat() ?? [];
+    expect(buttons).toHaveLength(1);
+    expect(buttons[0]!.callback_data).toBe('pb_sent:WIRE-010:WIRE-PB-010');
+
+    // 2. Tap "Mark sent"
+    await bot.handleUpdate(callbackUpdate(userId, 'pb_sent:WIRE-010:WIRE-PB-010'));
+    expect(stub.callbackAnswers).toContain('✅ Payback marked as sent');
+
+    // 3. DB transition + timestamp recorded
+    const row = await repo.getPaybackByRef('WIRE-PB-010');
+    expect(row!.status).toBe('sent');
+    expect(row!.sentAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+    expect(await repo.sumActivePaybacks(payment.id)).toBe(0);
+
+    // 4. Re-rendered detail: sent marker + timestamp, remaining refreshed,
+    //    no stale buttons
+    const refresh = stub.editedMessages[1]!;
+    expect(refresh.text).toContain('✅ $25.00 to +6598765432');
+    expect(refresh.text).toContain('(sent');
+    expect(refresh.text).toContain('*Remaining:* $75.00');
+    expect(refresh.replyMarkup?.inline_keyboard.flat() ?? []).toHaveLength(0);
+
+    // 5. Duplicate tap is refused and changes nothing
+    await bot.handleUpdate(callbackUpdate(userId, 'pb_sent:WIRE-010:WIRE-PB-010'));
+    expect(stub.callbackAnswers).toContain('⚠️ Payback already marked as sent');
+    expect(stub.editedMessages).toHaveLength(2);
+  });
 });

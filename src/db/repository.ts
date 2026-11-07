@@ -89,6 +89,13 @@ export interface Repository {
    * never push the active total over the original amount (design §5, task 7.2).
    */
   createPaybackBounded(payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }): Promise<CreatePaybackBoundedResult>;
+  getPaybackByRef(ref: string): Promise<Payback | null>;
+  /**
+   * Transition a payback's status. Marking `sent` is a guarded transition: the update
+   * applies only while the row is still `pending`, so duplicate taps concurrently
+   * resolve to exactly one winner — the loser gets null back (task 7.4).
+   */
+  updatePaybackStatus(ref: string, status: PaybackStatus, timestamp: string): Promise<Payback | null>;
   listPaybacksByPayment(paymentId: number): Promise<Payback[]>;
   sumActivePaybacks(paymentId: number): Promise<number>;
 }

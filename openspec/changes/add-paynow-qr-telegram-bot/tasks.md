@@ -45,7 +45,7 @@
 - [x] 7.1 Implement the `/payback <ref-or-id>` conversation: prompt for payer proxy (validate via 3.3), echo for confirmation, prompt for amount defaulting to original — verify conversation tests for mobile and UEN payers and invalid-proxy re-prompt
 - [x] 7.2 Enforce payback bounds inside a D1 batch with the design's in-transaction re-check of `SUM(active paybacks)` — verify tests for exact, partial, second-partial, and blocked-over cases matching the spec scenarios (5+3 of 12.50, remaining 4.50) plus, in `vitest-pool-workers`, two concurrent payback requests routed through the chat DO asserted to serialize so the sum never exceeds the original
 - [x] 7.3 Generate the payback QR using the 2.2 builder with the PAYER as payee proxy and payback `ref`, store the `paybacks` row (`pending`), and `sendPhoto` with caption — verify integration test round-tripping the payload as in 5.3
-- [ ] 7.4 Implement "Mark payback as sent" button and payback history rendering in payment detail — verify tests for transition, timestamp, and updated remaining total
+- [x] 7.4 Implement "Mark payback as sent" button and payback history rendering in payment detail — verify tests for transition, timestamp, and updated remaining total
 
 ## 8. Integration, scan validation, and operations
 

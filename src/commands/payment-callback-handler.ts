@@ -1,12 +1,16 @@
 import type { Context } from 'grammy';
-import { ConversationDO, type ConversationState } from '../worker/conversation-do.js';
-import type { Repository, Payment, ReceiptSource } from '../db/repository.js';
+import { InlineKeyboard } from 'grammy';
+import { ConversationDO } from '../worker/conversation-do.js';
+import { formatCents } from '../sgqr/amount.js';
+import type { Repository, Payment, Payback } from '../db/repository.js';
 
 /**
  * Callback query handler for payment actions
  * Handles inline button callbacks for:
+ * - View (payment detail with payback history + mark-sent buttons)
  * - Mark as received
  * - Payback
+ * - Mark payback as sent (task 7.4)
  */
 
 export class PaymentCallbackHandler {
@@ -19,7 +23,8 @@ export class PaymentCallbackHandler {
   }
 
   /**
-   * Handle callback queries from inline buttons
+   * Handle callback queries from inline buttons.
+   * Data formats: `<action>:<paymentRef>` and `pb_sent:<paymentRef>:<paybackRef>`.
    */
   async handleCallback(ctx: Context): Promise<void> {
     if (!ctx.callbackQuery?.data) {
@@ -30,28 +35,28 @@ export class PaymentCallbackHandler {
     const callbackData = ctx.callbackQuery.data;
 
     try {
-      // Parse callback data (format: "action:ref")
-      const [action, ref] = callbackData.split(':');
+      const parts = callbackData.split(':');
+      const action = parts[0];
+      const ref = parts[1];
 
       if (!action || !ref) {
         await ctx.answerCallbackQuery({ text: '❌ Invalid callback data' });
         return;
       }
 
-      // Get payment to verify ownership
+      // All payment actions carry the owning payment's ref as the first
+      // parameter — resolve it once and verify ownership centrally.
       const payment = await this.repository.getPaymentByRef(ref);
       if (!payment) {
         await ctx.answerCallbackQuery({ text: '❌ Payment not found' });
         return;
       }
 
-      // Verify ownership
       if (payment.userId !== userId) {
         await ctx.answerCallbackQuery({ text: '❌ You do not own this payment' });
         return;
       }
 
-      // Route to appropriate handler
       switch (action) {
         case 'view':
           await this.handleViewPayment(ctx, payment);
@@ -62,6 +67,15 @@ export class PaymentCallbackHandler {
         case 'payback':
           await this.handlePayback(ctx, payment);
           break;
+        case 'pb_sent': {
+          const paybackRef = parts[2];
+          if (!paybackRef) {
+            await ctx.answerCallbackQuery({ text: '❌ Invalid callback data' });
+            return;
+          }
+          await this.handleMarkPaybackSent(ctx, payment, paybackRef);
+          break;
+        }
         default:
           await ctx.answerCallbackQuery({ text: '❌ Unknown action' });
       }
@@ -73,58 +87,94 @@ export class PaymentCallbackHandler {
   }
 
   /**
-   * Handle "View" callback - show payment details
+   * Handle "View" callback - show payment details with payback history.
    */
   private async handleViewPayment(ctx: Context, payment: Payment): Promise<void> {
     try {
-      // Get paybacks for this payment
-      const paybacks = await this.repository.listPaybacksByPayment(payment.id);
-      
-      // Format payment details
-      const lines: string[] = [
-        '💳 *Payment Details*',
-        '',
-        `*Reference:* \`${payment.ref}\``,
-        `*Amount:* $${(payment.amountCents / 100).toFixed(2)}`,
-        `*Description:* ${payment.description}`,
-        `*Status:* ${payment.status === 'pending' ? '⏳ Pending' : '✅ Received'}`,
-        `*Created:* ${this.formatDate(payment.createdAt)}`,
-      ];
-
-      if (payment.receivedAt) {
-        lines.push(`*Received:* ${this.formatDate(payment.receivedAt)}`);
-        lines.push(`*Source:* ${payment.source === 'manual' ? 'Manual' : 'Notification'}`);
-      }
-
-      // Add payback summary if any
-      if (paybacks.length > 0) {
-        lines.push('');
-        lines.push('💸 *Paybacks:*');
-        
-        const totalPayback = paybacks.reduce((sum, pb) => sum + pb.amountCents, 0);
-        const remaining = payment.amountCents - totalPayback;
-        
-        for (const payback of paybacks) {
-          const status = payback.status === 'pending' ? '⏳' : '✅';
-          lines.push(`${status} $${(payback.amountCents / 100).toFixed(2)} to ${payback.payerValue} (${payback.status})`);
-        }
-        
-        lines.push('');
-        lines.push(`*Total Payback:* $${(totalPayback / 100).toFixed(2)}`);
-        lines.push(`*Remaining:* $${(remaining / 100).toFixed(2)}`);
-      } else {
-        lines.push('');
-        lines.push('💸 *Paybacks:* None');
-      }
-
-      const message = lines.join('\n');
       await ctx.answerCallbackQuery({ text: '📋 Payment details loaded' });
-      await ctx.editMessageText(message, { parse_mode: 'Markdown' });
-      
+      await this.renderDetails(ctx, payment);
     } catch (error) {
       console.error('Failed to load payment details:', error);
       await ctx.answerCallbackQuery({ text: '❌ Failed to load payment details' });
     }
+  }
+
+  /**
+   * Re-render the payment detail message (fresh payback history, updated
+   * remaining total, mark-sent buttons for pending paybacks).
+   */
+  private async renderDetails(ctx: Context, payment: Payment): Promise<void> {
+    const paybacks = await this.repository.listPaybacksByPayment(payment.id);
+    const { text, keyboard } = this.renderPaymentDetail(payment, paybacks);
+
+    await ctx.editMessageText(text, {
+      parse_mode: 'Markdown',
+      // Always send a keyboard (possibly empty) so stale buttons from the
+      // payments list or a previous render are cleared from this message.
+      reply_markup: keyboard ?? new InlineKeyboard(),
+    });
+  }
+
+  /**
+   * Build the detail text + inline keyboard. Pending paybacks get a
+   * "Mark sent" button (task 7.4); sent paybacks show their timestamp.
+   */
+  private renderPaymentDetail(
+    payment: Payment,
+    paybacks: Payback[]
+  ): { text: string; keyboard: InlineKeyboard | undefined } {
+    const lines: string[] = [
+      '💳 *Payment Details*',
+      '',
+      `*Reference:* \`${payment.ref}\``,
+      `*Amount:* $${formatCents(payment.amountCents)}`,
+      `*Description:* ${payment.description}`,
+      `*Status:* ${payment.status === 'pending' ? '⏳ Pending' : '✅ Received'}`,
+      `*Created:* ${this.formatDate(payment.createdAt)}`,
+    ];
+
+    if (payment.receivedAt) {
+      lines.push(`*Received:* ${this.formatDate(payment.receivedAt)}`);
+      lines.push(`*Source:* ${payment.source === 'manual' ? 'Manual' : 'Notification'}`);
+    }
+
+    if (paybacks.length > 0) {
+      lines.push('');
+      lines.push('💸 *Paybacks:*');
+
+      const totalPayback = paybacks.reduce((sum, pb) => sum + pb.amountCents, 0);
+      const remaining = payment.amountCents - totalPayback;
+
+      for (const payback of paybacks) {
+        const icon = payback.status === 'pending' ? '⏳' : '✅';
+        let line = `${icon} $${formatCents(payback.amountCents)} to ${payback.payerValue} — \`${payback.ref}\``;
+        if (payback.status === 'sent' && payback.sentAt) {
+          line += ` (sent ${this.formatDate(payback.sentAt)})`;
+        }
+        lines.push(line);
+      }
+
+      lines.push('');
+      lines.push(`*Total Payback:* $${formatCents(totalPayback)}`);
+      lines.push(`*Remaining:* $${formatCents(Math.max(0, remaining))}`);
+    } else {
+      lines.push('');
+      lines.push('💸 *Paybacks:* None');
+    }
+
+    // Mark-sent buttons for each pending payback
+    const pendingPaybacks = paybacks.filter((pb) => pb.status === 'pending');
+    let keyboard: InlineKeyboard | undefined;
+    if (pendingPaybacks.length > 0) {
+      keyboard = new InlineKeyboard();
+      for (const payback of pendingPaybacks) {
+        keyboard
+          .text(`✅ Mark sent: $${formatCents(payback.amountCents)}`, `pb_sent:${payment.ref}:${payback.ref}`)
+          .row();
+      }
+    }
+
+    return { text: lines.join('\n'), keyboard };
   }
 
   /**
@@ -165,14 +215,55 @@ export class PaymentCallbackHandler {
     }
 
     await ctx.answerCallbackQuery({ text: '✅ Payment marked as received!' });
-    
+
     // Optionally update the message to reflect new status
     if (ctx.callbackQuery?.message) {
       await ctx.editMessageText(
-        `✅ Payment received!\n\nRef: \`${payment.ref}\`\nAmount: $${(payment.amountCents / 100).toFixed(2)}`,
+        `✅ Payment received!\n\nRef: \`${payment.ref}\`\nAmount: $${formatCents(payment.amountCents)}`,
         { parse_mode: 'Markdown' }
       );
     }
+  }
+
+  /**
+   * Handle "Mark payback as sent" callback (task 7.4).
+   * The repository transition is compare-and-set, so duplicate or concurrent
+   * taps resolve to exactly one winner; the loser sees "already marked".
+   */
+  private async handleMarkPaybackSent(
+    ctx: Context,
+    payment: Payment,
+    paybackRef: string
+  ): Promise<void> {
+    const payback = await this.repository.getPaybackByRef(paybackRef);
+    if (!payback || payback.paymentId !== payment.id) {
+      await ctx.answerCallbackQuery({ text: '❌ Payback not found' });
+      return;
+    }
+
+    if (payback.status === 'sent') {
+      await ctx.answerCallbackQuery({ text: '⚠️ Payback already marked as sent' });
+      return;
+    }
+
+    const timestamp = new Date().toISOString();
+    const updated = await this.repository.updatePaybackStatus(paybackRef, 'sent', timestamp);
+
+    if (!updated) {
+      // Lost the race against a concurrent tap — distinguish the states.
+      const current = await this.repository.getPaybackByRef(paybackRef);
+      if (current?.status === 'sent') {
+        await ctx.answerCallbackQuery({ text: '⚠️ Payback already marked as sent' });
+      } else {
+        await ctx.answerCallbackQuery({ text: '❌ Failed to update payback status' });
+      }
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: '✅ Payback marked as sent' });
+
+    // Re-render the detail: button removed, sent timestamp shown, totals fresh
+    await this.renderDetails(ctx, payment);
   }
 
   /**
@@ -193,9 +284,9 @@ export class PaymentCallbackHandler {
     await response?.body?.cancel();
 
     await ctx.answerCallbackQuery({ text: '🔄 Starting payback flow...' });
-    
+
     await ctx.reply(
-      `💸 Payback for payment \`${payment.ref}\`\nAmount: $${(payment.amountCents / 100).toFixed(2)}\n\nPlease enter the payer's PayNow reference (mobile or UEN):`,
+      `💸 Payback for payment \`${payment.ref}\`\nAmount: $${formatCents(payment.amountCents)}\n\nPlease enter the payer's PayNow reference (mobile or UEN):`,
       { parse_mode: 'Markdown' }
     );
   }

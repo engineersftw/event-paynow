@@ -429,5 +429,115 @@ describe('D1Repository', () => {
       const sum = await repo.sumActivePaybacks(999999);
       expect(sum).toBe(0);
     });
+
+    // --------------------------------------------------------------------------
+    // Task 7.4: getPaybackByRef + guarded pending → sent transition
+    // --------------------------------------------------------------------------
+
+    it('retrieves a payback by its ref', async () => {
+      const created = await repo.createPayback({
+        ref: 'pb-lookup-001',
+        paymentId,
+        payerType: 'mobile',
+        payerValue: '+6598765432',
+        amountCents: 400,
+        status: 'pending',
+        qrPayload: 'payload',
+        timestamp: testTimestamp,
+      });
+
+      const fetched = await repo.getPaybackByRef('pb-lookup-001');
+      expect(fetched).not.toBeNull();
+      expect(fetched!.id).toBe(created.id);
+      expect(fetched!.ref).toBe('pb-lookup-001');
+      expect(fetched!.paymentId).toBe(paymentId);
+      expect(fetched!.status).toBe('pending');
+      expect(fetched!.sentAt).toBeNull();
+    });
+
+    it('returns null when looking up an unknown payback ref', async () => {
+      const payback = await repo.getPaybackByRef('pb-does-not-exist');
+      expect(payback).toBeNull();
+    });
+
+    it('marks a pending payback as sent with a timestamp', async () => {
+      await repo.createPayback({
+        ref: 'pb-sent-001',
+        paymentId,
+        payerType: 'mobile',
+        payerValue: '+6598765432',
+        amountCents: 300,
+        status: 'pending',
+        qrPayload: 'payload',
+        timestamp: testTimestamp,
+      });
+
+      const updated = await repo.updatePaybackStatus('pb-sent-001', 'sent', '2024-01-02T10:00:00Z');
+
+      expect(updated).not.toBeNull();
+      expect(updated!.status).toBe('sent');
+      expect(updated!.sentAt).toBe('2024-01-02T10:00:00Z');
+
+      // Read back: transition persisted
+      const fetched = await repo.getPaybackByRef('pb-sent-001');
+      expect(fetched!.status).toBe('sent');
+      expect(fetched!.sentAt).toBe('2024-01-02T10:00:00Z');
+
+      // Sent paybacks no longer count as active
+      expect(await repo.sumActivePaybacks(paymentId)).toBe(0);
+    });
+
+    it('rejects a duplicate pending → sent transition (compare-and-set)', async () => {
+      await repo.createPayback({
+        ref: 'pb-sent-002',
+        paymentId,
+        payerType: 'mobile',
+        payerValue: '+6598765432',
+        amountCents: 300,
+        status: 'pending',
+        qrPayload: 'payload',
+        timestamp: testTimestamp,
+      });
+
+      const first = await repo.updatePaybackStatus('pb-sent-002', 'sent', '2024-01-02T10:00:00Z');
+      expect(first).not.toBeNull();
+
+      // Second tap: no longer eligible — guarded update matches nothing
+      const second = await repo.updatePaybackStatus('pb-sent-002', 'sent', '2024-01-02T10:05:00Z');
+      expect(second).toBeNull();
+
+      // Original timestamp survives — no overwrite
+      const fetched = await repo.getPaybackByRef('pb-sent-002');
+      expect(fetched!.sentAt).toBe('2024-01-02T10:00:00Z');
+    });
+
+    it('returns null when updating an unknown payback ref', async () => {
+      const updated = await repo.updatePaybackStatus('pb-nonexistent', 'sent', '2024-01-02T10:00:00Z');
+      expect(updated).toBeNull();
+    });
+
+    it('concurrent duplicate taps yield exactly one winner', async () => {
+      await repo.createPayback({
+        ref: 'pb-sent-race',
+        paymentId,
+        payerType: 'mobile',
+        payerValue: '+6598765432',
+        amountCents: 250,
+        status: 'pending',
+        qrPayload: 'payload',
+        timestamp: testTimestamp,
+      });
+
+      const [a, b] = await Promise.all([
+        repo.updatePaybackStatus('pb-sent-race', 'sent', '2024-01-02T10:00:00Z'),
+        repo.updatePaybackStatus('pb-sent-race', 'sent', '2024-01-02T10:00:01Z'),
+      ]);
+
+      const winners = [a, b].filter((r) => r !== null);
+      expect(winners).toHaveLength(1);
+
+      const fetched = await repo.getPaybackByRef('pb-sent-race');
+      expect(fetched!.status).toBe('sent');
+    });
   });
 });

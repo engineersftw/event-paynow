@@ -15,6 +15,8 @@ describe('PaymentCallbackHandler', () => {
       getPaymentByRef: vi.fn(),
       updatePaymentStatus: vi.fn(),
       listPaybacksByPayment: vi.fn(),
+      getPaybackByRef: vi.fn(),
+      updatePaybackStatus: vi.fn(),
     } as unknown as Repository;
 
     mockConversationDO = {
@@ -289,8 +291,13 @@ describe('PaymentCallbackHandler', () => {
       });
       expect(mockCtx.editMessageText).toHaveBeenCalledWith(
         expect.stringContaining('💳 *Payment Details*'),
-        { parse_mode: 'Markdown' }
+        expect.objectContaining({ parse_mode: 'Markdown' })
       );
+      // Detail view replaces the list keyboard; with no paybacks it is empty
+      const opts = vi.mocked(mockCtx.editMessageText).mock.calls[0]![1] as {
+        reply_markup: { inline_keyboard: unknown[][] };
+      };
+      expect(opts.reply_markup.inline_keyboard.flat()).toHaveLength(0);
       
       const message = vi.mocked(mockCtx.editMessageText).mock.calls[0][0] as string;
       expect(message).toContain('PAY123');
@@ -360,6 +367,15 @@ describe('PaymentCallbackHandler', () => {
       expect(message).toContain('*Total Payback:* $50.00');
       expect(message).toContain('*Remaining:* $50.00');
       expect(message).toContain('Notification');
+
+      // Task 7.4: pending paybacks get a Mark-sent button; sent ones don't
+      const opts = vi.mocked(mockCtx.editMessageText).mock.calls[0]![1] as {
+        reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
+      };
+      const buttons = opts.reply_markup.inline_keyboard.flat();
+      expect(buttons).toHaveLength(1);
+      expect(buttons[0]!.callback_data).toBe('pb_sent:PAY123:PB2');
+      expect(buttons[0]!.text).toContain('Mark sent: $20.00');
     });
 
     it('should handle errors when loading payment details', async () => {
@@ -391,6 +407,172 @@ describe('PaymentCallbackHandler', () => {
         text: '❌ Failed to load payment details',
       });
       expect(mockCtx.editMessageText).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('handleCallback - Mark payback as sent (task 7.4)', () => {
+    const detailPayment: Payment = {
+      id: 1,
+      ref: 'PAY123',
+      userId: 123456789,
+      amountCents: 10000,
+      status: 'received',
+      createdAt: '2024-01-15T10:30:00Z',
+      description: 'Test payment',
+      payeeType: 'mobile',
+      payeeValue: '+6591234567',
+      qrPayload: 'test-payload',
+      source: 'manual',
+      receivedAt: '2024-01-15T10:35:00Z',
+    };
+
+    const pendingPayback = {
+      id: 2,
+      ref: 'PB2',
+      paymentId: 1,
+      payerType: 'mobile' as const,
+      payerValue: '201234567A',
+      amountCents: 2000,
+      status: 'pending' as const,
+      qrPayload: 'payload2',
+      createdAt: '2024-01-15T12:00:00Z',
+      sentAt: null,
+    };
+
+    function setupPaybackView() {
+      mockCtx.callbackQuery!.data = 'pb_sent:PAY123:PB2';
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(detailPayment);
+      vi.mocked(mockRepository.getPaybackByRef).mockResolvedValue(pendingPayback);
+    }
+
+    it('transitions the payback to sent with a timestamp and re-renders details', async () => {
+      setupPaybackView();
+      const sentRow = { ...pendingPayback, status: 'sent' as const, sentAt: '2024-01-16T09:00:00Z' };
+      vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue(sentRow);
+      vi.mocked(mockRepository.listPaybacksByPayment).mockResolvedValue([sentRow]);
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockRepository.getPaybackByRef).toHaveBeenCalledWith('PB2');
+      expect(mockRepository.updatePaybackStatus).toHaveBeenCalledWith(
+        'PB2',
+        'sent',
+        expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/)
+      );
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '✅ Payback marked as sent',
+      });
+
+      // Re-rendered detail: sent icon + timestamp, no remaining buttons
+      const message = vi.mocked(mockCtx.editMessageText).mock.calls[0]![0] as string;
+      expect(message).toContain('✅ $20.00 to 201234567A');
+      expect(message).toContain('(sent');
+      expect(message).toContain('*Remaining:* $80.00');
+      const opts = vi.mocked(mockCtx.editMessageText).mock.calls[0]![1] as {
+        reply_markup: { inline_keyboard: unknown[][] };
+      };
+      expect(opts.reply_markup.inline_keyboard.flat()).toHaveLength(0);
+    });
+
+    it('reports not found when the payback ref is unknown', async () => {
+      setupPaybackView();
+      vi.mocked(mockRepository.getPaybackByRef).mockResolvedValue(null);
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '❌ Payback not found',
+      });
+      expect(mockRepository.updatePaybackStatus).not.toHaveBeenCalled();
+    });
+
+    it('rejects a payback that belongs to a different payment', async () => {
+      setupPaybackView();
+      vi.mocked(mockRepository.getPaybackByRef).mockResolvedValue({
+        ...pendingPayback,
+        paymentId: 999,
+      });
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '❌ Payback not found',
+      });
+      expect(mockRepository.updatePaybackStatus).not.toHaveBeenCalled();
+    });
+
+    it('rejects a duplicate tap on an already-sent payback', async () => {
+      setupPaybackView();
+      vi.mocked(mockRepository.getPaybackByRef).mockResolvedValue({
+        ...pendingPayback,
+        status: 'sent',
+        sentAt: '2024-01-16T09:00:00Z',
+      });
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '⚠️ Payback already marked as sent',
+      });
+      expect(mockRepository.updatePaybackStatus).not.toHaveBeenCalled();
+    });
+
+    it('loses a concurrent duplicate tap gracefully (guarded update returns null)', async () => {
+      setupPaybackView();
+      // First read: still pending…
+      vi.mocked(mockRepository.getPaybackByRef)
+        .mockResolvedValueOnce(pendingPayback)
+        // …but the CAS update loses; re-read shows another tap won
+        .mockResolvedValueOnce({ ...pendingPayback, status: 'sent', sentAt: '2024-01-16T09:00:00Z' });
+      vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue(null);
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '⚠️ Payback already marked as sent',
+      });
+      expect(mockCtx.editMessageText).not.toHaveBeenCalled();
+    });
+
+    it('reports failure when the update returns null but the row is still pending', async () => {
+      setupPaybackView();
+      vi.mocked(mockRepository.getPaybackByRef)
+        .mockResolvedValueOnce(pendingPayback)
+        .mockResolvedValueOnce(pendingPayback);
+      vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue(null);
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '❌ Failed to update payback status',
+      });
+    });
+
+    it('rejects when the caller does not own the payment', async () => {
+      mockCtx.callbackQuery!.data = 'pb_sent:PAY123:PB2';
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue({
+        ...detailPayment,
+        userId: 999999999,
+      });
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '❌ You do not own this payment',
+      });
+      expect(mockRepository.getPaybackByRef).not.toHaveBeenCalled();
+    });
+
+    it('rejects malformed pb_sent data without a payback ref', async () => {
+      mockCtx.callbackQuery!.data = 'pb_sent:PAY123';
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(detailPayment);
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '❌ Invalid callback data',
+      });
+      expect(mockRepository.getPaybackByRef).not.toHaveBeenCalled();
     });
   });
 

@@ -93,7 +93,7 @@ Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
 - Webhook secret validation
 - Project scaffolding (wrangler, vitest 2-pool, TypeScript)
 - Database schema with Drizzle ORM (users, payments, paybacks tables with CHECK constraints)
-- Repository layer with infra-neutral interfaces (D1Repository implementation, 21 passing tests)
+- Repository layer with infra-neutral interfaces (D1Repository implementation, 27 passing tests)
 - Proxy validation and normalization (mobile → +65XXXXXXXX, UEN validation)
 - 10-char base32 reference generator using crypto.getRandomValues
 - Payment service with markPaymentReceived transition logic (routes through `updatePaymentStatus`)
@@ -112,6 +112,9 @@ Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
 - `src/bot.ts` wires all commands (/init, /start, /payments, /payback <ref>, /cancel, /help,
   /ping), inline-button callbacks, and free-text conversation routing; bot cached per isolate
   with a single `bot.init()` getMe
+- Mark payback as sent (task 7.4): detail view renders per-pending-payback buttons;
+  `updatePaybackStatus(ref, 'sent', ts)` is a guarded CAS transition (duplicate taps →
+  exactly one winner, loser sees "already marked"); re-render shows sent timestamps + refreshed remaining
 - `ChatSessionDO` binding serves the real conversation FSM (`src/index.ts` re-exports
   `ConversationDO` from `src/worker/conversation-do.ts`)
 
@@ -158,10 +161,10 @@ The repository layer provides infra-neutral interfaces for database operations:
 **Operations:**
 - Users: upsertUser, getUser
 - Payments: createPayment, getPaymentByRef, listPaymentsByUser, updatePaymentStatus
-- Paybacks: createPayback, createPaybackBounded (transactional bound enforcement), listPaybacksByPayment, sumActivePaybacks
+- Paybacks: createPayback, createPaybackBounded (transactional bound enforcement), getPaybackByRef, updatePaybackStatus (guarded pending→sent CAS, task 7.4), listPaybacksByPayment, sumActivePaybacks
 
 **Testing:**
-- 21 tests in `test/workers/repository.test.ts` cover all operations
+- 27 tests in `test/workers/repository.test.ts` cover all operations (incl. payback transitions + duplicate-tap race)
 - 11 tests in `test/workers/payback-bounds.test.ts` cover bounded payback creation incl. concurrency
 - Tests verify cross-user isolation, read-back-after-write consistency, and status transitions
 - Tests run in Workers pool with real D1 bindings
@@ -198,7 +201,9 @@ The repository layer provides infra-neutral interfaces for database operations:
 
 - Task 5.3 stage (b): live `cloudflared` dev-bot check that the photo arrives in Telegram
   (blocked on task 1.3, Cloudflare auth)
-- Task 7.4: "Mark payback as sent" button and payback history in payment detail
 - Task 1.3: Cloudflare auth setup (blocked) — also verify deployed webhook works now that
   `src/bot.ts` routes real handlers (getMe on first request per isolate)
 - Tasks 8.1-8.3: Integration testing, scan validation, deploy pipeline
+- Open design question (7.2/7.4): `sumActivePaybacks` counts only `pending`; marking a payback
+  `sent` frees bound room again, which could allow paying back more than the original. Decide
+  whether sent paybacks should count toward the bound before 8.x.

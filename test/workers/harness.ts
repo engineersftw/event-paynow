@@ -103,6 +103,7 @@ export interface CapturedPhoto {
 export interface CapturedEdit {
   chatId: string;
   text: string;
+  replyMarkup?: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
 }
 
 const asciiEnc = new TextEncoder();
@@ -264,8 +265,16 @@ export class TelegramStub {
     }
 
     if (method === 'editMessageText') {
-      const body = JSON.parse(String(init?.body)) as { chat_id: number | string; text: string };
-      this.editedMessages.push({ chatId: String(body.chat_id), text: body.text });
+      const body = JSON.parse(String(init?.body)) as {
+        chat_id: number | string;
+        text: string;
+        reply_markup?: CapturedEdit['replyMarkup'];
+      };
+      this.editedMessages.push({
+        chatId: String(body.chat_id),
+        text: body.text,
+        replyMarkup: body.reply_markup,
+      });
       return this.ok(this.message((this.messageId += 1), String(body.chat_id)));
     }
 
