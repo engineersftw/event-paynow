@@ -120,20 +120,20 @@
 - Requires confirmation before saving
 - Updates existing user or creates new user
 
-**`/start` handler** (pending):
-- Collects payment amount and description
-- Generates SGQR PayNow QR code
-- Creates payment record in database
-- Sends QR image to user
+**`/start` handler** (implemented):
+- Guard: unconfigured users are prompted to run `/init` first
+- Collects description, then amount (integer cents, ≤ 2 decimals)
+- Creates the payment record with payee snapshot + embedded base32 `ref`
+- Renders the SGQR PayNow QR (BMP, pure JS) and uploads it via `sendPhoto`
 
-**`/payments` handler** (pending):
-- Lists all payments for the user
-- Shows status, amount, description, date
+**`/payments` handler** (implemented):
+- Lists all payments for the user with inline buttons (View / Mark as received / Payback)
+- Payment detail view shows status, timestamps, source, and payback summary
 
-**`/payback` handler** (pending):
-- Selects payment to pay back
-- Generates QR with payer as payee
-- Creates payback record
+**`/payback` handler** (implemented):
+- 4-step conversation: payer proxy → confirm → amount → confirm
+- Payback row created inside the bounded D1 transaction (task 7.2)
+- Generates QR encoding the PAYER as payee proxy and uploads via `sendPhoto` (task 7.3)
 
 ### Repository Layer (src/db/repository.ts)
 **Role**: Database access abstraction
@@ -263,7 +263,7 @@ Handler resets state (flow: 'idle', step: 0)
 Handler sends success message
 ```
 
-### /start Command Flow (pending)
+### /start Command Flow
 ```
 User sends /start
   ↓
@@ -271,15 +271,15 @@ Handler checks if user has configured reference
   ↓ (if not configured)
 Handler prompts user to run /init first
   ↓ (if configured)
+Handler prompts for description (payee snapshot captured in DO state)
+  ↓
+User sends description
+  ↓
 Handler prompts for amount
   ↓
 User sends amount
   ↓
-Handler validates amount via amount parser
-  ↓
-Handler prompts for description
-  ↓
-User sends description
+Handler validates amount via amount parser (integer cents)
   ↓
 Handler generates unique ref (10-char base32)
   ↓
@@ -293,7 +293,7 @@ D1 stores payment record
   ↓
 Handler sends QR image via sendPhoto
   ↓
-Handler sends payment reference number
+Handler sends payment reference + /payments tracking hint
 ```
 
 ## Storage Strategy

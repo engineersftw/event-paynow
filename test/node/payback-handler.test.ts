@@ -1,8 +1,10 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { InputFile } from 'grammy';
 import { PaybackCommandHandler } from '../../src/commands/payback-handler.js';
 import type { Context } from 'grammy';
 import type { ConversationDO } from '../../src/worker/conversation-do.js';
 import type { Repository, Payment, CreatePaybackBoundedResult } from '../../src/db/repository.js';
+import { buildPayNowPayload } from '../../src/sgqr/paynow.js';
 
 describe('PaybackCommandHandler', () => {
   let handler: PaybackCommandHandler;
@@ -84,7 +86,9 @@ describe('PaybackCommandHandler', () => {
 
     mockCtx = {
       from: { id: 123456789 },
+      chat: { id: 123456789 },
       reply: vi.fn(),
+      replyWithPhoto: vi.fn(),
     } as unknown as Context;
 
     handler = new PaybackCommandHandler(mockConversationDO, mockRepository);
@@ -441,14 +445,35 @@ describe('PaybackCommandHandler', () => {
       expect(input.payerValue).toBe('+6591234567');
       expect(input.amountCents).toBe(550);
       expect(input.status).toBe('pending');
-      expect(input.qrPayload).toBe(`PAYBACK-PENDING:${input.ref}`);
       expect(input.timestamp).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+
+      // Task 7.3: real SGQR payload — PAYER as payee proxy, payback ref embedded
+      const expectedPayload = buildPayNowPayload({
+        proxyType: 'mobile',
+        proxyValue: '+6591234567',
+        amountCents: 550,
+        reference: input.ref,
+        description: 'Refund PAY123',
+      });
+      expect(input.qrPayload).toBe(expectedPayload);
+      expect(input.qrPayload).toContain('+6591234567');
+      expect(input.qrPayload).toContain('54045.50');
+      expect(input.qrPayload).not.toContain('PAYBACK-PENDING');
+
+      // QR image uploaded with the payback caption
+      expect(mockCtx.replyWithPhoto).toHaveBeenCalledTimes(1);
+      const [photo, photoOpts] = vi.mocked(mockCtx.replyWithPhoto).mock.calls[0]!;
+      expect(photo).toBeInstanceOf(InputFile);
+      expect(String((photoOpts as { caption?: string }).caption)).toBe(
+        'Payback for PAY123 / SGD 5.50 / ABCDEFGHIJ / Scan to send the money back'
+      );
 
       // The reply echoes the stored row's reference, not the request input
       expect(lastReply()).toContain('Payback Recorded');
       expect(lastReply()).toContain('Payback reference: `ABCDEFGHIJ`');
       expect(lastReply()).toContain('Amount: $5.50');
       expect(lastReply()).toContain('Remaining payable: $7.00');
+      expect(lastReply()).toContain('/payments');
     });
 
     it('should reset conversation after successful record', async () => {
@@ -483,6 +508,7 @@ describe('PaybackCommandHandler', () => {
 
       expect(lastReply()).toContain('exceeds the remaining payable amount ($4.50)');
       expect(lastReply()).toContain('Another payback may have landed just now');
+      expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
 
       const states = await postedStates();
       const state = states[states.length - 1] as { flow: string; step: number; context: Record<string, unknown> };
@@ -509,6 +535,7 @@ describe('PaybackCommandHandler', () => {
       await handler.handleInput(ctx);
 
       expect(lastReply()).toContain('fully paid back');
+      expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
       const states = await postedStates();
       expect(states[states.length - 1]).toMatchObject({ flow: 'idle', step: 0 });
     });
@@ -527,6 +554,7 @@ describe('PaybackCommandHandler', () => {
       await handler.handleInput(ctx);
 
       expect(lastReply()).toContain('no longer exists');
+      expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
     });
 
     it('should handle repository errors gracefully', async () => {

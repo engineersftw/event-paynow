@@ -1,7 +1,10 @@
 import type { Context } from 'grammy';
+import { InputFile } from 'grammy';
 import { ConversationDO, type ConversationState } from '../worker/conversation-do.js';
 import { detectProxyType, generateRef } from '../db/proxy-validation.js';
 import { parseAmount, formatCents } from '../sgqr/amount.js';
+import { buildPayNowPayload } from '../sgqr/paynow.js';
+import { renderQrPng } from '../sgqr/qr-render.js';
 import type { Repository, PayeeType } from '../db/repository.js';
 
 /**
@@ -18,7 +21,8 @@ import type { Repository, PayeeType } from '../db/repository.js';
  * 8. User provides amount
  * 9. Bot validates amount and confirms
  * 10. User confirms -> payback row created via the bounded D1 transaction (task 7.2)
- *     and echoed; QR image delivery is wired in task 7.3
+ *     with the payer-encoded SGQR payload, QR rendered in the isolate and uploaded
+ *     via sendPhoto (task 7.3)
  *
  * Payback bounds (task 7.2): the amount step pre-checks against
  * `payment.amount_cents - SUM(active paybacks)`, but the authoritative enforcement is
@@ -260,8 +264,9 @@ export class PaybackCommandHandler {
   }
 
   /**
-   * Create the payback row inside the bounded D1 transaction (task 7.2).
-   * QR payload/image generation is wired in task 7.3.
+   * Tasks 7.2 + 7.3: build the payback SGQR payload (PAYER as payee proxy),
+   * create the payback row inside the bounded D1 transaction, render the QR in
+   * the isolate, and upload it via sendPhoto.
    */
   private async createPaybackRecord(ctx: Context, state: ConversationState): Promise<void> {
     try {
@@ -271,6 +276,17 @@ export class PaybackCommandHandler {
       const paybackAmount = state.context.paybackAmount as number;
 
       const paybackRef = generateRef();
+
+      // Payback QR encodes the PAYER as the payee proxy (spec: the collecting
+      // user scans this in their own bank app and sends the money back)
+      const qrPayload = buildPayNowPayload({
+        proxyType: payerProxy.type,
+        proxyValue: payerProxy.normalized,
+        amountCents: paybackAmount,
+        reference: paybackRef,
+        description: `Refund ${paymentRef}`,
+      });
+
       const result = await this.repository.createPaybackBounded({
         ref: paybackRef,
         paymentId,
@@ -278,9 +294,7 @@ export class PaybackCommandHandler {
         payerValue: payerProxy.normalized,
         amountCents: paybackAmount,
         status: 'pending',
-        // Task 7.3 replaces this with the real SGQR payload built from the payer proxy
-        // and payback ref, delivered as a QR image via sendPhoto.
-        qrPayload: `PAYBACK-PENDING:${paybackRef}`,
+        qrPayload,
         timestamp: new Date().toISOString(),
       });
 
@@ -318,16 +332,25 @@ export class PaybackCommandHandler {
         return;
       }
 
-      // Success: row recorded inside the transaction.
+      // Success: row recorded inside the transaction — deliver the QR image
+      const qrBytes = await renderQrPng(result.payback.qrPayload);
+      await ctx.replyWithPhoto(
+        new InputFile(qrBytes, 'payback-qr.bmp'),
+        {
+          caption:
+            `Payback for ${paymentRef} / SGD ${formatCents(result.payback.amountCents)} / ` +
+            `${result.payback.ref} / Scan to send the money back`,
+        }
+      );
+
       await this.resetState();
       await ctx.reply(
         `✅ *Payback Recorded!*\n\n` +
         `Payback reference: \`${result.payback.ref}\`\n` +
         `Amount: $${formatCents(result.payback.amountCents)}\n` +
-        `Payer: ${payerProxy.normalized}\n` +
-        `Original payment: ${paymentRef}\n` +
+        `Payer (now payee): ${payerProxy.normalized}\n` +
         `Remaining payable: $${formatCents(result.remainingCents)}\n\n` +
-        `_QR image will be generated in task 7.3_`,
+        'Use /payments to track it.',
         { parse_mode: 'Markdown' }
       );
 

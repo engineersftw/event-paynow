@@ -107,6 +107,11 @@ Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
 - /start payment issuance: guard requiring /init first, description + amount collection with
   validation, payment row with payee snapshot, SGQR payload + isolate-rendered BMP QR uploaded
   via sendPhoto (tasks 5.1, 5.2, 5.4 done; 5.3 stage (a) verified e2e in Workers pool)
+- /payback QR (task 7.3): real SGQR payload encoding the PAYER as payee proxy, delivered via
+  sendPhoto with caption; jsQR round-trip verified in `test/workers/payback-qr.test.ts`
+- `src/bot.ts` wires all commands (/init, /start, /payments, /payback <ref>, /cancel, /help,
+  /ping), inline-button callbacks, and free-text conversation routing; bot cached per isolate
+  with a single `bot.init()` getMe
 - `ChatSessionDO` binding serves the real conversation FSM (`src/index.ts` re-exports
   `ConversationDO` from `src/worker/conversation-do.ts`)
 
@@ -193,8 +198,7 @@ The repository layer provides infra-neutral interfaces for database operations:
 
 - Task 5.3 stage (b): live `cloudflared` dev-bot check that the photo arrives in Telegram
   (blocked on task 1.3, Cloudflare auth)
-- Task 7.3: payback QR generation + sendPhoto (replaces the `PAYBACK-PENDING:<ref>` placeholder payload)
 - Task 7.4: "Mark payback as sent" button and payback history in payment detail
-- Task 1.3: Cloudflare auth setup (blocked)
-- Task 8.0 (implicit): wire command handlers into `src/bot.ts` (currently only ping/echo stubs)
+- Task 1.3: Cloudflare auth setup (blocked) — also verify deployed webhook works now that
+  `src/bot.ts` routes real handlers (getMe on first request per isolate)
 - Tasks 8.1-8.3: Integration testing, scan validation, deploy pipeline
