@@ -142,9 +142,17 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(payment!.payeeValue).toBe('+6591234567');
     expect(await repo.listPaymentsByUser(userId)).toHaveLength(1);
 
-    // Conversation reset to idle after completion; tracking hint sent
+    // Conversation reset to idle; inline buttons attached to the QR photo
     expect(await readDoFlow(userId)).toBe('idle');
-    expect(stub.lastText()).toContain('/payments');
+    const photoKeyboard = (
+      photo.replyMarkup as {
+        inline_keyboard: Array<Array<{ text: string; callback_data?: string }>>;
+      }
+    ).inline_keyboard;
+    const flat = (photoKeyboard ?? []).flat();
+    const byText = Object.fromEntries(flat.map((b) => [b.text, b.callback_data]));
+    expect(byText['✓ Received']).toBe(`mark_received:${ref}`);
+    expect(byText['Payback']).toBe(`payback:${ref}`);
   });
 
   it('re-prompts an invalid amount and creates nothing, then completes on a valid one', async () => {

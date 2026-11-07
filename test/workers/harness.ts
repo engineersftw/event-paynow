@@ -98,6 +98,7 @@ export interface CapturedPhoto {
   caption: string;
   filename: string;
   bytes: Uint8Array;
+  replyMarkup?: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
 }
 
 export interface CapturedEdit {
@@ -256,11 +257,21 @@ export class TelegramStub {
       if (!photoBytes) throw new Error('sendPhoto: no photo file part captured');
 
       const chatId = fields.chat_id?.value ?? '0';
+      const replyMarkupRaw = fields.reply_markup?.value;
+      let replyMarkup: CapturedPhoto['replyMarkup'] | undefined;
+      if (replyMarkupRaw) {
+        try {
+          replyMarkup = JSON.parse(replyMarkupRaw);
+        } catch {
+          /* ignore malformed reply_markup */
+        }
+      }
       this.sentPhotos.push({
         chatId,
         caption: fields.caption?.value ?? '',
         filename: photoName,
         bytes: photoBytes,
+        replyMarkup,
       });
       this.messageId += 1;
       return this.ok(this.message(this.messageId, chatId));

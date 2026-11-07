@@ -246,21 +246,28 @@ describe('StartCommandHandler', () => {
       expect(input.qrPayload).toContain('03010');
       expect(input.qrPayload).toContain('540512.50');
 
-      // sendPhoto with QR image bytes and caption per task 5.3
+      // sendPhoto with QR image bytes, caption, and inline action buttons
       expect(mockCtx.replyWithPhoto).toHaveBeenCalledTimes(1);
       const [photo, photoOpts] = vi.mocked(mockCtx.replyWithPhoto).mock.calls[0]!;
       expect(photo).toBeInstanceOf(InputFile);
-      const caption = String((photoOpts as { caption?: string }).caption);
+      const opts = photoOpts as { caption?: string; reply_markup?: { inline_keyboard: unknown } };
+      const caption = String(opts.caption);
       expect(caption).toBe(
         `Dinner split / SGD 12.50 / ${input.ref} / Forward this message to share`
       );
 
+      // Inline keyboard on the QR photo: ✓ Received + Payback
+      const keyboard = opts.reply_markup as {
+        inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+      };
+      const flat = (keyboard.inline_keyboard ?? []).flat();
+      const byText = Object.fromEntries(flat.map((b) => [b.text, b.callback_data]));
+      expect(byText['✓ Received']).toBe(`mark_received:${input.ref}`);
+      expect(byText['Payback']).toBe(`payback:${input.ref}`);
+
       // Conversation reset to idle afterwards
       const states = await postedStates();
       expect(states[states.length - 1]).toMatchObject({ flow: 'idle', step: 0 });
-
-      // Tracking hint mentioning /payments
-      expect(lastReply()).toContain('/payments');
     });
 
     it('stays in the flow and reports failure when record creation throws', async () => {
