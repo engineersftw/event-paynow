@@ -415,7 +415,7 @@ export class StartCommandHandler {
 
       const keyboard = new InlineKeyboard()
         .text('✓ Received', `mark_received:${payment.ref}`)
-        .text('Payback', `payback:${payment.ref}`);
+        .text('✖ Void', `void:${payment.ref}`);
 
       await ctx.replyWithPhoto(new InputFile(bmpBytes, 'paynow-qr.bmp'), {
         caption,

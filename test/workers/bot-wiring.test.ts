@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createBot } from '../../src/bot';
-import { D1Repository } from '../../src/db/drizzle-repository';
+import { D1EventRepository, D1Repository } from '../../src/db/drizzle-repository';
 import type { Env as WorkerEnv } from '../../src/env';
 import {
   applyTestSchema,
@@ -491,5 +491,96 @@ describe('bot wiring (src/bot.ts)', () => {
     const detail = stub.editedMessages.at(-1)!.text;
     expect(detail).toContain('to Alice (+6591234568)');
     expect(detail).toContain('to +6598765432');
+  });
+
+  /** An event with a pending payment (payer Alice) so stats and voiding can be observed. */
+  async function seedEventPayment(userId: number, ref: string, status: 'pending' | 'received') {
+    const repo = new D1Repository(env.paynow_db);
+    const eventRepo = new D1EventRepository(env.paynow_db);
+    const event = await eventRepo.createEvent({
+      ref: `EVT-${ref}`,
+      chatId: userId,
+      topicId: 0,
+      name: 'Dinner split',
+      payeeType: 'mobile',
+      payeeValue: '+6591234567',
+      status: 'open',
+      timestamp: T0,
+    });
+    await repo.createPayment({
+      ref,
+      userId,
+      eventId: event.id,
+      description: 'Dinner split',
+      amountCents: 1250,
+      payeeType: 'mobile',
+      payeeValue: '+6591234567',
+      payerType: 'mobile',
+      payerValue: '+6591234568',
+      payerName: 'Alice',
+      status,
+      source: 'manual',
+      qrPayload: 'x',
+      timestamp: T0,
+    });
+    return { repo, eventRepo, event };
+  }
+
+  it('Void replaces the QR with a status line; Received/Void/Payback are then refused and stats exclude it', async () => {
+    const userId = 800000050;
+    const { bot } = makeWiredBot();
+    const { repo, eventRepo, event } = await seedEventPayment(userId, 'WIRE-050', 'pending');
+    expect((await eventRepo.getEventStats(event.id)).pendingCents).toBe(1250);
+
+    await bot.handleUpdate(callbackUpdate(userId, 'void:WIRE-050', 600, 40, true));
+
+    expect(stub.lastText()).toMatch(
+      /^Dinner split \/ SGD 12\.50 \/ WIRE-050 \/ Payer: Alice \/ 🚫 Voided /
+    );
+    expect(stub.lastText()).not.toContain('91234568');
+    expect(stub.deletedMessages).toHaveLength(1);
+    expect((await repo.getPaymentByRef('WIRE-050'))!.status).toBe('voided');
+    expect(await eventRepo.getEventStats(event.id)).toEqual({
+      paymentCount: 0,
+      collectedCents: 0,
+      pendingCents: 0,
+    });
+
+    await bot.handleUpdate(callbackUpdate(userId, 'mark_received:WIRE-050', 600, 41, true));
+    expect(stub.callbackAnswers.at(-1)).toContain('was voided');
+    await bot.handleUpdate(callbackUpdate(userId, 'void:WIRE-050', 600, 42, true));
+    expect(stub.callbackAnswers.at(-1)).toContain('already voided');
+    await bot.handleUpdate(callbackUpdate(userId, 'payback:WIRE-050', 600, 43));
+    expect(stub.callbackAnswers.at(-1)).toContain('only create paybacks for received');
+    expect((await repo.getPaymentByRef('WIRE-050'))!.status).toBe('voided');
+  });
+
+  it('concurrent Received and Void taps leave exactly one outcome', async () => {
+    const userId = 800000051;
+    const { bot } = makeWiredBot();
+    const { repo } = await seedEventPayment(userId, 'WIRE-051', 'pending');
+
+    await Promise.all([
+      bot.handleUpdate(callbackUpdate(userId, 'mark_received:WIRE-051', 700, 50, true)),
+      bot.handleUpdate(callbackUpdate(userId, 'void:WIRE-051', 700, 51, true)),
+    ]);
+
+    expect(['received', 'voided']).toContain((await repo.getPaymentByRef('WIRE-051'))!.status);
+    const winners = stub.callbackAnswers.filter(
+      (t) => t === '✅ Payment marked as received!' || t === '🚫 Payment voided'
+    );
+    expect(winners).toHaveLength(1);
+  });
+
+  it('a received payment cannot be voided', async () => {
+    const userId = 800000052;
+    const { bot } = makeWiredBot();
+    const { repo } = await seedEventPayment(userId, 'WIRE-052', 'received');
+
+    await bot.handleUpdate(callbackUpdate(userId, 'void:WIRE-052', 600, 60, true));
+
+    expect(stub.callbackAnswers.at(-1)).toContain('already received');
+    expect((await repo.getPaymentByRef('WIRE-052'))!.status).toBe('received');
+    expect(stub.deletedMessages).toHaveLength(0);
   });
 });

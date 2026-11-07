@@ -36,7 +36,7 @@ export const payments = sqliteTable('payments', {
   amountCents: integer('amount_cents').notNull(),
   payeeType: text('payee_type').notNull(),
   payeeValue: text('payee_value').notNull(),
-  status: text('status').notNull(), // 'pending' | 'received'
+  status: text('status').notNull(), // 'pending' | 'received' | 'voided'
   source: text('source').notNull(), // 'manual' | 'notification' (future)
   qrPayload: text('qr_payload').notNull(),
   payerType: text('payer_type'), // 'mobile' | 'uen' | null (legacy rows)

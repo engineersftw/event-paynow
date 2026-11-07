@@ -49,7 +49,7 @@ const TEST_SCHEMA_STATEMENTS = [
     amount_cents INTEGER NOT NULL,
     payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
     payee_value TEXT NOT NULL,
-    status TEXT NOT NULL CHECK(status IN ('pending', 'received')),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'received', 'voided')),
     source TEXT NOT NULL CHECK(source IN ('manual', 'notification')),
     qr_payload TEXT NOT NULL,
     payer_type TEXT,

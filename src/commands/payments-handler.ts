@@ -1,8 +1,14 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
-import type { EventRepository, Repository } from '../db/repository.js';
+import type { EventRepository, PaymentStatus, Repository } from '../db/repository.js';
 import { formatCents } from '../sgqr/amount.js';
 import { escapeMarkdown } from './payer-label.js';
+
+const PAYMENT_STATUS_DISPLAY: Record<PaymentStatus, { icon: string; label: string }> = {
+  pending: { icon: '⏳', label: 'Pending' },
+  received: { icon: '✅', label: 'Received' },
+  voided: { icon: '🚫', label: 'Voided' },
+};
 
 export class PaymentsCommandHandler {
   private repository: Repository;
@@ -103,10 +109,9 @@ export class PaymentsCommandHandler {
     const keyboard = new InlineKeyboard();
 
     for (const payment of sorted) {
-      const statusIcon = payment.status === 'pending' ? '⏳' : '✅';
+      const { icon: statusIcon, label: status } = PAYMENT_STATUS_DISPLAY[payment.status];
       const amount = `$${formatCents(payment.amountCents)}`;
       const date = this.formatDate(payment.createdAt);
-      const status = payment.status === 'pending' ? 'Pending' : 'Received';
 
       const payer = payment.payerName ? ` (${escapeMarkdown(payment.payerName)})` : '';
       lines.push(`${statusIcon} *${amount}* - ${payment.description}${payer}`);
@@ -117,7 +122,10 @@ export class PaymentsCommandHandler {
       if (payment.status === 'pending') {
         keyboard.add({ text: '✓ Received', callback_data: `mark_received:${payment.ref}` });
       }
-      keyboard.add({ text: 'Payback', callback_data: `payback:${payment.ref}` });
+      // Paybacks only make sense once the money is in; voided payments are view-only
+      if (payment.status === 'received') {
+        keyboard.add({ text: 'Payback', callback_data: `payback:${payment.ref}` });
+      }
       keyboard.row();
     }
 

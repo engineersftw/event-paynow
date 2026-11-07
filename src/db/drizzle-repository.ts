@@ -168,6 +168,13 @@ export class D1Repository implements Repository {
   ): Promise<Payment | null> {
     const receivedAt = status === 'received' ? timestamp : null;
 
+    // Receiving is a pending-only compare-and-set so it races cleanly against void
+    // (and duplicate taps): the loser gets null.
+    const where =
+      status === 'received'
+        ? and(eq(schema.payments.ref, ref), eq(schema.payments.status, 'pending'))
+        : eq(schema.payments.ref, ref);
+
     const updated = await this.db
       .update(schema.payments)
       .set({
@@ -175,7 +182,19 @@ export class D1Repository implements Repository {
         source,
         receivedAt,
       })
-      .where(eq(schema.payments.ref, ref))
+      .where(where)
+      .returning()
+      .get();
+
+    return updated ? toPayment(updated) : null;
+  }
+
+  /** Void a payment: pending-only compare-and-set; null if missing or no longer pending. */
+  async voidPayment(ref: string): Promise<Payment | null> {
+    const updated = await this.db
+      .update(schema.payments)
+      .set({ status: 'voided' })
+      .where(and(eq(schema.payments.ref, ref), eq(schema.payments.status, 'pending')))
       .returning()
       .get();
 
@@ -466,7 +485,7 @@ export class D1EventRepository implements EventRepository {
   async getEventStats(eventId: number): Promise<EventStats> {
     const result = await this.db
       .select({
-        paymentCount: sql<number>`COUNT(*)`,
+        paymentCount: sql<number>`COUNT(CASE WHEN status != 'voided' THEN 1 END)`,
         collectedCents: sql<number>`COALESCE(SUM(CASE WHEN status = 'received' THEN amount_cents ELSE 0 END), 0)`,
         pendingCents: sql<number>`COALESCE(SUM(CASE WHEN status = 'pending' THEN amount_cents ELSE 0 END), 0)`,
       })

@@ -191,7 +191,8 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     const flat = (photoKeyboard ?? []).flat();
     const byText = Object.fromEntries(flat.map((b) => [b.text, b.callback_data]));
     expect(byText['✓ Received']).toBe(`mark_received:${ref}`);
-    expect(byText.Payback).toBe(`payback:${ref}`);
+    expect(byText['✖ Void']).toBe(`void:${ref}`);
+    expect(Object.keys(byText)).toEqual(['✓ Received', '✖ Void']); // no Payback on a /start QR
   });
 
   it('re-prompts an invalid amount and creates nothing, then completes on a valid one', async () => {
