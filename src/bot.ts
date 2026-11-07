@@ -98,7 +98,12 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
       );
       return;
     }
-    if (data.startsWith('start_pick:') || data === 'start_skip_name') {
+    if (
+      data.startsWith('start_pick:') ||
+      data === 'start_skip_name' ||
+      data === 'start_confirm' ||
+      data === 'start_cancel'
+    ) {
       await new StartCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(
         ctx
       );

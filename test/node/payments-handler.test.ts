@@ -158,6 +158,48 @@ describe('PaymentsCommandHandler', () => {
       expect(text).toContain('*$15.00* - Lunch\n');
     });
 
+    it('lists voided payments as view-only and offers Payback only for received ones', async () => {
+      const base: Payment = {
+        id: 1,
+        ref: 'PAYP',
+        userId: 123456789,
+        eventId: 1,
+        description: 'Lunch',
+        amountCents: 1500,
+        payeeType: 'mobile',
+        payeeValue: '+6591234567',
+        status: 'pending',
+        source: 'manual',
+        qrPayload: 'payload1',
+        createdAt: '2024-01-15T12:30:00Z',
+        receivedAt: null,
+      };
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
+      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([
+        { ...base, ref: 'PAYP', createdAt: '2024-01-15T12:30:00Z' },
+        { ...base, id: 2, ref: 'PAYR', status: 'received', createdAt: '2024-01-14T12:30:00Z' },
+        { ...base, id: 3, ref: 'PAYV', status: 'voided', createdAt: '2024-01-13T12:30:00Z' },
+      ]);
+
+      await handler.handle(mockCtx, 'EVT-TEST0001');
+
+      const [text, opts] = vi.mocked(mockCtx.reply).mock.calls[0]! as [
+        string,
+        { reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> } },
+      ];
+      expect(text).toContain('⏳ *$15.00*');
+      expect(text).toContain('Ref: `PAYV` | Voided');
+      expect(text).toContain('🚫 *$15.00*');
+      const rows = opts.reply_markup.inline_keyboard
+        .map((r) => r.map((b) => b.callback_data))
+        .filter((r) => r.length > 0); // grammY leaves a trailing empty row
+      expect(rows).toEqual([
+        ['view:PAYP', 'mark_received:PAYP'],
+        ['view:PAYR', 'payback:PAYR'],
+        ['view:PAYV'],
+      ]);
+    });
+
     it('should show empty message when event has no payments', async () => {
       vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
       vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([]);

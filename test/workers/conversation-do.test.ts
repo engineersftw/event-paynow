@@ -340,6 +340,61 @@ describe('ConversationDO', () => {
     });
   });
 
+  describe('claim (atomic compare-and-reset)', () => {
+    const post = (path: string, body: unknown) =>
+      conversationDO.fetch(
+        new Request(`http://localhost${path}`, { method: 'POST', body: JSON.stringify(body) })
+      );
+    const seed = (flow: string, step: number, context: Record<string, unknown> = {}) =>
+      post('/state', { flow, step, context });
+
+    it('succeeds when flow and step match, returns the previous state and resets to idle', async () => {
+      await seed('start', 5, { amountCents: 1250 });
+
+      const res = await post('/claim', { flow: 'start', step: 5 });
+
+      expect(res.status).toBe(200);
+      const previous = (await res.json()) as ConversationState;
+      expect(previous.flow).toBe('start');
+      expect(previous.context.amountCents).toBe(1250);
+
+      const after = (await (
+        await conversationDO.fetch(new Request('http://localhost/state', { method: 'GET' }))
+      ).json()) as ConversationState;
+      expect(after.flow).toBe('idle');
+      expect(after.step).toBe(0);
+      expect(after.context).toEqual({});
+    });
+
+    it('returns 409 on a repeat claim', async () => {
+      await seed('start', 5);
+      expect((await post('/claim', { flow: 'start', step: 5 })).status).toBe(200);
+      expect((await post('/claim', { flow: 'start', step: 5 })).status).toBe(409);
+    });
+
+    it('returns 409 and leaves state untouched on a flow or step mismatch', async () => {
+      await seed('start', 4, { keep: true });
+
+      expect((await post('/claim', { flow: 'start', step: 5 })).status).toBe(409);
+      expect((await post('/claim', { flow: 'payback', step: 4 })).status).toBe(409);
+
+      const state = (await (
+        await conversationDO.fetch(new Request('http://localhost/state', { method: 'GET' }))
+      ).json()) as ConversationState;
+      expect(state.flow).toBe('start');
+      expect(state.step).toBe(4);
+      expect(state.context.keep).toBe(true);
+    });
+
+    it('returns 409 when no state has ever been stored, and 400 on a malformed body', async () => {
+      expect((await post('/claim', { flow: 'start', step: 5 })).status).toBe(409);
+      const bad = await conversationDO.fetch(
+        new Request('http://localhost/claim', { method: 'POST', body: 'not json' })
+      );
+      expect(bad.status).toBe(400);
+    });
+  });
+
   describe('concurrent access', () => {
     it('should serialize concurrent state updates', async () => {
       // Create initial state

@@ -14,6 +14,8 @@ describe('PaymentCallbackHandler', () => {
     mockRepository = {
       getPaymentByRef: vi.fn(),
       updatePaymentStatus: vi.fn(),
+      voidPayment: vi.fn(),
+      sumPaybacks: vi.fn(),
       listPaybacksByPayment: vi.fn(),
       getPaybackByRef: vi.fn(),
       updatePaybackStatus: vi.fn(),
@@ -232,6 +234,141 @@ describe('PaymentCallbackHandler', () => {
       expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
         text: '❌ Failed to update payment status',
       });
+    });
+  });
+
+  describe('handleCallback - Void', () => {
+    const base: Payment = {
+      id: 1,
+      ref: 'PAY123',
+      userId: 123456789,
+      amountCents: 1000,
+      status: 'pending',
+      createdAt: new Date().toISOString(),
+      description: 'Test payment',
+      payeeType: 'mobile',
+      payeeValue: '+6512345678',
+      payerType: 'mobile',
+      payerValue: '+6591234568',
+      payerName: 'Alice',
+      qrPayload: 'test-payload',
+      source: 'manual',
+      receivedAt: null,
+    };
+    const photoMessage = { chat: { id: 123456789 }, message_id: 77, photo: [] };
+
+    function tapVoid(payment: Payment, onPhoto = true) {
+      mockCtx.callbackQuery!.data = 'void:PAY123';
+      if (onPhoto) (mockCtx.callbackQuery as { message: unknown }).message = photoMessage;
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(payment);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(0);
+    }
+
+    it('voids a pending payment: status line with the payer name replaces the QR photo', async () => {
+      tapVoid(base);
+      vi.mocked(mockRepository.voidPayment).mockResolvedValue({ ...base, status: 'voided' });
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockRepository.voidPayment).toHaveBeenCalledWith('PAY123');
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({ text: '🚫 Payment voided' });
+      const line = vi.mocked(mockCtx.reply).mock.calls[0]![0] as string;
+      expect(line).toMatch(/^Test payment \/ SGD 10\.00 \/ PAY123 \/ Payer: Alice \/ 🚫 Voided /);
+      expect(line).not.toContain('91234568');
+      expect(mockCtx.api.deleteMessage).toHaveBeenCalledWith(123456789, 77);
+    });
+
+    it('still succeeds when the QR photo cannot be deleted', async () => {
+      tapVoid(base);
+      vi.mocked(mockRepository.voidPayment).mockResolvedValue({ ...base, status: 'voided' });
+      vi.mocked(mockCtx.api.deleteMessage).mockRejectedValue(new Error('too old'));
+
+      await expect(handler.handleCallback(mockCtx)).resolves.toBeUndefined();
+      expect(mockCtx.reply).toHaveBeenCalled();
+    });
+
+    it('refuses received, voided and payback-bearing payments without writing', async () => {
+      tapVoid({ ...base, status: 'received' });
+      await handler.handleCallback(mockCtx);
+      expect(mockCtx.answerCallbackQuery).toHaveBeenLastCalledWith({
+        text: '⚠️ Payment was already received — it can’t be voided',
+      });
+
+      tapVoid({ ...base, status: 'voided' });
+      await handler.handleCallback(mockCtx);
+      expect(mockCtx.answerCallbackQuery).toHaveBeenLastCalledWith({
+        text: '⚠️ Payment already voided',
+      });
+
+      tapVoid(base);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(500);
+      await handler.handleCallback(mockCtx);
+      expect(mockCtx.answerCallbackQuery).toHaveBeenLastCalledWith({
+        text: '⚠️ This payment has paybacks and can’t be voided',
+      });
+
+      expect(mockRepository.voidPayment).not.toHaveBeenCalled();
+      expect(mockCtx.reply).not.toHaveBeenCalled();
+    });
+
+    it('reports the winner when it loses a race against Received', async () => {
+      tapVoid(base);
+      vi.mocked(mockRepository.voidPayment).mockResolvedValue(null);
+      vi.mocked(mockRepository.getPaymentByRef)
+        .mockResolvedValueOnce(base)
+        .mockResolvedValueOnce({ ...base, status: 'received' });
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenLastCalledWith({
+        text: '⚠️ Payment was already received — it can’t be voided',
+      });
+      expect(mockCtx.reply).not.toHaveBeenCalled();
+      expect(mockCtx.api.deleteMessage).not.toHaveBeenCalled();
+    });
+
+    it('Received on a voided payment is refused, and a lost Received race says voided', async () => {
+      mockCtx.callbackQuery!.data = 'mark_received:PAY123';
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue({ ...base, status: 'voided' });
+      await handler.handleCallback(mockCtx);
+      expect(mockCtx.answerCallbackQuery).toHaveBeenLastCalledWith({
+        text: '⚠️ Payment was voided',
+      });
+      expect(mockRepository.updatePaymentStatus).not.toHaveBeenCalled();
+
+      // Pending when read, but Void wins before the guarded update
+      vi.mocked(mockRepository.getPaymentByRef)
+        .mockResolvedValueOnce(base)
+        .mockResolvedValueOnce({ ...base, status: 'voided' });
+      vi.mocked(mockRepository.updatePaymentStatus).mockResolvedValue(null);
+      await handler.handleCallback(mockCtx);
+      expect(mockCtx.answerCallbackQuery).toHaveBeenLastCalledWith({
+        text: '⚠️ Payment was voided',
+      });
+      expect(mockCtx.reply).not.toHaveBeenCalled();
+    });
+
+    it('Payback button is refused for pending and voided payments', async () => {
+      mockCtx.callbackQuery!.data = 'payback:PAY123';
+      for (const status of ['pending', 'voided'] as const) {
+        vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue({ ...base, status });
+        await handler.handleCallback(mockCtx);
+        expect(mockCtx.answerCallbackQuery).toHaveBeenLastCalledWith({
+          text: '⚠️ You can only create paybacks for received payments.',
+        });
+      }
+      expect(mockConversationDO.fetch).not.toHaveBeenCalled();
+      expect(mockCtx.reply).not.toHaveBeenCalled();
+    });
+
+    it('payment detail labels a voided payment', async () => {
+      mockCtx.callbackQuery!.data = 'view:PAY123';
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue({ ...base, status: 'voided' });
+      vi.mocked(mockRepository.listPaybacksByPayment).mockResolvedValue([]);
+
+      await handler.handleCallback(mockCtx);
+
+      expect(vi.mocked(mockCtx.editMessageText).mock.calls[0]![0]).toContain('*Status:* 🚫 Voided');
     });
   });
 

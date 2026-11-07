@@ -120,6 +120,17 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
 
     await bot.handleUpdate(textUpdate(userId, '12.50'));
 
+    // Summary first: nothing persisted and no QR until Confirm
+    expect(stub.lastText()).toContain('Confirm payment request');
+    expect(stub.lastText()).toContain('Payer: Alice (+6591234568)');
+    expect(stub.lastText()).toContain('Pay to: +6591234567');
+    expect(stub.lastText()).toContain('Amount: SGD 12.50');
+    expect(stub.sentPhotos).toHaveLength(0);
+    expect(await repo.listPaymentsByUser(userId)).toHaveLength(0);
+
+    await bot.handleUpdate(callbackUpdate(userId, 'start_confirm'));
+    expect(stub.editedMessages.at(-1)!.text).toContain('✅ Confirmed');
+
     // --- outbound sendPhoto captured --------------------------------------
     expect(stub.sentPhotos).toHaveLength(1);
     const photo = stub.sentPhotos[0]!;
@@ -180,7 +191,8 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     const flat = (photoKeyboard ?? []).flat();
     const byText = Object.fromEntries(flat.map((b) => [b.text, b.callback_data]));
     expect(byText['✓ Received']).toBe(`mark_received:${ref}`);
-    expect(byText.Payback).toBe(`payback:${ref}`);
+    expect(byText['✖ Void']).toBe(`void:${ref}`);
+    expect(Object.keys(byText)).toEqual(['✓ Received', '✖ Void']); // no Payback on a /start QR
   });
 
   it('re-prompts an invalid amount and creates nothing, then completes on a valid one', async () => {
@@ -198,6 +210,7 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(await repo.listPaymentsByUser(userId)).toHaveLength(0);
 
     await bot.handleUpdate(textUpdate(userId, '4.00'));
+    await bot.handleUpdate(callbackUpdate(userId, 'start_confirm'));
     expect(stub.sentPhotos).toHaveLength(1);
     expect(await repo.listPaymentsByUser(userId)).toHaveLength(1);
   });
@@ -214,6 +227,7 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     await bot.handleUpdate(textUpdate(userId, '91234568'));
     await bot.handleUpdate(callbackUpdate(userId, 'start_skip_name'));
     await bot.handleUpdate(textUpdate(userId, '4.00'));
+    await bot.handleUpdate(callbackUpdate(userId, 'start_confirm'));
 
     const ref = stub.sentPhotos[0]!.caption.split(' / ')[2]!;
     const payment = await repo.getPaymentByRef(ref);
@@ -246,6 +260,75 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
   });
 });
 
+describe('/start confirmation step (end-to-end)', () => {
+  /** Drive /start up to the summary (single event, payer + skipped name, given amount). */
+  async function toSummary(userId: number, amount = '12.50') {
+    const ctxs = makeStub(userId);
+    const event = await seedEvent(ctxs.repo, userId);
+    await ctxs.bot.handleUpdate(textUpdate(userId, '/start'));
+    await ctxs.bot.handleUpdate(textUpdate(userId, '91234568'));
+    await ctxs.bot.handleUpdate(callbackUpdate(userId, 'start_skip_name'));
+    await ctxs.bot.handleUpdate(textUpdate(userId, amount));
+    return { ...ctxs, event };
+  }
+
+  it('double Confirm (concurrent taps) creates exactly one payment and one QR', async () => {
+    const userId = 500000500;
+    const { repo, bot } = await toSummary(userId);
+    expect(stub.sentPhotos).toHaveLength(0);
+
+    await Promise.all([
+      bot.handleUpdate(callbackUpdate(userId, 'start_confirm', 500, 10)),
+      bot.handleUpdate(callbackUpdate(userId, 'start_confirm', 500, 11)),
+      bot.handleUpdate(callbackUpdate(userId, 'start_confirm', 500, 12)),
+    ]);
+
+    expect(await repo.listPaymentsByUser(userId)).toHaveLength(1);
+    expect(stub.sentPhotos).toHaveLength(1);
+    expect(stub.callbackAnswers.filter((t) => t.includes('Already processed'))).toHaveLength(2);
+  });
+
+  it('Cancel button creates nothing and a later Confirm is rejected', async () => {
+    const userId = 500000510;
+    const { repo, bot } = await toSummary(userId);
+
+    await bot.handleUpdate(callbackUpdate(userId, 'start_cancel'));
+    expect(stub.editedMessages.at(-1)!.text).toBe('❌ Start cancelled. No payment was created.');
+    expect(await readDoFlow(userId)).toBe('idle');
+
+    await bot.handleUpdate(callbackUpdate(userId, 'start_confirm'));
+    expect(stub.callbackAnswers.at(-1)).toContain('Already processed or expired');
+    expect(await repo.listPaymentsByUser(userId)).toHaveLength(0);
+    expect(stub.sentPhotos).toHaveLength(0);
+  });
+
+  it('typed cancel at the summary creates nothing; other text is nudged', async () => {
+    const userId = 500000520;
+    const { repo, bot } = await toSummary(userId);
+
+    await bot.handleUpdate(textUpdate(userId, '99'));
+    expect(stub.lastText()).toContain('tap Confirm or Cancel');
+    expect(await readDoFlow(userId)).toBe('start');
+
+    await bot.handleUpdate(textUpdate(userId, 'cancel'));
+    expect(stub.lastText()).toContain('Start cancelled');
+    expect(await repo.listPaymentsByUser(userId)).toHaveLength(0);
+    expect(stub.sentPhotos).toHaveLength(0);
+  });
+
+  it('Confirm after the event was closed creates nothing', async () => {
+    const userId = 500000530;
+    const { repo, bot, event } = await toSummary(userId);
+    await new D1EventRepository(env.paynow_db).closeEvent(event.ref, T0);
+
+    await bot.handleUpdate(callbackUpdate(userId, 'start_confirm'));
+
+    expect(stub.lastText()).toContain('event is closed');
+    expect(await repo.listPaymentsByUser(userId)).toHaveLength(0);
+    expect(stub.sentPhotos).toHaveLength(0);
+  });
+});
+
 describe('payee snapshot immutability (task 5.4)', () => {
   it('a later /init rewrite leaves the stored payment row and qr_payload unchanged', async () => {
     const userId = 500000400;
@@ -257,6 +340,7 @@ describe('payee snapshot immutability (task 5.4)', () => {
     await bot.handleUpdate(textUpdate(userId, '91234568'));
     await bot.handleUpdate(callbackUpdate(userId, 'start_skip_name'));
     await bot.handleUpdate(textUpdate(userId, '25.00'));
+    await bot.handleUpdate(callbackUpdate(userId, 'start_confirm'));
     expect(stub.sentPhotos).toHaveLength(1);
     const ref = stub.sentPhotos[0]!.caption.split(' / ')[2]!;
 

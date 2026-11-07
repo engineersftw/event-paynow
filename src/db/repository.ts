@@ -8,7 +8,7 @@
 // ============================================================================
 
 export type PayeeType = 'mobile' | 'uen';
-export type PaymentStatus = 'pending' | 'received';
+export type PaymentStatus = 'pending' | 'received' | 'voided';
 export type PaybackStatus = 'pending' | 'sent' | 'cancelled';
 export type ReceiptSource = 'manual' | 'notification';
 export type EventStatus = 'open' | 'closed';
@@ -126,6 +126,8 @@ export interface Repository {
     source: ReceiptSource,
     timestamp: string
   ): Promise<Payment | null>;
+  /** Pending → voided compare-and-set. Returns null if missing or no longer pending. */
+  voidPayment(ref: string): Promise<Payment | null>;
 
   // Paybacks
   createPayback(

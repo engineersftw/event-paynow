@@ -52,6 +52,14 @@ class MockRepository implements Repository {
     return updated;
   }
 
+  async voidPayment(ref: string): Promise<Payment | null> {
+    const current = this.payments.get(ref);
+    if (current?.status !== 'pending') return null;
+    const updated: Payment = { ...current, status: 'voided' };
+    this.payments.set(ref, updated);
+    return updated;
+  }
+
   // Other repository methods not needed for payment service tests
   async upsertUser(): Promise<User> {
     throw new Error('Not implemented');
@@ -101,6 +109,14 @@ describe('PaymentService', () => {
   });
 
   describe('markPaymentReceived', () => {
+    it('does not transition a voided payment', async () => {
+      await seedPayment(repo, 'VOID123456', 5000);
+      await repo.voidPayment('VOID123456');
+
+      expect(await service.markPaymentReceived('VOID123456', 'manual')).toBeNull();
+      expect((await repo.getPaymentByRef('VOID123456'))!.status).toBe('voided');
+    });
+
     it('should transition payment from pending to received', async () => {
       // Arrange
       await seedPayment(repo, 'ABC1234567', 5000);

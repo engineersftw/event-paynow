@@ -69,6 +69,9 @@ export class PaymentCallbackHandler {
         case 'payback':
           await this.handlePayback(ctx, payment);
           break;
+        case 'void':
+          await this.handleVoid(ctx, payment);
+          break;
         case 'pb_sent':
         case 'pb_cancel': {
           const paybackRef = parts[2];
@@ -139,7 +142,7 @@ export class PaymentCallbackHandler {
       ...(payment.payerValue
         ? [`*Payer:* ${payerLabel(payment.payerName, payment.payerValue)}`]
         : []),
-      `*Status:* ${payment.status === 'pending' ? '⏳ Pending' : '✅ Received'}`,
+      `*Status:* ${{ pending: '⏳ Pending', received: '✅ Received', voided: '🚫 Voided' }[payment.status]}`,
       `*Created:* ${this.formatDate(payment.createdAt)}`,
     ];
 
@@ -225,6 +228,10 @@ export class PaymentCallbackHandler {
       await ctx.answerCallbackQuery({ text: '⚠️ Payment already marked as received' });
       return;
     }
+    if (payment.status === 'voided') {
+      await ctx.answerCallbackQuery({ text: '⚠️ Payment was voided' });
+      return;
+    }
 
     // Update payment status
     const timestamp = new Date().toISOString();
@@ -236,7 +243,16 @@ export class PaymentCallbackHandler {
     );
 
     if (!updatedPayment) {
-      await ctx.answerCallbackQuery({ text: '❌ Failed to update payment status' });
+      // Lost a race against a concurrent Received/Void tap — report the state that won.
+      const current = await this.repository.getPaymentByRef(payment.ref);
+      await ctx.answerCallbackQuery({
+        text:
+          current?.status === 'voided'
+            ? '⚠️ Payment was voided'
+            : current?.status === 'received'
+              ? '⚠️ Payment already marked as received'
+              : '❌ Failed to update payment status',
+      });
       return;
     }
 
@@ -343,9 +359,78 @@ export class PaymentCallbackHandler {
   }
 
   /**
+   * Handle "Void" callback: pending-only compare-and-set (races cleanly against ✓ Received).
+   * On the QR photo it is replaced by a status line like ✓ Received does; in the detail
+   * view the view re-renders in place.
+   */
+  private async handleVoid(ctx: Context, payment: Payment): Promise<void> {
+    if (payment.status === 'voided') {
+      await ctx.answerCallbackQuery({ text: '⚠️ Payment already voided' });
+      return;
+    }
+    if (payment.status === 'received') {
+      await ctx.answerCallbackQuery({
+        text: '⚠️ Payment was already received — it can’t be voided',
+      });
+      return;
+    }
+    if ((await this.repository.sumPaybacks(payment.id)) > 0) {
+      await ctx.answerCallbackQuery({ text: '⚠️ This payment has paybacks and can’t be voided' });
+      return;
+    }
+
+    const voided = await this.repository.voidPayment(payment.ref);
+    if (!voided) {
+      // Lost the race against ✓ Received (or another Void)
+      const current = await this.repository.getPaymentByRef(payment.ref);
+      await ctx.answerCallbackQuery({
+        text:
+          current?.status === 'received'
+            ? '⚠️ Payment was already received — it can’t be voided'
+            : current?.status === 'voided'
+              ? '⚠️ Payment already voided'
+              : '❌ Failed to void the payment',
+      });
+      return;
+    }
+
+    await ctx.answerCallbackQuery({ text: '🚫 Payment voided' });
+
+    const message = ctx.callbackQuery?.message;
+    if (message && 'photo' in message) {
+      await ctx.reply(
+        [
+          payment.description,
+          `SGD ${formatCents(payment.amountCents)}`,
+          payment.ref,
+          ...captionPart('Payer', payment.payerName),
+          `🚫 Voided ${this.formatDate(new Date().toISOString())}`,
+        ].join(' / ')
+      );
+      try {
+        await ctx.api.deleteMessage(message.chat.id, message.message_id);
+      } catch (error) {
+        // The void and status line are already committed; a stale QR photo is harmless.
+        console.error('Failed to delete voided payment QR message:', error);
+      }
+      return;
+    }
+
+    await this.renderDetails(ctx, voided);
+  }
+
+  /**
    * Handle "Payback" callback
    */
   private async handlePayback(ctx: Context, payment: Payment): Promise<void> {
+    // Same rule as /payback <ref>; also neutralises stale Payback buttons on old messages
+    if (payment.status !== 'received') {
+      await ctx.answerCallbackQuery({
+        text: '⚠️ You can only create paybacks for received payments.',
+      });
+      return;
+    }
+
     await ctx.answerCallbackQuery({ text: '🔄 Starting payback flow...' });
     // Same seeding and prompts as /payback <ref> (stored payer → confirm / change)
     await new PaybackCommandHandler(this.conversationDO, this.repository).beginFlow(ctx, payment);

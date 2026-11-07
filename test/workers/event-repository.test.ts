@@ -1,6 +1,6 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
-import { D1EventRepository } from '../../src/db/drizzle-repository';
+import { D1EventRepository, D1Repository } from '../../src/db/drizzle-repository';
 
 describe('D1EventRepository', () => {
   let repo: D1EventRepository;
@@ -29,7 +29,7 @@ describe('D1EventRepository', () => {
         amount_cents INTEGER NOT NULL,
         payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
         payee_value TEXT NOT NULL,
-        status TEXT NOT NULL CHECK(status IN ('pending', 'received')),
+        status TEXT NOT NULL CHECK(status IN ('pending', 'received', 'voided')),
         source TEXT NOT NULL CHECK(source IN ('manual', 'notification')),
         qr_payload TEXT NOT NULL,
         payer_type TEXT,
@@ -339,6 +339,42 @@ describe('D1EventRepository', () => {
       expect(stats.paymentCount).toBe(0);
       expect(stats.collectedCents).toBe(0);
       expect(stats.pendingCents).toBe(0);
+    });
+
+    it('excludes voided payments from the count and both totals', async () => {
+      const chatId = 1001;
+      const event = await repo.createEvent({
+        ref: 'EVT-STATS1',
+        chatId,
+        topicId: 0,
+        name: 'With Voids',
+        payeeType: 'mobile',
+        payeeValue: '+6591234567',
+        status: 'open',
+        timestamp: testTimestamp,
+      });
+      const payments = new D1Repository(env.paynow_db);
+      const make = (ref: string, amountCents: number, status: 'pending' | 'received' | 'voided') =>
+        payments.createPayment({
+          ref,
+          userId: chatId,
+          eventId: event.id,
+          description: 'With Voids',
+          amountCents,
+          payeeType: 'mobile',
+          payeeValue: '+6591234567',
+          status,
+          source: 'manual',
+          qrPayload: 'x',
+          timestamp: testTimestamp,
+        });
+      await make('STAT-R1', 1000, 'received');
+      await make('STAT-P1', 500, 'pending');
+      await make('STAT-V1', 700, 'voided');
+
+      const stats = await repo.getEventStats(event.id);
+
+      expect(stats).toEqual({ paymentCount: 2, collectedCents: 1000, pendingCents: 500 });
     });
   });
 });

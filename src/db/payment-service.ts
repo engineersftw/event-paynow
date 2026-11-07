@@ -27,8 +27,8 @@ export function createPaymentService(repo: Repository): PaymentService {
         return null;
       }
 
-      // Already received - duplicate request
-      if (payment.status === 'received') {
+      // Already received (duplicate request) or voided - nothing to transition
+      if (payment.status !== 'pending') {
         return null;
       }
 

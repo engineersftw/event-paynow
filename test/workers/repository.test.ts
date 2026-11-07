@@ -42,7 +42,7 @@ beforeAll(async () => {
       amount_cents INTEGER NOT NULL,
       payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
       payee_value TEXT NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('pending', 'received')),
+      status TEXT NOT NULL CHECK(status IN ('pending', 'received', 'voided')),
       source TEXT NOT NULL CHECK(source IN ('manual', 'notification')),
       qr_payload TEXT NOT NULL,
       payer_type TEXT,
@@ -276,6 +276,76 @@ describe('D1Repository', () => {
       expect(updated!.status).toBe('received');
       expect(updated!.source).toBe('manual');
       expect(updated!.receivedAt).toBe('2024-01-02T00:00:00Z');
+    });
+
+    describe('voidPayment', () => {
+      it('voids a pending payment and keeps the record', async () => {
+        const input = makePayment();
+        await repo.createPayment({ ...input, timestamp: testTimestamp });
+
+        const voided = await repo.voidPayment(input.ref);
+
+        expect(voided!.status).toBe('voided');
+        expect(voided!.receivedAt).toBeNull();
+        expect((await repo.getPaymentByRef(input.ref))!.status).toBe('voided');
+      });
+
+      it('returns null for unknown, received and already-voided payments', async () => {
+        expect(await repo.voidPayment('nope')).toBeNull();
+
+        const received = makePayment();
+        await repo.createPayment({ ...received, timestamp: testTimestamp });
+        await repo.updatePaymentStatus(received.ref, 'received', 'manual', testTimestamp);
+        expect(await repo.voidPayment(received.ref)).toBeNull();
+        expect((await repo.getPaymentByRef(received.ref))!.status).toBe('received');
+
+        const pending = makePayment();
+        await repo.createPayment({ ...pending, timestamp: testTimestamp });
+        expect(await repo.voidPayment(pending.ref)).not.toBeNull();
+        expect(await repo.voidPayment(pending.ref)).toBeNull();
+      });
+
+      it('a voided payment cannot be marked received', async () => {
+        const input = makePayment();
+        await repo.createPayment({ ...input, timestamp: testTimestamp });
+        await repo.voidPayment(input.ref);
+
+        const updated = await repo.updatePaymentStatus(
+          input.ref,
+          'received',
+          'manual',
+          testTimestamp
+        );
+
+        expect(updated).toBeNull();
+        expect((await repo.getPaymentByRef(input.ref))!.status).toBe('voided');
+      });
+
+      it('Received and Void race: exactly one wins', async () => {
+        const input = makePayment();
+        await repo.createPayment({ ...input, timestamp: testTimestamp });
+
+        const [received, voided] = await Promise.all([
+          repo.updatePaymentStatus(input.ref, 'received', 'manual', testTimestamp),
+          repo.voidPayment(input.ref),
+        ]);
+
+        expect([received, voided].filter(Boolean)).toHaveLength(1);
+        const finalStatus = (await repo.getPaymentByRef(input.ref))!.status;
+        expect(finalStatus).toBe(received ? 'received' : 'voided');
+      });
+
+      it('receiving twice yields one winner (duplicate taps)', async () => {
+        const input = makePayment();
+        await repo.createPayment({ ...input, timestamp: testTimestamp });
+
+        const results = await Promise.all([
+          repo.updatePaymentStatus(input.ref, 'received', 'manual', testTimestamp),
+          repo.updatePaymentStatus(input.ref, 'received', 'manual', testTimestamp),
+        ]);
+
+        expect(results.filter(Boolean)).toHaveLength(1);
+      });
     });
 
     it('updates payment status from notification source', async () => {

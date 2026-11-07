@@ -165,6 +165,42 @@ describe('Migration 0000_initial_schema.sql', () => {
     db.close();
   });
 
+  it('0004 widens payments.status to allow voided and keeps every column of existing rows', () => {
+    const db = new Database(':memory:');
+    const run = (file: string) => {
+      for (const stmt of readFileSync(join(__dirname, `../../drizzle/${file}`), 'utf-8').split(
+        '--> statement-breakpoint'
+      )) {
+        if (stmt.trim()) db.exec(stmt.trim());
+      }
+    };
+    for (const f of [
+      '0000_initial_schema.sql',
+      '0001_certain_albert_cleary.sql',
+      '0002_empty_rocket_racer.sql',
+      '0003_paybacks_cancelled_status.sql',
+    ]) {
+      run(f);
+    }
+    const insert = db.prepare(
+      `INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at, received_at, event_id, payer_type, payer_value, payer_name)
+       VALUES (?, 7, 'Dinner', 1250, 'mobile', '+6591234567', ?, 'manual', 'payload', '2024-01-01', ?, ?, ?, ?, ?)`
+    );
+    insert.run('p1', 'pending', null, 3, 'mobile', '+6591234568', 'Alice');
+    insert.run('p2', 'received', '2024-01-02', null, null, null, null); // legacy row
+    const before = db.prepare('SELECT * FROM payments ORDER BY id').all();
+
+    run('0004_payments_voided_status.sql');
+
+    expect(db.prepare('SELECT * FROM payments ORDER BY id').all()).toEqual(before);
+    insert.run('p3', 'voided', null, 3, 'mobile', '+6591234568', 'Alice');
+    expect(() => insert.run('p4', 'bogus', null, 3, null, null, null)).toThrow(
+      /CHECK constraint failed/i
+    );
+    expect(() => insert.run('p1', 'pending', null, 3, null, null, null)).toThrow(/UNIQUE/i);
+    db.close();
+  });
+
   it('0003 widens paybacks.status to allow cancelled and keeps existing rows', () => {
     const db = new Database(':memory:');
     const run = (file: string) => {

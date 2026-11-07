@@ -6,7 +6,7 @@ import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
-import { captionPart } from './payer-label.js';
+import { captionPart, plainPayerLabel } from './payer-label.js';
 
 const SHARE_HINT = 'Forward this message to share';
 const MAX_PAYER_NAME = 40;
@@ -24,6 +24,21 @@ function amountPrompt(payerLabel: string): string {
     `Payer: ${payerLabel}\n\n` +
     '💵 Enter the amount in dollars (e.g. 12.50).\n\n' +
     'Up to 2 decimals; the QR will be locked to this amount.'
+  );
+}
+
+/** Plain-text confirmation summary for step 5 (nothing is persisted until Confirm). */
+function summaryText(context: Record<string, unknown>): string {
+  const payer = plainPayerLabel(
+    context.payerName as string | undefined,
+    context.payerValue as string
+  );
+  return (
+    '🧾 Confirm payment request\n\n' +
+    `Event: ${context.eventName as string}\n` +
+    `Payer: ${payer}\n` +
+    `Pay to: ${context.payeeValue as string}\n` +
+    `Amount: SGD ${formatCents(context.amountCents as number)}`
   );
 }
 
@@ -121,6 +136,10 @@ export class StartCommandHandler {
       case 4:
         await this.handleAmountInput(ctx, text, state);
         break;
+      case 5:
+        // Confirmation is button-driven; text input gets a nudge
+        await ctx.reply('⏳ Please tap Confirm or Cancel on the summary above.');
+        break;
       default:
         // Step 1 (pick event) is button-driven; text input gets a nudge
         await ctx.reply('⏳ Waiting for event selection. Please tap a button above.');
@@ -134,6 +153,12 @@ export class StartCommandHandler {
     const data = ctx.callbackQuery?.data;
     if (data === 'start_skip_name') {
       return this.handleSkipName(ctx);
+    }
+    if (data === 'start_confirm') {
+      return this.handleConfirm(ctx);
+    }
+    if (data === 'start_cancel') {
+      return this.handleCancelButton(ctx);
     }
     if (!data?.startsWith('start_pick:')) {
       return false;
@@ -256,7 +281,78 @@ export class StartCommandHandler {
       return;
     }
 
-    await this.createPaymentAndSendQr(ctx, state, amountCents);
+    try {
+      const event = await this.eventRepository.getEventByRef(state.context.eventRef as string);
+      if (event?.status !== 'open') {
+        await ctx.reply('❌ This event is closed. Run /init to open a new one.');
+        await this.resetState();
+        return;
+      }
+
+      const context = { ...state.context, amountCents, payeeValue: event.payeeValue };
+      await this.setState({
+        flow: 'start',
+        step: 5, // confirm
+        context,
+        lastActivity: new Date().toISOString(),
+      });
+
+      await ctx.reply(summaryText(context), {
+        reply_markup: new InlineKeyboard()
+          .text('✅ Confirm', 'start_confirm')
+          .text('❌ Cancel', 'start_cancel'),
+      });
+    } catch (error) {
+      console.error('Failed to prepare payment confirmation:', error);
+      await ctx.reply('❌ Something went wrong. Please enter the amount again:');
+    }
+  }
+
+  /** Confirm: claim the conversation atomically (one winner), then create the payment + QR. */
+  private async handleConfirm(ctx: Context): Promise<boolean> {
+    const claimed = await this.claimConfirmStep();
+    if (!claimed) {
+      await ctx.answerCallbackQuery({
+        text: '⚠️ Already processed or expired. Run /start again.',
+      });
+      return true;
+    }
+
+    await ctx.answerCallbackQuery({ text: 'Confirmed' });
+    await ctx.editMessageText(`${summaryText(claimed.context)}\n\n✅ Confirmed`, {
+      reply_markup: { inline_keyboard: [] },
+    });
+    await this.createPaymentAndSendQr(ctx, claimed, claimed.context.amountCents as number);
+    return true;
+  }
+
+  private async handleCancelButton(ctx: Context): Promise<boolean> {
+    const claimed = await this.claimConfirmStep();
+    if (!claimed) {
+      await ctx.answerCallbackQuery({ text: '⚠️ Already processed or expired.' });
+      return true;
+    }
+
+    await ctx.answerCallbackQuery({ text: 'Cancelled' });
+    await ctx.editMessageText('❌ Start cancelled. No payment was created.', {
+      reply_markup: { inline_keyboard: [] },
+    });
+    return true;
+  }
+
+  /** Atomically take the step-5 conversation (resets it to idle); null if someone else did. */
+  private async claimConfirmStep(): Promise<ConversationState | null> {
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/claim', {
+        method: 'POST',
+        body: JSON.stringify({ flow: 'start', step: 5 }),
+      })
+    );
+    if (response.status !== 200) {
+      await response.body?.cancel();
+      return null;
+    }
+    return (await response.json()) as ConversationState;
   }
 
   private async createPaymentAndSendQr(
@@ -271,8 +367,8 @@ export class StartCommandHandler {
     try {
       const event = await this.eventRepository.getEventByRef(eventRef);
       if (event?.status !== 'open') {
+        // State was already reset by the Confirm claim
         await ctx.reply('❌ This event is closed. Run /init to open a new one.');
-        await this.resetState();
         return;
       }
 
@@ -319,17 +415,16 @@ export class StartCommandHandler {
 
       const keyboard = new InlineKeyboard()
         .text('✓ Received', `mark_received:${payment.ref}`)
-        .text('Payback', `payback:${payment.ref}`);
+        .text('✖ Void', `void:${payment.ref}`);
 
       await ctx.replyWithPhoto(new InputFile(bmpBytes, 'paynow-qr.bmp'), {
         caption,
         reply_markup: keyboard,
       });
-
-      await this.resetState();
     } catch (error) {
       console.error('Failed to create payment:', error);
-      await ctx.reply('❌ Failed to create the payment. Please try again with a new amount:');
+      // The Confirm claim already ended the conversation, so a retry means a fresh /start
+      await ctx.reply('❌ Failed to create the payment. Please run /start again.');
     }
   }
 
