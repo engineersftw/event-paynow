@@ -410,14 +410,16 @@ describe('PaymentCallbackHandler', () => {
       expect(message).toContain('*Remaining:* $50.00');
       expect(message).toContain('Notification');
 
-      // Task 7.4: pending paybacks get a Mark-sent button; sent ones don't
+      // Pending paybacks get Mark-sent + Cancel buttons; sent ones don't
       const opts = vi.mocked(mockCtx.editMessageText).mock.calls[0]![1] as {
         reply_markup: { inline_keyboard: Array<Array<{ text: string; callback_data: string }>> };
       };
       const buttons = opts.reply_markup.inline_keyboard.flat();
-      expect(buttons).toHaveLength(1);
+      expect(buttons).toHaveLength(2);
       expect(buttons[0]!.callback_data).toBe('pb_sent:PAY123:PB2');
       expect(buttons[0]!.text).toContain('Mark sent: $20.00');
+      expect(buttons[1]!.callback_data).toBe('pb_cancel:PAY123:PB2');
+      expect(buttons[1]!.text).toContain('Cancel: $20.00');
     });
 
     it('should handle errors when loading payment details', async () => {
@@ -518,6 +520,121 @@ describe('PaymentCallbackHandler', () => {
         reply_markup: { inline_keyboard: unknown[][] };
       };
       expect(opts.reply_markup.inline_keyboard.flat()).toHaveLength(0);
+    });
+
+    describe('from the payback QR photo and cancel', () => {
+      const photoMessage = { chat: { id: 123456789 }, message_id: 77, photo: [] };
+
+      function viewingPhoto(data: string) {
+        setupPaybackView();
+        mockCtx.callbackQuery!.data = data;
+        (mockCtx.callbackQuery as { message: unknown }).message = photoMessage;
+      }
+
+      it('Sent on the QR photo replies with a status line and deletes the photo', async () => {
+        viewingPhoto('pb_sent:PAY123:PB2');
+        vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue({
+          ...pendingPayback,
+          status: 'sent',
+          sentAt: '2024-01-16T09:00:00Z',
+        });
+
+        await handler.handleCallback(mockCtx);
+
+        expect(mockCtx.reply).toHaveBeenCalledWith(
+          expect.stringMatching(/^Payback for PAY123 \/ SGD 20\.00 \/ PB2 \/ ✅ Sent /)
+        );
+        expect(mockCtx.api.deleteMessage).toHaveBeenCalledWith(123456789, 77);
+        expect(mockCtx.editMessageText).not.toHaveBeenCalled();
+      });
+
+      it('Cancel on the QR photo cancels, replies ❌ Cancelled and deletes the photo', async () => {
+        viewingPhoto('pb_cancel:PAY123:PB2');
+        vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue({
+          ...pendingPayback,
+          status: 'cancelled',
+        });
+
+        await handler.handleCallback(mockCtx);
+
+        expect(mockRepository.updatePaybackStatus).toHaveBeenCalledWith(
+          'PB2',
+          'cancelled',
+          expect.stringMatching(/^\d{4}-/)
+        );
+        expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({ text: '❌ Payback cancelled' });
+        expect(mockCtx.reply).toHaveBeenCalledWith(
+          'Payback for PAY123 / SGD 20.00 / PB2 / ❌ Cancelled'
+        );
+        expect(mockCtx.api.deleteMessage).toHaveBeenCalledWith(123456789, 77);
+      });
+
+      it('still succeeds when the photo cannot be deleted', async () => {
+        viewingPhoto('pb_cancel:PAY123:PB2');
+        vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue({
+          ...pendingPayback,
+          status: 'cancelled',
+        });
+        vi.mocked(mockCtx.api.deleteMessage).mockRejectedValue(new Error('too old'));
+
+        await expect(handler.handleCallback(mockCtx)).resolves.toBeUndefined();
+        expect(mockCtx.reply).toHaveBeenCalled();
+      });
+
+      it('Cancel from the detail view re-renders with the payback marked cancelled', async () => {
+        setupPaybackView();
+        mockCtx.callbackQuery!.data = 'pb_cancel:PAY123:PB2';
+        const cancelled = { ...pendingPayback, status: 'cancelled' as const };
+        vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue(cancelled);
+        vi.mocked(mockRepository.listPaybacksByPayment).mockResolvedValue([cancelled]);
+
+        await handler.handleCallback(mockCtx);
+
+        const message = vi.mocked(mockCtx.editMessageText).mock.calls[0]![0] as string;
+        expect(message).toContain('❌ $20.00 to 201234567A');
+        expect(message).toContain('(cancelled)');
+        expect(message).toContain('*Total Payback:* $0.00');
+        expect(message).toContain('*Remaining:* $100.00');
+        expect(mockCtx.reply).not.toHaveBeenCalled();
+      });
+
+      it('refuses to cancel a sent payback and changes nothing', async () => {
+        setupPaybackView();
+        mockCtx.callbackQuery!.data = 'pb_cancel:PAY123:PB2';
+        vi.mocked(mockRepository.getPaybackByRef).mockResolvedValue({
+          ...pendingPayback,
+          status: 'sent',
+          sentAt: '2024-01-16T09:00:00Z',
+        });
+
+        await handler.handleCallback(mockCtx);
+
+        expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+          text: '⚠️ Payback was already sent — it can’t be cancelled',
+        });
+        expect(mockRepository.updatePaybackStatus).not.toHaveBeenCalled();
+      });
+
+      it('refuses Sent on a cancelled payback and a repeat Cancel', async () => {
+        setupPaybackView();
+        vi.mocked(mockRepository.getPaybackByRef).mockResolvedValue({
+          ...pendingPayback,
+          status: 'cancelled',
+        });
+
+        mockCtx.callbackQuery!.data = 'pb_sent:PAY123:PB2';
+        await handler.handleCallback(mockCtx);
+        expect(mockCtx.answerCallbackQuery).toHaveBeenLastCalledWith({
+          text: '⚠️ Payback was cancelled',
+        });
+
+        mockCtx.callbackQuery!.data = 'pb_cancel:PAY123:PB2';
+        await handler.handleCallback(mockCtx);
+        expect(mockCtx.answerCallbackQuery).toHaveBeenLastCalledWith({
+          text: '⚠️ Payback already cancelled',
+        });
+        expect(mockRepository.updatePaybackStatus).not.toHaveBeenCalled();
+      });
     });
 
     it('reports not found when the payback ref is unknown', async () => {

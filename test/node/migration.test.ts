@@ -164,4 +164,44 @@ describe('Migration 0000_initial_schema.sql', () => {
 
     db.close();
   });
+
+  it('0003 widens paybacks.status to allow cancelled and keeps existing rows', () => {
+    const db = new Database(':memory:');
+    const run = (file: string) => {
+      for (const stmt of readFileSync(join(__dirname, `../../drizzle/${file}`), 'utf-8').split(
+        '--> statement-breakpoint'
+      )) {
+        if (stmt.trim()) db.exec(stmt.trim());
+      }
+    };
+    for (const f of [
+      '0000_initial_schema.sql',
+      '0001_certain_albert_cleary.sql',
+      '0002_empty_rocket_racer.sql',
+    ]) {
+      run(f);
+    }
+    db.prepare(
+      `INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at)
+       VALUES ('p1', 1, 'd', 1000, 'mobile', '+6512345678', 'received', 'manual', 'x', '2024-01-01')`
+    ).run();
+    const insert = db.prepare(
+      `INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at, sent_at)
+       VALUES (?, 1, 'mobile', '+6587654321', 500, ?, 'x', '2024-01-01', ?)`
+    );
+    insert.run('pb1', 'pending', null);
+    insert.run('pb2', 'sent', '2024-01-02');
+
+    run('0003_paybacks_cancelled_status.sql');
+
+    const rows = db.prepare('SELECT ref, status, sent_at FROM paybacks ORDER BY id').all();
+    expect(rows).toEqual([
+      { ref: 'pb1', status: 'pending', sent_at: null },
+      { ref: 'pb2', status: 'sent', sent_at: '2024-01-02' },
+    ]);
+    insert.run('pb3', 'cancelled', null);
+    expect(() => insert.run('pb4', 'bogus', null)).toThrow(/CHECK constraint failed/i);
+    expect(() => insert.run('pb1', 'pending', null)).toThrow(/UNIQUE/i); // index recreated
+    db.close();
+  });
 });

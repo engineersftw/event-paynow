@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreatePaybackBoundedResult,
@@ -233,7 +233,7 @@ export class D1Repository implements Repository {
          SELECT ?, ?, ?, ?, ?, ?, ?, ?
          WHERE (
            SELECT COALESCE(SUM(amount_cents), 0) FROM paybacks
-           WHERE payment_id = ?
+           WHERE payment_id = ? AND status != 'cancelled'
          ) + ? <= (SELECT amount_cents FROM payments WHERE id = ?)`
       )
       .bind(
@@ -256,7 +256,7 @@ export class D1Repository implements Repository {
       .prepare(
         `SELECT amount_cents AS paymentAmountCents,
                 (SELECT COALESCE(SUM(amount_cents), 0) FROM paybacks p
-                 WHERE p.payment_id = payments.id) AS paidBackCents
+                 WHERE p.payment_id = payments.id AND p.status != 'cancelled') AS paidBackCents
          FROM payments
          WHERE id = ?`
       )
@@ -328,9 +328,10 @@ export class D1Repository implements Repository {
   }
 
   /**
-   * Task 7.4: payback status transition. `pending → sent` is compare-and-set —
-   * the UPDATE only matches rows still `pending`, so duplicate or concurrent
-   * taps yield exactly one winner; everyone else gets null.
+   * Task 7.4: payback status transition. `pending → sent` and `pending → cancelled`
+   * are compare-and-set — the UPDATE only matches rows still `pending`, so duplicate
+   * or concurrent taps (including Sent vs Cancel) yield exactly one winner; everyone
+   * else gets null.
    */
   async updatePaybackStatus(
     ref: string,
@@ -340,9 +341,9 @@ export class D1Repository implements Repository {
     const sentAt = status === 'sent' ? timestamp : null;
 
     const where =
-      status === 'sent'
-        ? and(eq(schema.paybacks.ref, ref), eq(schema.paybacks.status, 'pending'))
-        : eq(schema.paybacks.ref, ref);
+      status === 'pending'
+        ? eq(schema.paybacks.ref, ref)
+        : and(eq(schema.paybacks.ref, ref), eq(schema.paybacks.status, 'pending'));
 
     const updated = await this.db
       .update(schema.paybacks)
@@ -374,7 +375,7 @@ export class D1Repository implements Repository {
         total: sql<number>`COALESCE(SUM(${schema.paybacks.amountCents}), 0)`,
       })
       .from(schema.paybacks)
-      .where(eq(schema.paybacks.paymentId, paymentId))
+      .where(and(eq(schema.paybacks.paymentId, paymentId), ne(schema.paybacks.status, 'cancelled')))
       .get();
 
     return result?.total ?? 0;

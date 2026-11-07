@@ -67,7 +67,7 @@ beforeAll(async () => {
       payer_type TEXT NOT NULL CHECK(payer_type IN ('mobile', 'uen')),
       payer_value TEXT NOT NULL,
       amount_cents INTEGER NOT NULL,
-      status TEXT NOT NULL CHECK(status IN ('pending', 'sent')),
+      status TEXT NOT NULL CHECK(status IN ('pending', 'sent', 'cancelled')),
       qr_payload TEXT NOT NULL,
       created_at TEXT NOT NULL,
       sent_at TEXT,
@@ -279,6 +279,60 @@ describe('createPaybackBounded (task 7.2)', () => {
     expect(again.paidBackCents).toBe(1250);
     expect(again.remainingCents).toBe(0);
     expect(await repo.listPaybacksByPayment(paymentId)).toHaveLength(1);
+  });
+
+  // ----------------------------------------------------------------------------
+  // Cancelled paybacks release their amount
+  // ----------------------------------------------------------------------------
+
+  it('cancelling a pending payback frees its amount for a new payback', async () => {
+    const paymentId = await seedPayment(1250);
+    const first = await repo.createPaybackBounded(paybackInput(paymentId, 1250));
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    const cancelled = await repo.updatePaybackStatus(first.payback.ref, 'cancelled', T0);
+    expect(cancelled!.status).toBe('cancelled');
+    expect(cancelled!.sentAt).toBeNull();
+    expect(await repo.sumPaybacks(paymentId)).toBe(0);
+
+    const again = await repo.createPaybackBounded(paybackInput(paymentId, 1250));
+    expect(again.ok).toBe(true);
+    if (!again.ok) return;
+    expect(again.remainingCents).toBe(0);
+    // history keeps the cancelled row
+    expect(await repo.listPaybacksByPayment(paymentId)).toHaveLength(2);
+  });
+
+  it('cancelled amounts are excluded from the over-bound totals too', async () => {
+    const paymentId = await seedPayment(1250);
+    const a = await repo.createPaybackBounded(paybackInput(paymentId, 500));
+    const b = await repo.createPaybackBounded(paybackInput(paymentId, 700));
+    if (!a.ok || !b.ok) throw new Error('setup');
+    await repo.updatePaybackStatus(a.payback.ref, 'cancelled', T0);
+
+    const over = await repo.createPaybackBounded(paybackInput(paymentId, 600));
+    expect(over.ok).toBe(false);
+    if (over.ok || over.reason !== 'over_bound') return;
+    expect(over.paidBackCents).toBe(700);
+    expect(over.remainingCents).toBe(550);
+  });
+
+  it('Sent and Cancel are mutually exclusive: only the first transition from pending wins', async () => {
+    const paymentId = await seedPayment(1250);
+    const created = await repo.createPaybackBounded(paybackInput(paymentId, 500));
+    if (!created.ok) throw new Error('setup');
+    const ref = created.payback.ref;
+
+    const [sent, cancelled] = await Promise.all([
+      repo.updatePaybackStatus(ref, 'sent', T0),
+      repo.updatePaybackStatus(ref, 'cancelled', T0),
+    ]);
+    expect([sent, cancelled].filter(Boolean)).toHaveLength(1);
+
+    // Neither terminal state can be changed afterwards
+    expect(await repo.updatePaybackStatus(ref, 'sent', T0)).toBeNull();
+    expect(await repo.updatePaybackStatus(ref, 'cancelled', T0)).toBeNull();
   });
 
   // ----------------------------------------------------------------------------

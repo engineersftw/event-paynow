@@ -700,6 +700,15 @@ describe('PaybackCommandHandler', () => {
         'Payback for PAY123 / SGD 5.50 / ABCDEFGHIJ / Scan to send the money back'
       );
 
+      // The QR photo carries Sent / Cancel actions bound to the new payback
+      const keyboard = (
+        photoOpts as { reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> } }
+      ).reply_markup.inline_keyboard.flat();
+      expect(keyboard.map((b) => b.callback_data)).toEqual([
+        'pb_sent:PAY123:ABCDEFGHIJ',
+        'pb_cancel:PAY123:ABCDEFGHIJ',
+      ]);
+
       // The reply echoes the stored row's reference, not the request input
       expect(mockCtx.editMessageText).toHaveBeenCalledWith(
         expect.stringContaining('Payback Recorded'),

@@ -306,14 +306,15 @@ describe('bot wiring (src/bot.ts)', () => {
       timestamp: T0,
     });
 
-    // 1. Open the detail view — pending payback gets a Mark-sent button
+    // 1. Open the detail view — pending payback gets Mark-sent + Cancel buttons
     await bot.handleUpdate(callbackUpdate(userId, 'view:WIRE-010'));
     const view = stub.editedMessages[0]!;
     expect(view.text).toContain('💸 *Paybacks:*');
     expect(view.text).toContain('⏳ $25.00 to +6598765432');
     const buttons = view.replyMarkup?.inline_keyboard.flat() ?? [];
-    expect(buttons).toHaveLength(1);
+    expect(buttons).toHaveLength(2);
     expect(buttons[0]!.callback_data).toBe('pb_sent:WIRE-010:WIRE-PB-010');
+    expect(buttons[1]!.callback_data).toBe('pb_cancel:WIRE-010:WIRE-PB-010');
 
     // 2. Tap "Mark sent"
     await bot.handleUpdate(callbackUpdate(userId, 'pb_sent:WIRE-010:WIRE-PB-010'));
@@ -373,5 +374,66 @@ describe('bot wiring (src/bot.ts)', () => {
     const stored = await repo.getPaymentByRef('WIRE-020');
     expect(stored!.payerValue).toBe('+6591234568');
     expect(stored!.payerName).toBe('Alice');
+  });
+
+  /** Drive /payback to the delivered QR photo and return the new payback's ref. */
+  async function createPaybackViaBot(
+    bot: ReturnType<typeof makeWiredBot>['bot'],
+    userId: number,
+    paymentRef: string,
+    amount: string
+  ): Promise<string> {
+    await bot.handleUpdate(textUpdate(userId, `/payback ${paymentRef}`));
+    await bot.handleUpdate(textUpdate(userId, '98765432'));
+    await bot.handleUpdate(callbackUpdate(userId, `payback_confirm_payer:${paymentRef}`));
+    await bot.handleUpdate(textUpdate(userId, amount));
+    await bot.handleUpdate(callbackUpdate(userId, `payback_confirm_amount:${paymentRef}`));
+    return stub.sentPhotos.at(-1)!.caption.split(' / ')[2]!;
+  }
+
+  it('payback QR photo has Sent/Cancel; Sent replaces the photo with a status line', async () => {
+    const userId = 800000030;
+    const { bot, repo } = makeWiredBot();
+    await seedPayment(repo, userId, 'WIRE-030', 10000, 'received');
+
+    const pbRef = await createPaybackViaBot(bot, userId, 'WIRE-030', '25.00');
+    const buttons = stub.sentPhotos.at(-1)!.replyMarkup?.inline_keyboard.flat() ?? [];
+    expect(buttons.map((b) => b.callback_data)).toEqual([
+      `pb_sent:WIRE-030:${pbRef}`,
+      `pb_cancel:WIRE-030:${pbRef}`,
+    ]);
+
+    await bot.handleUpdate(callbackUpdate(userId, `pb_sent:WIRE-030:${pbRef}`, 600, 20, true));
+
+    expect(stub.lastText()).toContain(`Payback for WIRE-030 / SGD 25.00 / ${pbRef} / ✅ Sent`);
+    expect(stub.deletedMessages).toHaveLength(1);
+    const row = await repo.getPaybackByRef(pbRef);
+    expect(row!.status).toBe('sent');
+    expect(row!.sentAt).not.toBeNull();
+
+    // Cancel after Sent is refused and nothing changes
+    await bot.handleUpdate(callbackUpdate(userId, `pb_cancel:WIRE-030:${pbRef}`, 600, 21, true));
+    expect(stub.callbackAnswers.at(-1)).toContain('can’t be cancelled');
+    expect((await repo.getPaybackByRef(pbRef))!.status).toBe('sent');
+  });
+
+  it('Cancel on the QR photo replaces it, frees the amount, and allows a full re-create', async () => {
+    const userId = 800000031;
+    const { bot, repo } = makeWiredBot();
+    const payment = await seedPayment(repo, userId, 'WIRE-031', 10000, 'received');
+
+    const pbRef = await createPaybackViaBot(bot, userId, 'WIRE-031', '100.00');
+    expect(await repo.sumPaybacks(payment.id)).toBe(10000);
+
+    await bot.handleUpdate(callbackUpdate(userId, `pb_cancel:WIRE-031:${pbRef}`, 600, 22, true));
+    expect(stub.lastText()).toBe(`Payback for WIRE-031 / SGD 100.00 / ${pbRef} / ❌ Cancelled`);
+    expect(stub.deletedMessages).toHaveLength(1);
+    expect((await repo.getPaybackByRef(pbRef))!.status).toBe('cancelled');
+    expect(await repo.sumPaybacks(payment.id)).toBe(0);
+
+    // The full amount can be paid back again
+    const again = await createPaybackViaBot(bot, userId, 'WIRE-031', '100.00');
+    expect(again).not.toBe(pbRef);
+    expect(await repo.sumPaybacks(payment.id)).toBe(10000);
   });
 });

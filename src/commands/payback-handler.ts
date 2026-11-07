@@ -485,6 +485,9 @@ export class PaybackCommandHandler {
         caption:
           `Payback for ${paymentRef} / SGD ${formatCents(result.payback.amountCents)} / ` +
           `${result.payback.ref} / Scan to send the money back`,
+        reply_markup: new InlineKeyboard()
+          .text('✓ Sent', `pb_sent:${paymentRef}:${result.payback.ref}`)
+          .text('✖ Cancel', `pb_cancel:${paymentRef}:${result.payback.ref}`),
       });
 
       await this.resetState();
