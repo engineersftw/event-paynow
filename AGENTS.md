@@ -55,7 +55,10 @@ See `docs/testing.md` for update-fixture replay and live dev bot setup.
 
 ## OpenSpec Workflow
 
-This project uses OpenSpec for change management. The current active change is `add-paynow-qr-telegram-bot`.
+This project uses OpenSpec for change management. Both changes are archived:
+
+1. `add-paynow-qr-telegram-bot` (29 tasks) — archived 2026-11-07
+2. `add-event-management` (22 tasks) — archived 2026-11-07
 
 **Workflow commands:**
 
@@ -63,12 +66,14 @@ This project uses OpenSpec for change management. The current active change is `
 - `/opsx-apply` — Implement tasks from a change
 - `/opsx-archive` — Archive a completed change
 
-**Artifacts location:** `openspec/changes/add-paynow-qr-telegram-bot/`
+**Artifacts location:** `openspec/changes/archive/<date>-<change-name>/`
 
 - `proposal.md` — What and why
 - `specs/<capability>/spec.md` — Behavioral specifications
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
+
+**Main specs:** `openspec/specs/<capability>/spec.md` (6 capabilities)
 
 ## Key Design Decisions
 
@@ -229,6 +234,6 @@ The repository layer provides infra-neutral interfaces for database operations:
 
 ## What's Next
 
-- Complete remaining test tasks (6.1-6.3) for event-management change
-- Apply the `add-event-management` change to production D1
 - README quick-start (BotFather setup, secrets, deploy commands)
+- Automated payment notification webhook (bank-side transaction correlation)
+- Multi-currency support, payment expiry, export history, admin dashboard
