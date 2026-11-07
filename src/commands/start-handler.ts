@@ -1,7 +1,7 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
 import { generateRef } from '../db/proxy-validation.js';
-import type { Event, EventRepository, Payment, Repository, User } from '../db/repository.js';
+import type { EventRepository, Payment, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
@@ -14,7 +14,11 @@ export class StartCommandHandler {
   private repository: Repository;
   private eventRepository: EventRepository;
 
-  constructor(conversationDO: ConversationDO, repository: Repository, eventRepository: EventRepository) {
+  constructor(
+    conversationDO: ConversationDO,
+    repository: Repository,
+    eventRepository: EventRepository
+  ) {
     this.conversationDO = conversationDO;
     this.repository = repository;
     this.eventRepository = eventRepository;
@@ -30,9 +34,7 @@ export class StartCommandHandler {
       const events = await this.eventRepository.listOpenEventsByChat(chatId, topicId);
 
       if (events.length === 0) {
-        await ctx.reply(
-          '❓ No open events.\n\nRun /init to create one first.'
-        );
+        await ctx.reply('❓ No open events.\n\nRun /init to create one first.');
         return;
       }
 
@@ -64,17 +66,12 @@ export class StartCommandHandler {
         // Show event picker
         const keyboard = new InlineKeyboard();
         for (const event of events) {
-          keyboard.text(
-            `${event.name} (${event.payeeValue})`,
-            `start_pick:${event.ref}`
-          ).row();
+          keyboard.text(`${event.name} (${event.payeeValue})`, `start_pick:${event.ref}`).row();
         }
 
-        await ctx.reply(
-          '🧾 New payment request.\n\n' +
-            'Which event is this payment for?',
-          { reply_markup: keyboard }
-        );
+        await ctx.reply('🧾 New payment request.\n\n' + 'Which event is this payment for?', {
+          reply_markup: keyboard,
+        });
       }
     } catch (error) {
       console.error('Failed to start payment flow:', error);
@@ -116,7 +113,7 @@ export class StartCommandHandler {
 
   async handleCallback(ctx: Context): Promise<boolean> {
     const data = ctx.callbackQuery?.data;
-    if (!data || !data.startsWith('start_pick:')) {
+    if (!data?.startsWith('start_pick:')) {
       return false;
     }
 
@@ -131,8 +128,10 @@ export class StartCommandHandler {
 
     // Verify event is still open
     const event = await this.eventRepository.getEventByRef(eventRef);
-    if (!event || event.status !== 'open') {
-      await ctx.answerCallbackQuery({ text: '❌ This event is closed. Run /init to open a new one.' });
+    if (event?.status !== 'open') {
+      await ctx.answerCallbackQuery({
+        text: '❌ This event is closed. Run /init to open a new one.',
+      });
       return true;
     }
 
@@ -182,12 +181,12 @@ export class StartCommandHandler {
     amountCents: number
   ): Promise<void> {
     const eventRef = state.context.eventRef as string;
-    const eventName = state.context.eventName as string;
+    const _eventName = state.context.eventName as string;
     const userId = ctx.from!.id;
 
     try {
       const event = await this.eventRepository.getEventByRef(eventRef);
-      if (!event || event.status !== 'open') {
+      if (event?.status !== 'open') {
         await ctx.reply('❌ This event is closed. Run /init to open a new one.');
         await this.resetState();
         return;

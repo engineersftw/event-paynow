@@ -5,7 +5,6 @@ import type {
   Event,
   EventRepository,
   EventStats,
-  EventStatus,
   Payback,
   PaybackStatus,
   Payment,
@@ -127,6 +126,7 @@ export class D1Repository implements Repository {
 
     const created = await this.db
       .insert(schema.payments)
+      // biome-ignore lint/suspicious/noExplicitAny: dynamic insert with optional eventId
       .values(values as any)
       .returning()
       .get();
@@ -381,11 +381,9 @@ export class D1Repository implements Repository {
 
 export class D1EventRepository implements EventRepository {
   private db: ReturnType<typeof drizzle>;
-  private d1: D1Database;
 
   constructor(d1: D1Database) {
     this.db = drizzle(d1, { schema });
-    this.d1 = d1;
   }
 
   async createEvent(
@@ -431,9 +429,7 @@ export class D1EventRepository implements EventRepository {
     const results = await this.db
       .select()
       .from(schema.events)
-      .where(
-        and(eq(schema.events.chatId, chatId), eq(schema.events.topicId, topicId))
-      )
+      .where(and(eq(schema.events.chatId, chatId), eq(schema.events.topicId, topicId)))
       .all();
 
     return results.map(toEvent);

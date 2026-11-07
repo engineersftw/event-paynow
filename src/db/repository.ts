@@ -96,7 +96,9 @@ export type CreatePaybackBoundedResult =
 // ============================================================================
 
 export interface EventRepository {
-  createEvent(event: Omit<Event, 'id' | 'createdAt' | 'closedAt'> & { timestamp: string }): Promise<Event>;
+  createEvent(
+    event: Omit<Event, 'id' | 'createdAt' | 'closedAt'> & { timestamp: string }
+  ): Promise<Event>;
   listOpenEventsByChat(chatId: number, topicId: number): Promise<Event[]>;
   listAllEventsByChat(chatId: number, topicId: number): Promise<Event[]>;
   getEventByRef(ref: string): Promise<Event | null>;

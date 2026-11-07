@@ -6,7 +6,7 @@ import { PaybackCommandHandler } from './commands/payback-handler';
 import { PaymentCallbackHandler } from './commands/payment-callback-handler';
 import { PaymentsCommandHandler } from './commands/payments-handler';
 import { StartCommandHandler } from './commands/start-handler';
-import { D1Repository, D1EventRepository } from './db/drizzle-repository';
+import { D1EventRepository, D1Repository } from './db/drizzle-repository';
 import type { Env } from './env';
 import type { ConversationDO } from './worker/conversation-do';
 
@@ -47,18 +47,26 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   bot.command('ping', (ctx) => ctx.reply('pong 🏓'));
   bot.command('help', (ctx) => ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' }));
 
-  bot.command('init', (ctx) => new InitCommandHandler(conversation(ctx), repository, eventRepository).start(ctx));
+  bot.command('init', (ctx) =>
+    new InitCommandHandler(conversation(ctx), repository, eventRepository).start(ctx)
+  );
 
-  bot.command('start', (ctx) => new StartCommandHandler(conversation(ctx), repository, eventRepository).start(ctx));
+  bot.command('start', (ctx) =>
+    new StartCommandHandler(conversation(ctx), repository, eventRepository).start(ctx)
+  );
 
-  bot.command('payments', (ctx) => new PaymentsCommandHandler(repository, eventRepository).handle(ctx));
+  bot.command('payments', (ctx) =>
+    new PaymentsCommandHandler(repository, eventRepository).handle(ctx)
+  );
 
   bot.command('payback', (ctx) => {
     const arg = typeof ctx.match === 'string' ? ctx.match.trim() : '';
     return new PaybackCommandHandler(conversation(ctx), repository).start(ctx, arg || undefined);
   });
 
-  bot.command('end_event', (ctx) => new EndEventHandler(conversation(ctx), eventRepository).start(ctx));
+  bot.command('end_event', (ctx) =>
+    new EndEventHandler(conversation(ctx), eventRepository).start(ctx)
+  );
 
   bot.command('cancel', async (ctx) => {
     // Generic abort: reset the per-chat conversation state. No flow writes
@@ -85,14 +93,22 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery?.data ?? '';
     if (data.startsWith('init_confirm:') || data.startsWith('init_cancel:')) {
-      await new InitCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(ctx);
+      await new InitCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(
+        ctx
+      );
       return;
     }
     if (data.startsWith('start_pick:')) {
-      await new StartCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(ctx);
+      await new StartCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(
+        ctx
+      );
       return;
     }
-    if (data.startsWith('end_pick:') || data.startsWith('end_confirm:') || data.startsWith('end_cancel:')) {
+    if (
+      data.startsWith('end_pick:') ||
+      data.startsWith('end_confirm:') ||
+      data.startsWith('end_cancel:')
+    ) {
       await new EndEventHandler(conversation(ctx), eventRepository).handleCallback(ctx);
       return;
     }

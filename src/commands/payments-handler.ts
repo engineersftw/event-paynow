@@ -1,7 +1,6 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
-import type { Payment, Repository } from '../db/repository.js';
-import type { EventRepository } from '../db/repository.js';
+import type { EventRepository, Repository } from '../db/repository.js';
 import { formatCents } from '../sgqr/amount.js';
 
 export class PaymentsCommandHandler {
@@ -90,9 +89,7 @@ export class PaymentsCommandHandler {
     const eventPayments = allPayments.filter((p) => p.eventId === event.id);
 
     if (eventPayments.length === 0) {
-      await ctx.reply(
-        `📭 No payments for event "${event.name}" yet.\n\nUse /start to create one!`
-      );
+      await ctx.reply(`📭 No payments for event "${event.name}" yet.\n\nUse /start to create one!`);
       return;
     }
 
@@ -128,14 +125,6 @@ export class PaymentsCommandHandler {
       parse_mode: 'Markdown',
       reply_markup: keyboard,
     });
-  }
-
-  /**
-   * Format amount in cents to dollars with 2 decimal places
-   */
-  private formatAmount(cents: number): string {
-    const dollars = cents / 100;
-    return `$${dollars.toFixed(2)}`;
   }
 
   /**

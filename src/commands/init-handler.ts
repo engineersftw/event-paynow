@@ -1,8 +1,7 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
-import { detectProxyType } from '../db/proxy-validation.js';
-import { generateRef } from '../db/proxy-validation.js';
-import type { Event, EventRepository, Repository } from '../db/repository.js';
+import { detectProxyType, generateRef } from '../db/proxy-validation.js';
+import type { EventRepository, Repository } from '../db/repository.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 
 /**
@@ -21,12 +20,14 @@ import type { ConversationDO, ConversationState } from '../worker/conversation-d
 
 export class InitCommandHandler {
   private conversationDO: ConversationDO;
-  private repository: Repository;
   private eventRepository: EventRepository;
 
-  constructor(conversationDO: ConversationDO, repository: Repository, eventRepository: EventRepository) {
+  constructor(
+    conversationDO: ConversationDO,
+    _repository: Repository,
+    eventRepository: EventRepository
+  ) {
     this.conversationDO = conversationDO;
-    this.repository = repository;
     this.eventRepository = eventRepository;
   }
 
@@ -44,7 +45,7 @@ export class InitCommandHandler {
     });
 
     await ctx.reply(
-      '👋 Let\'s create a new event.\n\n' +
+      "👋 Let's create a new event.\n\n" +
         'What\'s the event name? (e.g. "Dinner split", "Birthday party")\n\n' +
         'This will be used as the description on all payment QRs for this event.'
     );
@@ -88,9 +89,7 @@ export class InitCommandHandler {
   ): Promise<void> {
     const name = input.trim();
     if (!name || name.length > 50) {
-      await ctx.reply(
-        '❌ Event name must be between 1 and 50 characters. Please try again:'
-      );
+      await ctx.reply('❌ Event name must be between 1 and 50 characters. Please try again:');
       return;
     }
 
@@ -193,11 +192,11 @@ export class InitCommandHandler {
     proxy: { type: string; normalized: string },
     state: ConversationState
   ): Promise<void> {
-    const userId = state.context.userId as number;
+    const _userId = state.context.userId as number;
     const chatId = state.context.chatId as number;
     const topicId = state.context.topicId as number;
     const eventName = state.context.eventName as string;
-    const userName = state.context.userName as string;
+    const _userName = state.context.userName as string;
     const ref = generateRef();
 
     try {
@@ -229,10 +228,9 @@ export class InitCommandHandler {
       );
     } catch (error) {
       console.error('Failed to create event:', error);
-      await ctx.editMessageText(
-        `❌ Failed to create event. Please try again with /init.`,
-        { reply_markup: { inline_keyboard: [] } }
-      );
+      await ctx.editMessageText(`❌ Failed to create event. Please try again with /init.`, {
+        reply_markup: { inline_keyboard: [] },
+      });
     }
   }
 

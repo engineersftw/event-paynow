@@ -40,11 +40,9 @@ export class EndEventHandler {
           keyboard.text(event.name, `end_pick:${event.ref}`).row();
         }
 
-        await ctx.reply(
-          '🔒 Close an event.\n\n' +
-            'Which event would you like to close?',
-          { reply_markup: keyboard }
-        );
+        await ctx.reply('🔒 Close an event.\n\n' + 'Which event would you like to close?', {
+          reply_markup: keyboard,
+        });
       }
     } catch (error) {
       console.error('Failed to start end_event flow:', error);
@@ -77,7 +75,12 @@ export class EndEventHandler {
 
   async handleCallback(ctx: Context): Promise<boolean> {
     const data = ctx.callbackQuery?.data;
-    if (!data || (!data.startsWith('end_pick:') && !data.startsWith('end_confirm:') && !data.startsWith('end_cancel:'))) {
+    if (
+      !data ||
+      (!data.startsWith('end_pick:') &&
+        !data.startsWith('end_confirm:') &&
+        !data.startsWith('end_cancel:'))
+    ) {
       return false;
     }
 
@@ -94,7 +97,7 @@ export class EndEventHandler {
       if (!eventRef) return false;
 
       const event = await this.eventRepository.getEventByRef(eventRef);
-      if (!event || event.status !== 'open') {
+      if (event?.status !== 'open') {
         await ctx.answerCallbackQuery({ text: '❌ Event not found or already closed.' });
         return true;
       }
@@ -116,7 +119,7 @@ export class EndEventHandler {
       if (!eventRef) return false;
 
       const event = await this.eventRepository.getEventByRef(eventRef);
-      if (!event || event.status !== 'open') {
+      if (event?.status !== 'open') {
         await ctx.editMessageText('❌ Event not found or already closed.', {
           reply_markup: { inline_keyboard: [] },
         });
@@ -149,7 +152,10 @@ export class EndEventHandler {
     return false;
   }
 
-  private async proceedToConfirm(ctx: Context, event: { ref: string; name: string }): Promise<void> {
+  private async proceedToConfirm(
+    ctx: Context,
+    event: { ref: string; name: string }
+  ): Promise<void> {
     const stats = await this.eventRepository.getEventStats(
       (await this.eventRepository.getEventByRef(event.ref))!.id
     );

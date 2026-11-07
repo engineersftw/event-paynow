@@ -1,7 +1,6 @@
-import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { D1EventRepository } from '../../src/db/drizzle-repository';
-import type { EventRepository } from '../../src/db/repository';
 
 describe('D1EventRepository', () => {
   let repo: D1EventRepository;

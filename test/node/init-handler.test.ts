@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InitCommandHandler } from '../../src/commands/init-handler';
-import type { Event, EventRepository, Repository, User } from '../../src/db/repository';
+import type { Event, EventRepository, Repository } from '../../src/db/repository';
 import type { ConversationDO } from '../../src/worker/conversation-do';
 
 describe('/init command handler (event creation)', () => {
@@ -92,12 +92,8 @@ describe('/init command handler (event creation)', () => {
 
       expect(result).toBe(true);
       expect(mockConversationDO.fetch).toHaveBeenCalledTimes(2);
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Event: Dinner split')
-      );
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('mobile number')
-      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('Event: Dinner split'));
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('mobile number'));
     });
 
     it('should reject empty event name', async () => {
@@ -186,7 +182,13 @@ describe('/init command handler (event creation)', () => {
           json: async () => ({
             flow: 'init',
             step: 2,
-            context: { userId: 789, chatId: 123456, userName: 'John', topicId: 0, eventName: 'Dinner split' },
+            context: {
+              userId: 789,
+              chatId: 123456,
+              userName: 'John',
+              topicId: 0,
+              eventName: 'Dinner split',
+            },
             lastActivity: new Date().toISOString(),
           }),
         })
@@ -213,7 +215,13 @@ describe('/init command handler (event creation)', () => {
           json: async () => ({
             flow: 'init',
             step: 2,
-            context: { userId: 789, chatId: 123456, userName: 'John', topicId: 0, eventName: 'Dinner split' },
+            context: {
+              userId: 789,
+              chatId: 123456,
+              userName: 'John',
+              topicId: 0,
+              eventName: 'Dinner split',
+            },
             lastActivity: new Date().toISOString(),
           }),
         })
@@ -239,7 +247,13 @@ describe('/init command handler (event creation)', () => {
         json: async () => ({
           flow: 'init',
           step: 2,
-          context: { userId: 789, chatId: 123456, userName: 'John', topicId: 0, eventName: 'Dinner split' },
+          context: {
+            userId: 789,
+            chatId: 123456,
+            userName: 'John',
+            topicId: 0,
+            eventName: 'Dinner split',
+          },
           lastActivity: new Date().toISOString(),
         }),
       });
@@ -418,10 +432,9 @@ describe('/init command handler (event creation)', () => {
 
       expect(result).toBe(true);
       expect(mockEventRepository.createEvent).not.toHaveBeenCalled();
-      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('Cancelled'),
-        { reply_markup: { inline_keyboard: [] } }
-      );
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(expect.stringContaining('Cancelled'), {
+        reply_markup: { inline_keyboard: [] },
+      });
     });
 
     it('should reject expired session taps', async () => {
@@ -445,10 +458,9 @@ describe('/init command handler (event creation)', () => {
 
       expect(result).toBe(true);
       expect(mockEventRepository.createEvent).not.toHaveBeenCalled();
-      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
-        '❌ Session expired. Run /init again.',
-        { reply_markup: { inline_keyboard: [] } }
-      );
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith('❌ Session expired. Run /init again.', {
+        reply_markup: { inline_keyboard: [] },
+      });
     });
 
     it('should handle database errors gracefully on Confirm', async () => {

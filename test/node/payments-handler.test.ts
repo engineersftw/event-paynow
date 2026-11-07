@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PaymentsCommandHandler } from '../../src/commands/payments-handler';
-import type { Event, EventRepository, Payment, Repository, User } from '../../src/db/repository';
+import type { EventRepository, Payment, Repository, User } from '../../src/db/repository';
 
 describe('PaymentsCommandHandler', () => {
   let handler: PaymentsCommandHandler;
@@ -8,7 +8,7 @@ describe('PaymentsCommandHandler', () => {
   let mockEventRepository: EventRepository;
   let mockCtx: any;
 
-  const user: User = {
+  const _user: User = {
     telegramId: 123456789,
     payeeType: 'mobile',
     payeeValue: '+6591234567',
@@ -135,9 +135,7 @@ describe('PaymentsCommandHandler', () => {
 
       await handler.handle(mockCtx, 'EVT-TEST0001');
 
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining("No payments for event")
-      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('No payments for event'));
     });
 
     it('should handle non-existent event', async () => {

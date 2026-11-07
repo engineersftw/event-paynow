@@ -69,7 +69,7 @@ async function seedPayment(
 describe('bot wiring (src/bot.ts)', () => {
   it('/init conversation creates an event, unlocks /start, then /cancel aborts', async () => {
     const userId = 800000001;
-    const { bot, repo } = makeWiredBot();
+    const { bot } = makeWiredBot();
 
     await bot.handleUpdate(textUpdate(userId, '/init'));
     expect(stub.lastText()).toContain('create a new event');
@@ -119,8 +119,10 @@ describe('bot wiring (src/bot.ts)', () => {
       timestamp: T0,
     });
     // Seed an event for this user's chat
-    const eventRepo = new (await import('../../src/db/drizzle-repository')).D1EventRepository(env.paynow_db);
-    const event = await eventRepo.createEvent({
+    const eventRepo = new (await import('../../src/db/drizzle-repository')).D1EventRepository(
+      env.paynow_db
+    );
+    const _event = await eventRepo.createEvent({
       ref: 'EVT-WIRE002',
       chatId: userId,
       topicId: 0,

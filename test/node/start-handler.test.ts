@@ -1,9 +1,7 @@
 import type { Context } from 'grammy';
-import { InputFile } from 'grammy';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { StartCommandHandler } from '../../src/commands/start-handler.js';
 import type { Event, EventRepository, Repository } from '../../src/db/repository.js';
-import { buildPayNowPayload } from '../../src/sgqr/paynow.js';
 import type { ConversationDO } from '../../src/worker/conversation-do.js';
 
 describe('StartCommandHandler', () => {
@@ -30,7 +28,7 @@ describe('StartCommandHandler', () => {
     return { status: 200, json: async () => state } as unknown as Response;
   }
 
-  const okResponse = { status: 200 } as unknown as Response;
+  const _okResponse = { status: 200 } as unknown as Response;
 
   function lastReply(): string {
     const calls = vi.mocked(mockCtx.reply).mock.calls;
@@ -159,7 +157,13 @@ describe('StartCommandHandler', () => {
           json: async () => ({
             flow: 'start',
             step: 2,
-            context: { userId: 123456789, chatId: 123456789, topicId: 0, eventRef: 'EVT-TEST1234', eventName: 'Test Event' },
+            context: {
+              userId: 123456789,
+              chatId: 123456789,
+              topicId: 0,
+              eventRef: 'EVT-TEST1234',
+              eventName: 'Test Event',
+            },
             lastActivity: new Date().toISOString(),
           }),
         })
@@ -182,7 +186,13 @@ describe('StartCommandHandler', () => {
         json: async () => ({
           flow: 'start',
           step: 2,
-          context: { userId: 123456789, chatId: 123456789, topicId: 0, eventRef: 'EVT-TEST1234', eventName: 'Test Event' },
+          context: {
+            userId: 123456789,
+            chatId: 123456789,
+            topicId: 0,
+            eventRef: 'EVT-TEST1234',
+            eventName: 'Test Event',
+          },
           lastActivity: new Date().toISOString(),
         }),
       });

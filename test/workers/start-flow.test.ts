@@ -3,9 +3,7 @@ import { Bot } from 'grammy';
 import jsQR from 'jsqr';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { StartCommandHandler } from '../../src/commands/start-handler';
-import { D1Repository } from '../../src/db/drizzle-repository';
-import { D1EventRepository } from '../../src/db/drizzle-repository';
-import type { User } from '../../src/db/repository';
+import { D1EventRepository, D1Repository } from '../../src/db/drizzle-repository';
 import type { ConversationDO } from '../../src/worker/conversation-do';
 import { applyTestSchema, bmpToRgba, TEST_BOT_INFO, TelegramStub, textUpdate } from './harness';
 
@@ -55,7 +53,11 @@ function makeStub(userId: number) {
   return { repo, handler, bot };
 }
 
-async function seedEvent(repo: D1Repository, chatId: number, name: string = 'Dinner split'): Promise<any> {
+async function seedEvent(
+  _repo: D1Repository,
+  chatId: number,
+  name: string = 'Dinner split'
+): Promise<any> {
   // Need to use the event repository
   const eventRepo = new D1EventRepository(env.paynow_db);
   const ref = `EVT-${chatId}-${Math.random().toString(36).slice(2, 8)}`;
@@ -158,7 +160,7 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     const flat = (photoKeyboard ?? []).flat();
     const byText = Object.fromEntries(flat.map((b) => [b.text, b.callback_data]));
     expect(byText['✓ Received']).toBe(`mark_received:${ref}`);
-    expect(byText['Payback']).toBe(`payback:${ref}`);
+    expect(byText.Payback).toBe(`payback:${ref}`);
   });
 
   it('re-prompts an invalid amount and creates nothing, then completes on a valid one', async () => {
