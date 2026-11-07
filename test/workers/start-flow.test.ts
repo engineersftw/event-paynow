@@ -4,6 +4,7 @@ import jsQR from 'jsqr';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { StartCommandHandler } from '../../src/commands/start-handler';
 import { D1Repository } from '../../src/db/drizzle-repository';
+import { D1EventRepository } from '../../src/db/drizzle-repository';
 import type { User } from '../../src/db/repository';
 import type { ConversationDO } from '../../src/worker/conversation-do';
 import { applyTestSchema, bmpToRgba, TEST_BOT_INFO, TelegramStub, textUpdate } from './harness';
@@ -36,8 +37,9 @@ beforeEach(() => {
 
 function makeStub(userId: number) {
   const repo = new D1Repository(env.paynow_db);
+  const eventRepo = new D1EventRepository(env.paynow_db);
   const doStub = env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`chat-${userId}`));
-  const handler = new StartCommandHandler(doStub as unknown as ConversationDO, repo);
+  const handler = new StartCommandHandler(doStub as unknown as ConversationDO, repo, eventRepo);
 
   const bot = new Bot('test-secret-token', {
     botInfo: TEST_BOT_INFO,
@@ -53,12 +55,18 @@ function makeStub(userId: number) {
   return { repo, handler, bot };
 }
 
-async function seedPayeeUser(repo: D1Repository, telegramId: number): Promise<User> {
-  return repo.upsertUser({
-    telegramId,
+async function seedEvent(repo: D1Repository, chatId: number, name: string = 'Dinner split'): Promise<any> {
+  // Need to use the event repository
+  const eventRepo = new D1EventRepository(env.paynow_db);
+  const ref = `EVT-${chatId}-${Math.random().toString(36).slice(2, 8)}`;
+  return eventRepo.createEvent({
+    ref,
+    chatId,
+    topicId: 0,
+    name,
     payeeType: 'mobile',
     payeeValue: '+6591234567',
-    displayName: 'ACME PTE LTD',
+    status: 'open',
     timestamp: T0,
   });
 }
@@ -72,29 +80,26 @@ async function readDoFlow(userId: number): Promise<string> {
 }
 
 describe('/start end-to-end (task 5.3 stage a)', () => {
-  it('prompts an unconfigured user to run /init and creates nothing (5.1)', async () => {
+  it('prompts when no open events exist', async () => {
     const userId = 500000200;
     const { repo, bot } = makeStub(userId);
 
     await bot.handleUpdate(textUpdate(userId, '/start'));
 
     expect(stub.sentPhotos).toHaveLength(0);
-    expect(stub.lastText()).toContain('run /init first');
+    expect(stub.lastText()).toContain('No open events');
 
     // No payment created, conversation left idle
     expect(await repo.listPaymentsByUser(userId)).toHaveLength(0);
     expect(await readDoFlow(userId)).toBe('idle');
   });
 
-  it('/start → description → amount creates the payment and uploads a decodable QR (5.3)', async () => {
+  it('/start → amount creates the payment and uploads a decodable QR (5.3)', async () => {
     const userId = 500000100;
     const { repo, bot } = makeStub(userId);
-    await seedPayeeUser(repo, userId);
+    await seedEvent(repo, userId);
 
     await bot.handleUpdate(textUpdate(userId, '/start'));
-    expect(stub.lastText()).toContain('Enter a short description');
-
-    await bot.handleUpdate(textUpdate(userId, 'Dinner split'));
     expect(stub.lastText()).toContain('Enter the amount');
 
     await bot.handleUpdate(textUpdate(userId, '12.50'));
@@ -138,6 +143,7 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(payment!.amountCents).toBe(1250);
     expect(payment!.userId).toBe(userId);
     expect(payment!.description).toBe('Dinner split');
+    expect(payment!.eventId).not.toBeNull();
     expect(payment!.payeeType).toBe('mobile');
     expect(payment!.payeeValue).toBe('+6591234567');
     expect(await repo.listPaymentsByUser(userId)).toHaveLength(1);
@@ -158,7 +164,7 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
   it('re-prompts an invalid amount and creates nothing, then completes on a valid one', async () => {
     const userId = 500000150;
     const { repo, bot } = makeStub(userId);
-    await seedPayeeUser(repo, userId);
+    await seedEvent(repo, userId);
 
     await bot.handleUpdate(textUpdate(userId, '/start'));
     await bot.handleUpdate(textUpdate(userId, 'Coffee'));
@@ -176,7 +182,7 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
   it('/cancel mid-flow ends the conversation and writes nothing (5.2)', async () => {
     const userId = 500000300;
     const { repo, bot } = makeStub(userId);
-    await seedPayeeUser(repo, userId);
+    await seedEvent(repo, userId);
 
     await bot.handleUpdate(textUpdate(userId, '/start'));
     await bot.handleUpdate(textUpdate(userId, 'Lunch'));
@@ -198,11 +204,10 @@ describe('payee snapshot immutability (task 5.4)', () => {
   it('a later /init rewrite leaves the stored payment row and qr_payload unchanged', async () => {
     const userId = 500000400;
     const { repo, bot } = makeStub(userId);
-    await seedPayeeUser(repo, userId);
+    await seedEvent(repo, userId, 'Team photo');
 
     // Collect a payment via the live /start flow
     await bot.handleUpdate(textUpdate(userId, '/start'));
-    await bot.handleUpdate(textUpdate(userId, 'Team photo'));
     await bot.handleUpdate(textUpdate(userId, '25.00'));
     expect(stub.sentPhotos).toHaveLength(1);
     const ref = stub.sentPhotos[0]!.caption.split(' / ')[2]!;
@@ -236,7 +241,7 @@ describe('payee snapshot immutability (task 5.4)', () => {
 
     // And the payload still encodes the ORIGINAL payee + merchant name
     expect(after!.qrPayload).toContain('+6591234567');
-    expect(after!.qrPayload).toContain('ACME PTE LTD');
+    expect(after!.qrPayload).toContain('Team photo');
     expect(after!.qrPayload).not.toContain('201234567B');
     expect(after!.qrPayload).not.toContain('Renamed User');
   });

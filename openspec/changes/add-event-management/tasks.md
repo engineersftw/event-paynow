@@ -17,20 +17,20 @@
 
 ## 3. /start rewrite (pick event → amount)
 
-- [ ] 3.1 Rewrite `src/commands/start-handler.ts`: replace guard-with-description-then-amount with (a) fetch open events for `(chat_id, topic_id)`, (b) if 1 event → jump to amount; if N > 1 → inline button list; if 0 → "No open events" message, (c) amount step (existing `parseAmount` + `formatCents`), (d) on complete, `createPayment` with `event_id` set, event name as `description`, payee snapshot from event, build SGQR payload with event name as `description` option, render QR, sendPhoto with caption.
-- [ ] 3.2 Reject stale button taps for closed events: button callback re-reads event by ref, rejects if `status !== 'open'`.
+- [x] 3.1 Rewrite `src/commands/start-handler.ts`: replace guard-with-description-then-amount with (a) fetch open events for `(chat_id, topic_id)`, (b) if 1 event → jump to amount; if N > 1 → inline button list; if 0 → "No open events" message, (c) amount step (existing `parseAmount` + `formatCents`), (d) on complete, `createPayment` with `event_id` set, event name as `description`, payee snapshot from event, build SGQR payload with event name as `description` option, render QR, sendPhoto with caption.
+- [x] 3.2 Reject stale button taps for closed events: button callback re-reads event by ref, rejects if `status !== 'open'`.
 - [ ] 3.3 Workers-pool tests: single-event skip, multi-event pick, invalid amount re-prompt, cancel mid-flow, closed-event rejection via stale button, caption + DB row contain event name as description, QR payload uses event name as tag 62.01, payee snapshot from event not from user.
-- [ ] 3.4 Update `src/bot.ts` command routing: `/start` still wired, but free-text routing table updated to recognise the new `start-pick-event` / `start-amount` states.
+- [x] 3.4 Update `src/bot.ts` command routing: `/start` still wired, but free-text routing table updated to recognise the new `start-pick-event` / `start-amount` states.
 
 ## 4. /end_event (close event)
 
-- [ ] 4.1 New `src/commands/end-event-handler.ts`: `end-pick-event` → inline list of open events; `end-confirm` → echo event name + payment count + total; on confirm → `closeEvent(ref, ts)` CAS. Reply with summary (payments collected, pending).
+- [x] 4.1 New `src/commands/end-event-handler.ts`: `end-pick-event` → inline list of open events; `end-confirm` → echo event name + payment count + total; on confirm → `closeEvent(ref, ts)` CAS. Reply with summary (payments collected, pending).
 - [ ] 4.2 Workers-pool tests: close with mixed payment statuses, double-tap (second shows "already closed"), close event still has pending paybacks (paybacks still work against received payments), close event rejects new /start (spec scenario).
-- [ ] 4.3 Wire `/end_event` into `src/bot.ts` routing. Telegram requires underscores in command names — confirm `/end_event` registers and triggers.
+- [x] 4.3 Wire `/end_event` into `src/bot.ts` routing. Telegram requires underscores in command names — confirm `/end_event` registers and triggers.
 
 ## 5. /payments event-first
 
-- [ ] 5.1 Rewrite `src/commands/payments-handler.ts`: top-level lists events (open + closed, sorted by `created_at DESC`, up to 10) showing payment count + collected + pending. Each event button → drills into per-event payment list with existing per-payment buttons (View, Mark as Received, Payback).
+- [x] 5.1 Rewrite `src/commands/payments-handler.ts`: top-level lists events (open + closed, sorted by `created_at DESC`, up to 10) showing payment count + collected + pending. Each event button → drills into per-event payment list with existing per-payment buttons (View, Mark as Received, Payback).
 - [ ] 5.2 Workers-pool tests: empty events list, mixed statuses (open + closed), drill-in shows only that event's payments, cross-chat isolation (chat A cannot see chat B's events), Mark-as-Received button works within the event drill.
 
 ## 6. Integration + verification

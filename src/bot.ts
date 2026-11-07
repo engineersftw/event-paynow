@@ -1,5 +1,6 @@
 import type { BotConfig, Context } from 'grammy';
 import { Bot, webhookCallback } from 'grammy';
+import { EndEventHandler } from './commands/end-event-handler';
 import { InitCommandHandler } from './commands/init-handler';
 import { PaybackCommandHandler } from './commands/payback-handler';
 import { PaymentCallbackHandler } from './commands/payment-callback-handler';
@@ -14,7 +15,8 @@ const HELP_TEXT =
   '/start — create a PayNow QR payment request\n' +
   '/payments — list your payments (with inline buttons)\n' +
   '/payback <ref> — pay back a received payment\n' +
-  '/init — set your PayNow reference (mobile/UEN)\n' +
+  '/init — create a new event (name + PayNow payee)\n' +
+  '/end_event — close an event\n' +
   '/cancel — abandon the current conversation\n\n' +
   'Commands must be set up with BotFather (task 1.3).';
 
@@ -47,14 +49,16 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
 
   bot.command('init', (ctx) => new InitCommandHandler(conversation(ctx), repository, eventRepository).start(ctx));
 
-  bot.command('start', (ctx) => new StartCommandHandler(conversation(ctx), repository).start(ctx));
+  bot.command('start', (ctx) => new StartCommandHandler(conversation(ctx), repository, eventRepository).start(ctx));
 
-  bot.command('payments', (ctx) => new PaymentsCommandHandler(repository).handle(ctx));
+  bot.command('payments', (ctx) => new PaymentsCommandHandler(repository, eventRepository).handle(ctx));
 
   bot.command('payback', (ctx) => {
     const arg = typeof ctx.match === 'string' ? ctx.match.trim() : '';
     return new PaybackCommandHandler(conversation(ctx), repository).start(ctx, arg || undefined);
   });
+
+  bot.command('end_event', (ctx) => new EndEventHandler(conversation(ctx), eventRepository).start(ctx));
 
   bot.command('cancel', async (ctx) => {
     // Generic abort: reset the per-chat conversation state. No flow writes
@@ -84,9 +88,22 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
       await new InitCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(ctx);
       return;
     }
+    if (data.startsWith('start_pick:')) {
+      await new StartCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(ctx);
+      return;
+    }
+    if (data.startsWith('end_pick:') || data.startsWith('end_confirm:') || data.startsWith('end_cancel:')) {
+      await new EndEventHandler(conversation(ctx), eventRepository).handleCallback(ctx);
+      return;
+    }
+    if (data.startsWith('event_view:')) {
+      const eventRef = data.split(':')[1];
+      await new PaymentsCommandHandler(repository, eventRepository).handle(ctx, eventRef);
+      return;
+    }
     if (data.startsWith('payments:')) {
       const page = data.split(':')[1];
-      await new PaymentsCommandHandler(repository).handle(ctx, page);
+      await new PaymentsCommandHandler(repository, eventRepository).handle(ctx, page);
       return;
     }
     if (
@@ -107,8 +124,9 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   bot.on('message:text', async (ctx) => {
     const doStub = conversation(ctx);
     if (await new PaybackCommandHandler(doStub, repository).handleInput(ctx)) return;
-    if (await new StartCommandHandler(doStub, repository).handleInput(ctx)) return;
+    if (await new StartCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;
     if (await new InitCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;
+    if (await new EndEventHandler(doStub, eventRepository).handleInput(ctx)) return;
     await ctx.reply(
       '❓ No active conversation. Try /start, /payments, /init, /payback <ref> or /help.'
     );

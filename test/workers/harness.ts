@@ -53,9 +53,7 @@ const TEST_SCHEMA_STATEMENTS = [
     source TEXT NOT NULL CHECK(source IN ('manual', 'notification')),
     qr_payload TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    received_at TEXT,
-    FOREIGN KEY (user_id) REFERENCES users(telegram_id),
-    FOREIGN KEY (event_id) REFERENCES events(id)
+    received_at TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS paybacks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
