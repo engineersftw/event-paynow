@@ -1,0 +1,22 @@
+name = "event-paynow"
+main = "src/index.ts"
+compatibility_date = "2024-12-05"
+compatibility_flags = ["nodejs_compat"]
+
+# Placeholder IDs — replace after `wrangler d1 create` and `wrangler whoami`
+[[d1_databases]]
+binding = "DB"
+database_name = "paynow-db"
+database_id = "00000000-0000-0000-0000-000000000000"
+
+[durable_objects]
+bindings = [{ name = "CHAT_SESSION", class_name = "ChatSessionDO" }]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["ChatSessionDO"]
+
+[vars]
+BOT_USERNAME = "event_paynow_bot"
+
+# Set via `wrangler secret put TELEGRAM_BOT_TOKEN`

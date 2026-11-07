@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.wrangler/
+.dev.vars
+*.sqlite
+*.db
+*.db-journal
+.drizzle/
