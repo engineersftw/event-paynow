@@ -54,7 +54,9 @@ describe('end-to-end event flow (task 6.1)', () => {
 
     // 2. /start — with 1 event, auto-advance to amount
     await bot.handleUpdate(textUpdate(userId, '/start'));
-    expect(stub.lastText()).toContain('Enter the amount');
+    expect(stub.lastText()).toContain("payer's PayNow");
+    await bot.handleUpdate(textUpdate(userId, '91234568'));
+    await bot.handleUpdate(callbackUpdate(userId, 'start_skip_name'));
 
     await bot.handleUpdate(textUpdate(userId, '10.00'));
     expect(stub.sentPhotos).toHaveLength(1);

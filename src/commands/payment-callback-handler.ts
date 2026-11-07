@@ -3,6 +3,8 @@ import { InlineKeyboard } from 'grammy';
 import type { Payback, Payment, Repository } from '../db/repository.js';
 import { formatCents } from '../sgqr/amount.js';
 import type { ConversationDO } from '../worker/conversation-do.js';
+import { PaybackCommandHandler } from './payback-handler.js';
+import { payerLabel } from './payer-label.js';
 
 /**
  * Callback query handler for payment actions
@@ -128,6 +130,9 @@ export class PaymentCallbackHandler {
       `*Reference:* \`${payment.ref}\``,
       `*Amount:* $${formatCents(payment.amountCents)}`,
       `*Description:* ${payment.description}`,
+      ...(payment.payerValue
+        ? [`*Payer:* ${payerLabel(payment.payerName, payment.payerValue)}`]
+        : []),
       `*Status:* ${payment.status === 'pending' ? '⏳ Pending' : '✅ Received'}`,
       `*Created:* ${this.formatDate(payment.createdAt)}`,
     ];
@@ -278,26 +283,8 @@ export class PaymentCallbackHandler {
    * Handle "Payback" callback
    */
   private async handlePayback(ctx: Context, payment: Payment): Promise<void> {
-    // Start payback conversation flow
-    const response = await this.conversationDO.fetch(
-      new Request('http://localhost/state', {
-        method: 'POST',
-        body: JSON.stringify({
-          flow: 'payback',
-          step: 1,
-          context: { paymentRef: payment.ref },
-          lastActivity: new Date().toISOString(),
-        }),
-      })
-    );
-    // Drain the response so cross-isolate streams don't pin DO storage
-    await response?.body?.cancel();
-
     await ctx.answerCallbackQuery({ text: '🔄 Starting payback flow...' });
-
-    await ctx.reply(
-      `💸 Payback for payment \`${payment.ref}\`\nAmount: $${formatCents(payment.amountCents)}\n\nPlease enter the payer's PayNow reference (mobile or UEN):`,
-      { parse_mode: 'Markdown' }
-    );
+    // Same seeding and prompts as /payback <ref> (stored payer → confirm / change)
+    await new PaybackCommandHandler(this.conversationDO, this.repository).beginFlow(ctx, payment);
   }
 }

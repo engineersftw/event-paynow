@@ -5,7 +5,14 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { StartCommandHandler } from '../../src/commands/start-handler';
 import { D1EventRepository, D1Repository } from '../../src/db/drizzle-repository';
 import type { ConversationDO } from '../../src/worker/conversation-do';
-import { applyTestSchema, bmpToRgba, TEST_BOT_INFO, TelegramStub, textUpdate } from './harness';
+import {
+  applyTestSchema,
+  bmpToRgba,
+  callbackUpdate,
+  TEST_BOT_INFO,
+  TelegramStub,
+  textUpdate,
+} from './harness';
 
 /**
  * Task 5.3 stage (a): end-to-end /start flow inside the Workers runtime with
@@ -48,6 +55,9 @@ function makeStub(userId: number) {
   // Return the promise (not `void`) so grammY awaits DO/DB work before the update completes
   bot.on('message:text', (ctx) => {
     return handler.handleInput(ctx) as Promise<void>;
+  });
+  bot.on('callback_query:data', async (ctx) => {
+    await handler.handleCallback(ctx);
   });
 
   return { repo, handler, bot };
@@ -102,6 +112,10 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     await seedEvent(repo, userId);
 
     await bot.handleUpdate(textUpdate(userId, '/start'));
+    expect(stub.lastText()).toContain("payer's PayNow");
+
+    await bot.handleUpdate(textUpdate(userId, '91234568'));
+    await bot.handleUpdate(textUpdate(userId, 'Alice'));
     expect(stub.lastText()).toContain('Enter the amount');
 
     await bot.handleUpdate(textUpdate(userId, '12.50'));
@@ -143,6 +157,10 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(payment!.status).toBe('pending');
     expect(payment!.source).toBe('manual');
     expect(payment!.amountCents).toBe(1250);
+    expect(payment!.payerType).toBe('mobile');
+    expect(payment!.payerValue).toBe('+6591234568');
+    expect(payment!.payerName).toBe('Alice');
+    expect(captionParts.join(' ')).not.toContain('91234568');
     expect(payment!.userId).toBe(userId);
     expect(payment!.description).toBe('Dinner split');
     expect(payment!.eventId).not.toBeNull();
@@ -169,7 +187,8 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     await seedEvent(repo, userId);
 
     await bot.handleUpdate(textUpdate(userId, '/start'));
-    await bot.handleUpdate(textUpdate(userId, 'Coffee'));
+    await bot.handleUpdate(textUpdate(userId, '91234568'));
+    await bot.handleUpdate(callbackUpdate(userId, 'start_skip_name'));
     await bot.handleUpdate(textUpdate(userId, '12.505'));
 
     expect(stub.lastText()).toContain('Invalid amount');
@@ -181,13 +200,32 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(await repo.listPaymentsByUser(userId)).toHaveLength(1);
   });
 
+  it('rejects an invalid payer, then stores NULL name when skipped', async () => {
+    const userId = 500000160;
+    const { repo, bot } = makeStub(userId);
+    await seedEvent(repo, userId);
+
+    await bot.handleUpdate(textUpdate(userId, '/start'));
+    await bot.handleUpdate(textUpdate(userId, 'abc'));
+    expect(stub.lastText()).toContain('Invalid PayNow reference');
+
+    await bot.handleUpdate(textUpdate(userId, '91234568'));
+    await bot.handleUpdate(callbackUpdate(userId, 'start_skip_name'));
+    await bot.handleUpdate(textUpdate(userId, '4.00'));
+
+    const ref = stub.sentPhotos[0]!.caption.split(' / ')[2]!;
+    const payment = await repo.getPaymentByRef(ref);
+    expect(payment!.payerValue).toBe('+6591234568');
+    expect(payment!.payerName).toBeNull();
+  });
+
   it('/cancel mid-flow ends the conversation and writes nothing (5.2)', async () => {
     const userId = 500000300;
     const { repo, bot } = makeStub(userId);
     await seedEvent(repo, userId);
 
     await bot.handleUpdate(textUpdate(userId, '/start'));
-    await bot.handleUpdate(textUpdate(userId, 'Lunch'));
+    await bot.handleUpdate(textUpdate(userId, '91234568'));
     await bot.handleUpdate(textUpdate(userId, '/cancel'));
 
     expect(stub.lastText()).toContain('Start cancelled. No payment was created.');
@@ -210,6 +248,8 @@ describe('payee snapshot immutability (task 5.4)', () => {
 
     // Collect a payment via the live /start flow
     await bot.handleUpdate(textUpdate(userId, '/start'));
+    await bot.handleUpdate(textUpdate(userId, '91234568'));
+    await bot.handleUpdate(callbackUpdate(userId, 'start_skip_name'));
     await bot.handleUpdate(textUpdate(userId, '25.00'));
     expect(stub.sentPhotos).toHaveLength(1);
     const ref = stub.sentPhotos[0]!.caption.split(' / ')[2]!;

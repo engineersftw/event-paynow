@@ -39,6 +39,9 @@ export const payments = sqliteTable('payments', {
   status: text('status').notNull(), // 'pending' | 'received'
   source: text('source').notNull(), // 'manual' | 'notification' (future)
   qrPayload: text('qr_payload').notNull(),
+  payerType: text('payer_type'), // 'mobile' | 'uen' | null (legacy rows)
+  payerValue: text('payer_value'),
+  payerName: text('payer_name'),
   createdAt: text('created_at').notNull(),
   receivedAt: text('received_at'),
 });

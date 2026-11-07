@@ -50,7 +50,8 @@ async function seedPayment(
   userId: number,
   ref: string,
   amountCents: number,
-  status: 'pending' | 'received'
+  status: 'pending' | 'received',
+  payer?: { type: 'mobile'; value: string; name: string }
 ) {
   return repo.createPayment({
     ref,
@@ -62,6 +63,7 @@ async function seedPayment(
     status,
     source: 'manual',
     qrPayload: '000201010212WIRING6304ABCD',
+    ...(payer ? { payerType: payer.type, payerValue: payer.value, payerName: payer.name } : {}),
     timestamp: T0,
   });
 }
@@ -98,9 +100,8 @@ describe('bot wiring (src/bot.ts)', () => {
 
     // /start now passes (no guard for unconfigured users anymore since events exist)
     await bot.handleUpdate(textUpdate(userId, '/start'));
-    // With no open events... wait, we just created one, so it should show amount prompt
-    // Actually /start now lists events first. With 1 event, it skips to amount.
-    expect(stub.lastText()).toContain('Enter the amount');
+    // One open event → /start skips the picker and asks for the payer
+    expect(stub.lastText()).toContain("payer's PayNow");
 
     // /cancel resets the active start flow
     await bot.handleUpdate(textUpdate(userId, '/cancel'));
@@ -337,5 +338,40 @@ describe('bot wiring (src/bot.ts)', () => {
     await bot.handleUpdate(callbackUpdate(userId, 'pb_sent:WIRE-010:WIRE-PB-010'));
     expect(stub.callbackAnswers).toContain('⚠️ Payback already marked as sent');
     expect(stub.editedMessages).toHaveLength(2);
+  });
+
+  it('Payback button proposes the stored payer; Change recipient redirects this payback only', async () => {
+    const userId = 800000020;
+    const { bot, repo } = makeWiredBot();
+    const payment = await seedPayment(repo, userId, 'WIRE-020', 10000, 'received', {
+      type: 'mobile',
+      value: '+6591234568',
+      name: 'Alice',
+    });
+
+    // Button → proposal with Confirm / Change / Cancel
+    await bot.handleUpdate(callbackUpdate(userId, 'payback:WIRE-020'));
+    expect(stub.lastText()).toContain('Pay back to Alice (+6591234568)?');
+
+    // Change recipient → new payer prompt → valid replacement → confirm
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_change_payer:WIRE-020'));
+    expect(stub.editedMessages.at(-1)!.text).toContain('new recipient');
+    await bot.handleUpdate(textUpdate(userId, '98765432'));
+    expect(stub.lastText()).toContain('+6598765432');
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_payer:WIRE-020'));
+
+    // Amount → confirm → payback row targets the new recipient
+    await bot.handleUpdate(textUpdate(userId, '25.00'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_amount:WIRE-020'));
+
+    const paybacks = await repo.listPaybacksByPayment(payment.id);
+    expect(paybacks).toHaveLength(1);
+    expect(paybacks[0]!.payerValue).toBe('+6598765432');
+    expect(paybacks[0]!.amountCents).toBe(2500);
+
+    // The payment's stored payer is untouched
+    const stored = await repo.getPaymentByRef('WIRE-020');
+    expect(stored!.payerValue).toBe('+6591234568');
+    expect(stored!.payerName).toBe('Alice');
   });
 });

@@ -120,11 +120,11 @@ This project uses OpenSpec for change management. Both changes are archived:
 - Conversation Durable Object with FSM state, 10-min alarm expiry, eviction survival
 - public `alarm()` lifecycle method (workerd requirement, not a fetch route)
 - /init command with mobile/UEN validation, inline Confirm/Cancel buttons, in-place message updates, creates events
-- /start payment issuance with event picker, payee snapshot, SGQR payload + BMP QR uploaded via sendPhoto
+- /start payment issuance with event picker, required payer PayNow proxy + optional payer name (snapshotted on the payment; kept out of the shareable QR caption), payee snapshot, SGQR payload + BMP QR uploaded via sendPhoto
 - QR photo carries action buttons (✓ Received / Payback)
 - mark_received replaces QR photo with text summary (deleteMessage + reply)
 - /payments listing with pagination (5 per page), inline buttons, payment detail view
-- /payback 4-step conversation with inline buttons at payer and amount confirmation steps
+- /payback 4-step conversation with inline buttons at payer and amount confirmation steps; a payment with a stored payer proposes it (Confirm / Change recipient — a changed recipient applies to that payback only), legacy payments without one prompt for the payer. `/payback <ref>` and the QR Payback button share `PaybackCommandHandler.beginFlow`
 - /end_event command: close event with CAS, summary of payments collected/pending
 - Events scoped by (chat_id, topic_id) for chat+topic isolation
 - Payback bounds: `createPaybackBounded()` enforces `SUM(paybacks) <= payment.amount_cents`

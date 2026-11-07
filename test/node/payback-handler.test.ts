@@ -159,6 +159,122 @@ describe('PaybackCommandHandler', () => {
     });
   });
 
+  describe('stored payer: confirm or change recipient', () => {
+    const payerPayment: Payment = {
+      ...receivedPayment,
+      payerType: 'mobile',
+      payerValue: '+6591234568',
+      payerName: 'Alice',
+    };
+
+    it('proposes the stored payer with Confirm / Change recipient / Cancel', async () => {
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(payerPayment);
+
+      await handler.start(mockCtx, 'PAY123');
+
+      expect(lastReply()).toContain('Pay back to Alice (+6591234568)?');
+      expect(lastReply()).not.toContain("payer's PayNow reference");
+      const opts = vi.mocked(mockCtx.reply).mock.calls.at(-1)![1] as {
+        reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> };
+      };
+      const data = opts.reply_markup.inline_keyboard.flat().map((b) => b.callback_data);
+      expect(data).toEqual([
+        'payback_confirm_payer:PAY123',
+        'payback_change_payer:PAY123',
+        'payback_cancel:PAY123',
+      ]);
+
+      const [state] = (await postedStates()) as Array<{
+        step: number;
+        context: Record<string, unknown>;
+      }>;
+      expect(state!.step).toBe(2);
+      expect(state!.context.pendingPayer).toEqual({ type: 'mobile', normalized: '+6591234568' });
+      expect(state!.context.paymentId).toBe(42);
+    });
+
+    it('beginFlow (button path) seeds the same state as /payback <ref>', async () => {
+      await handler.beginFlow(mockCtx, payerPayment);
+
+      const [state] = (await postedStates()) as Array<{
+        step: number;
+        context: Record<string, unknown>;
+      }>;
+      expect(state!.step).toBe(2);
+      expect(state!.context).toMatchObject({
+        paymentRef: 'PAY123',
+        paymentId: 42,
+        paymentAmount: 1000,
+        pendingPayer: { type: 'mobile', normalized: '+6591234568' },
+      });
+    });
+
+    it('escapes Markdown in the payer name', async () => {
+      await handler.beginFlow(mockCtx, { ...payerPayment, payerName: 'A_li*ce' });
+
+      expect(lastReply()).toContain('A\\_li\\*ce (+6591234568)');
+    });
+
+    it('Change recipient returns to the payer prompt and drops the proposed payer', async () => {
+      vi.mocked(mockConversationDO.fetch)
+        .mockResolvedValueOnce(
+          stateResponse(
+            paybackState(2, { pendingPayer: { type: 'mobile', normalized: '+6591234568' } })
+          )
+        )
+        .mockResolvedValueOnce(okResponse);
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_change_payer:PAY123' },
+      } as unknown as Context;
+
+      expect(await handler.handleCallback(ctx)).toBe(true);
+
+      const [state] = (await postedStates()) as Array<{
+        step: number;
+        context: Record<string, unknown>;
+      }>;
+      expect(state!.step).toBe(1);
+      expect(state!.context).not.toHaveProperty('pendingPayer');
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('new recipient'),
+        expect.anything()
+      );
+    });
+
+    it('a different recipient typed after Change goes through validation and confirm', async () => {
+      vi.mocked(mockConversationDO.fetch)
+        .mockResolvedValueOnce(stateResponse(paybackState(1)))
+        .mockResolvedValueOnce(okResponse);
+      const ctx = { ...mockCtx, message: { text: '98765432' } } as unknown as Context;
+
+      await handler.handleInput(ctx);
+
+      const [state] = (await postedStates()) as Array<{
+        step: number;
+        context: Record<string, unknown>;
+      }>;
+      expect(state!.step).toBe(2);
+      expect(state!.context.pendingPayer).toEqual({ type: 'mobile', normalized: '+6598765432' });
+      expect(lastReply()).toContain('+6598765432');
+    });
+
+    it('Change recipient is rejected outside the confirm step', async () => {
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(stateResponse(paybackState(3)));
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_change_payer:PAY123' },
+      } as unknown as Context;
+
+      await handler.handleCallback(ctx);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '❌ Session expired. Run /payback <ref> again.',
+      });
+      expect(await postedStates()).toHaveLength(0);
+    });
+  });
+
   describe('handleInput - Step 1: Payer Reference', () => {
     it('should accept valid mobile number and prompt for confirmation', async () => {
       const ctx = { ...mockCtx, message: { text: '91234567' } } as unknown as Context;

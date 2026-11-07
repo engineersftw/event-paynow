@@ -1,13 +1,30 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
-import { generateRef } from '../db/proxy-validation.js';
-import type { EventRepository, Payment, Repository } from '../db/repository.js';
+import { detectProxyType, generateRef } from '../db/proxy-validation.js';
+import type { EventRepository, PayeeType, Payment, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 
 const SHARE_HINT = 'Forward this message to share';
+const MAX_PAYER_NAME = 40;
+
+function payerPrompt(eventName: string, payeeValue: string): string {
+  return (
+    `🧾 New payment for "${eventName}".\n\n` +
+    `Payee: ${payeeValue}\n\n` +
+    "👤 Enter the payer's PayNow mobile number or UEN (used later for paybacks)."
+  );
+}
+
+function amountPrompt(payerLabel: string): string {
+  return (
+    `Payer: ${payerLabel}\n\n` +
+    '💵 Enter the amount in dollars (e.g. 12.50).\n\n' +
+    'Up to 2 decimals; the QR will be locked to this amount.'
+  );
+}
 
 export class StartCommandHandler {
   private conversationDO: ConversationDO;
@@ -47,21 +64,16 @@ export class StartCommandHandler {
       });
 
       if (events.length === 1) {
-        // Auto-advance to amount step
+        // Auto-advance to payer step
         const event = events[0]!;
         await this.setState({
           flow: 'start',
-          step: 2, // amount
+          step: 2, // payer proxy
           context: { userId, chatId, topicId, eventRef: event.ref, eventName: event.name },
           lastActivity: new Date().toISOString(),
         });
 
-        await ctx.reply(
-          `🧾 New payment for "${event.name}".\n\n` +
-            `Payee: ${event.payeeValue}\n\n` +
-            '💵 Enter the amount in dollars (e.g. 12.50).\n\n' +
-            'Up to 2 decimals; the QR will be locked to this amount.'
-        );
+        await ctx.reply(payerPrompt(event.name, event.payeeValue));
       } else {
         // Show event picker
         const keyboard = new InlineKeyboard();
@@ -100,6 +112,12 @@ export class StartCommandHandler {
 
     switch (state.step) {
       case 2:
+        await this.handlePayerInput(ctx, text, state);
+        break;
+      case 3:
+        await this.handleNameInput(ctx, text, state);
+        break;
+      case 4:
         await this.handleAmountInput(ctx, text, state);
         break;
       default:
@@ -113,6 +131,9 @@ export class StartCommandHandler {
 
   async handleCallback(ctx: Context): Promise<boolean> {
     const data = ctx.callbackQuery?.data;
+    if (data === 'start_skip_name') {
+      return this.handleSkipName(ctx);
+    }
     if (!data?.startsWith('start_pick:')) {
       return false;
     }
@@ -135,7 +156,7 @@ export class StartCommandHandler {
       return true;
     }
 
-    // Transition to amount step
+    // Transition to payer step
     await this.setState({
       flow: 'start',
       step: 2,
@@ -148,15 +169,77 @@ export class StartCommandHandler {
     });
 
     await ctx.answerCallbackQuery({ text: `Selected: ${event.name}` });
-    await ctx.editMessageText(
-      `🧾 New payment for "${event.name}".\n\n` +
-        `Payee: ${event.payeeValue}\n\n` +
-        '💵 Enter the amount in dollars (e.g. 12.50).\n\n' +
-        'Up to 2 decimals; the QR will be locked to this amount.',
-      { reply_markup: { inline_keyboard: [] } }
-    );
+    await ctx.editMessageText(payerPrompt(event.name, event.payeeValue), {
+      reply_markup: { inline_keyboard: [] },
+    });
 
     return true;
+  }
+
+  private async handleSkipName(ctx: Context): Promise<boolean> {
+    const state = await this.getState();
+    if (state?.flow !== 'start' || state.step !== 3) {
+      await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /start again.' });
+      return true;
+    }
+    await this.setState({
+      ...state,
+      step: 4,
+      lastActivity: new Date().toISOString(),
+    });
+    await ctx.answerCallbackQuery({ text: 'Skipped' });
+    await ctx.editMessageText(amountPrompt(state.context.payerValue as string), {
+      reply_markup: { inline_keyboard: [] },
+    });
+    return true;
+  }
+
+  private async handlePayerInput(
+    ctx: Context,
+    text: string,
+    state: ConversationState
+  ): Promise<void> {
+    const payer = detectProxyType(text);
+    if (!payer) {
+      await ctx.reply(
+        '❌ Invalid PayNow reference. Please enter:\n• Mobile number (8 digits, starting with 6/8/9)\n• UEN (9-13 characters)\n\nTry again:'
+      );
+      return;
+    }
+
+    await this.setState({
+      flow: 'start',
+      step: 3,
+      context: { ...state.context, payerType: payer.type, payerValue: payer.normalized },
+      lastActivity: new Date().toISOString(),
+    });
+
+    await ctx.reply(
+      `👤 Payer: ${payer.normalized}\n\nEnter the payer's name (optional), or skip:`,
+      {
+        reply_markup: new InlineKeyboard().text('Skip', 'start_skip_name'),
+      }
+    );
+  }
+
+  private async handleNameInput(
+    ctx: Context,
+    text: string,
+    state: ConversationState
+  ): Promise<void> {
+    if (text.length > MAX_PAYER_NAME) {
+      await ctx.reply(`❌ Name is too long (max ${MAX_PAYER_NAME} characters). Try again:`);
+      return;
+    }
+
+    await this.setState({
+      flow: 'start',
+      step: 4,
+      context: { ...state.context, payerName: text },
+      lastActivity: new Date().toISOString(),
+    });
+
+    await ctx.reply(amountPrompt(`${text} (${state.context.payerValue as string})`));
   }
 
   private async handleAmountInput(
@@ -214,6 +297,9 @@ export class StartCommandHandler {
         amountCents,
         payeeType: event.payeeType,
         payeeValue: event.payeeValue,
+        payerType: state.context.payerType as PayeeType,
+        payerValue: state.context.payerValue as string,
+        payerName: (state.context.payerName as string | undefined) ?? null,
         status: 'pending',
         source: 'manual',
         qrPayload,

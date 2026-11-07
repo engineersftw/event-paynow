@@ -266,6 +266,42 @@ describe('PaymentCallbackHandler', () => {
   });
 
   describe('handleCallback - View Payment Details', () => {
+    it('shows the payer in payment details when stored', async () => {
+      const payment: Payment = {
+        id: 1,
+        ref: 'PAY123',
+        userId: 123456789,
+        amountCents: 1000,
+        status: 'received',
+        createdAt: '2024-01-15T10:30:00Z',
+        description: 'Test payment',
+        payeeType: 'mobile',
+        payeeValue: '+6512345678',
+        payerType: 'mobile',
+        payerValue: '+6591234568',
+        payerName: 'Alice',
+        qrPayload: 'test-payload',
+        source: 'manual',
+        receivedAt: '2024-01-15T10:35:00Z',
+      };
+      mockCtx.callbackQuery!.data = 'view:PAY123';
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(payment);
+      vi.mocked(mockRepository.listPaybacksByPayment).mockResolvedValue([]);
+
+      await handler.handleCallback(mockCtx);
+      expect(mockCtx.editMessageText).toHaveBeenLastCalledWith(
+        expect.stringContaining('*Payer:* Alice (+6591234568)'),
+        expect.anything()
+      );
+
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue({ ...payment, payerName: null });
+      await handler.handleCallback(mockCtx);
+      expect(mockCtx.editMessageText).toHaveBeenLastCalledWith(
+        expect.stringContaining('*Payer:* +6591234568'),
+        expect.anything()
+      );
+    });
+
     it('should display payment details with no paybacks', async () => {
       // Setup
       const payment: Payment = {

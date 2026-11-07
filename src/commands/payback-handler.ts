@@ -1,11 +1,12 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
 import { detectProxyType, generateRef } from '../db/proxy-validation.js';
-import type { PayeeType, Repository } from '../db/repository.js';
+import type { PayeeType, Payment, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
+import { payerLabel } from './payer-label.js';
 
 /**
  * /payback command handler - initiates payback flow for a payment
@@ -75,31 +76,70 @@ export class PaybackCommandHandler {
         return;
       }
 
-      // Initialize conversation state for payback flow
-      await this.setState({
-        flow: 'payback',
-        step: 1, // waiting for payer reference
-        context: {
-          paymentRef,
-          paymentId: payment.id,
-          paymentAmount: payment.amountCents,
-          paymentDescription: payment.description,
-        },
-        lastActivity: new Date().toISOString(),
-      });
-
-      await ctx.reply(
-        `💸 *Payback for Payment*\n\n` +
-          `Reference: \`${paymentRef}\`\n` +
-          `Amount: $${formatCents(payment.amountCents)}\n` +
-          `Description: ${payment.description}\n\n` +
-          `Please enter the payer's PayNow reference (mobile number or UEN):`,
-        { parse_mode: 'Markdown' }
-      );
+      await this.beginFlow(ctx, payment);
     } catch (error) {
       console.error('Failed to start payback:', error);
       await ctx.reply('❌ Failed to start payback flow. Please try again.');
     }
+  }
+
+  /**
+   * Seed the payback conversation for an already-validated payment and send the first
+   * prompt. Shared by `/payback <ref>` and the QR-photo Payback button so both leave
+   * identical state behind.
+   *
+   * With a stored payer, the payer is proposed for confirmation (Confirm / Change
+   * recipient); a changed recipient applies to this payback only. Without one (legacy
+   * payments) the payer reference is requested.
+   */
+  async beginFlow(ctx: Context, payment: Payment): Promise<void> {
+    const context: Record<string, unknown> = {
+      paymentRef: payment.ref,
+      paymentId: payment.id,
+      paymentAmount: payment.amountCents,
+      paymentDescription: payment.description,
+    };
+    const header =
+      `💸 *Payback for Payment*\n\n` +
+      `Reference: \`${payment.ref}\`\n` +
+      `Amount: $${formatCents(payment.amountCents)}\n` +
+      `Description: ${payment.description}\n\n`;
+
+    if (payment.payerType && payment.payerValue) {
+      await this.setState({
+        flow: 'payback',
+        step: 2, // confirm the proposed recipient
+        context: {
+          ...context,
+          pendingPayer: { type: payment.payerType, normalized: payment.payerValue },
+        },
+        lastActivity: new Date().toISOString(),
+      });
+
+      const keyboard = new InlineKeyboard()
+        .text('✅ Confirm', `payback_confirm_payer:${payment.ref}`)
+        .text('✏️ Change recipient', `payback_change_payer:${payment.ref}`)
+        .row()
+        .text('❌ Cancel', `payback_cancel:${payment.ref}`);
+      await ctx.reply(
+        `${header}Pay back to ${payerLabel(payment.payerName, payment.payerValue)}?`,
+        {
+          parse_mode: 'Markdown',
+          reply_markup: keyboard,
+        }
+      );
+      return;
+    }
+
+    await this.setState({
+      flow: 'payback',
+      step: 1, // waiting for payer reference
+      context,
+      lastActivity: new Date().toISOString(),
+    });
+    await ctx.reply(`${header}Please enter the payer's PayNow reference (mobile number or UEN):`, {
+      parse_mode: 'Markdown',
+    });
   }
 
   /**
@@ -182,6 +222,7 @@ export class PaybackCommandHandler {
     if (
       !data ||
       (!data.startsWith('payback_confirm_payer:') &&
+        !data.startsWith('payback_change_payer:') &&
         !data.startsWith('payback_cancel:') &&
         !data.startsWith('payback_confirm_amount:') &&
         !data.startsWith('payback_cancel_amount:'))
@@ -202,6 +243,27 @@ export class PaybackCommandHandler {
         return true;
       }
       await this.proceedToAmountStep(ctx, state);
+      return true;
+    }
+
+    // Change recipient: back to the payer prompt, for this payback only
+    if (data.startsWith('payback_change_payer:')) {
+      if (state.step !== 2) {
+        await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /payback <ref> again.' });
+        return true;
+      }
+      const { pendingPayer: _discarded, ...rest } = state.context;
+      await this.setState({
+        flow: 'payback',
+        step: 1,
+        context: rest,
+        lastActivity: new Date().toISOString(),
+      });
+      await ctx.answerCallbackQuery();
+      await ctx.editMessageText(
+        "Please enter the new recipient's PayNow reference (mobile number or UEN):",
+        { reply_markup: { inline_keyboard: [] } }
+      );
       return true;
     }
 
