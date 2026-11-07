@@ -82,8 +82,9 @@ describe('bot wiring (src/bot.ts)', () => {
     const keyboard = confirmMessage.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
     };
-    const confirmData = keyboard.inline_keyboard.flat().find((b) => b.text.startsWith('✅'))!
-      .callback_data;
+    const confirmData = keyboard.inline_keyboard
+      .flat()
+      .find((b) => b.text.startsWith('✅'))!.callback_data;
     await bot.handleUpdate(callbackUpdate(userId, confirmData));
 
     // Success is delivered via answerCallbackQuery (toast), no extra chat message

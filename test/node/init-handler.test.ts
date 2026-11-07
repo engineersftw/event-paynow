@@ -478,7 +478,9 @@ describe('/init command handler', () => {
         displayName: 'John',
         timestamp: expect.any(String),
       });
-      expect(callbackCtx.answerCallbackQuery).toHaveBeenCalledWith({ text: '✅ Reference updated' });
+      expect(callbackCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '✅ Reference updated',
+      });
     });
 
     it('should preserve existing user data when Cancel tapped', async () => {
@@ -540,7 +542,9 @@ describe('/init command handler', () => {
       await handler.handleCallback(callbackCtx);
 
       expect(mockRepository.upsertUser).not.toHaveBeenCalled();
-      expect(callbackCtx.reply).toHaveBeenCalledWith('❌ Cancelled. Run /init again to start over.');
+      expect(callbackCtx.reply).toHaveBeenCalledWith(
+        '❌ Cancelled. Run /init again to start over.'
+      );
     });
 
     it('should preserve existing user data when conversation expires (alarm)', async () => {

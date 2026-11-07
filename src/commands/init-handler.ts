@@ -120,7 +120,7 @@ export class InitCommandHandler {
    */
   async handleCallback(ctx: Context): Promise<boolean> {
     const data = ctx.callbackQuery?.data;
-    if (!data || !data.startsWith('init_confirm:') && !data.startsWith('init_cancel:')) {
+    if (!data || (!data.startsWith('init_confirm:') && !data.startsWith('init_cancel:'))) {
       return false; // Not ours — let the next dispatcher try
     }
 
