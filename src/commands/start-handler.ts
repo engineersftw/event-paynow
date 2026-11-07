@@ -403,7 +403,14 @@ export class StartCommandHandler {
         timestamp: new Date().toISOString(),
       });
 
-      const bmpBytes = await renderQrPng(qrPayload);
+      // Same name-only rule as the caption: the image is forwarded too
+      const bmpBytes = await renderQrPng(qrPayload, [
+        event.name,
+        ...(payment.description === event.name ? [] : [payment.description]),
+        `SGD ${formatCents(payment.amountCents)}`,
+        payment.ref,
+        ...captionPart('Payer', payment.payerName),
+      ]);
       // Name only: this caption is forwarded, so never include the payer's number
       const caption = [
         payment.description,

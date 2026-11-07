@@ -83,7 +83,7 @@ This project uses OpenSpec for change management. All changes are archived:
 ## Key Design Decisions
 
 1. **SGQR payload builder is runtime-agnostic** — No Node APIs, runs in both vitest and Workers isolate. CRC16-CCITT-FALSE, uppercase hex, computed over payload + "6304".
-2. **QR rendering uses BMP in Workers, PNG in Node** — `qrcode-generator` is pure JS (works in Workers), outputs BMP via custom builder. Node tests use `qrcode` + `pngjs` + `jsqr` for PNG round-trip verification. QR codes overlay a PayNow logo in the center using error correction level H (30% recovery).
+2. **QR rendering uses BMP in Workers, PNG in Node** — `qrcode-generator` is pure JS (works in Workers), outputs BMP via custom builder. Node tests use `qrcode` + `pngjs` + `jsqr` for PNG round-trip verification. QR codes overlay a PayNow logo in the center using error correction level H (30% recovery). `renderQrPng(payload, lines)` also appends a text band below the QR (built-in 5x7 ASCII font in `src/sgqr/font5x7.ts`, non-ASCII → `?`, long lines truncated) carrying the payment/payback details; names only, never PayNow numbers.
 3. **Conversation state lives in Durable Objects** — Per-chat DO holds FSM state, 10-min alarm expiry, survives cold starts and deploys. The `alarm()` lifecycle method is required by workerd (not a fetch route).
 4. **Drizzle ORM over D1** — Schema in `src/db/schema.ts`, migrations in `drizzle/`, repository layer abstracts queries behind infra-neutral interfaces.
 5. **Secret validation before bot creation** — Webhook handler validates `X-Telegram-Bot-Api-Secret-Token` against the separate `TELEGRAM_WEBHOOK_SECRET` binding before instantiating grammY bot.
