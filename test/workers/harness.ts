@@ -107,6 +107,12 @@ export interface CapturedEdit {
   replyMarkup?: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
 }
 
+export interface CapturedCaptionEdit {
+  chatId: string;
+  caption: string;
+  replyMarkup?: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
+}
+
 const asciiEnc = new TextEncoder();
 
 function indexOfBytes(hay: Uint8Array, needle: Uint8Array, from: number): number {
@@ -193,6 +199,7 @@ export class TelegramStub {
   sentMessages: CapturedSend[] = [];
   sentPhotos: CapturedPhoto[] = [];
   editedMessages: CapturedEdit[] = [];
+  editedCaptions: CapturedCaptionEdit[] = [];
   callbackAnswers: string[] = [];
   otherCalls: { method: string; body: string }[] = [];
 
@@ -202,6 +209,7 @@ export class TelegramStub {
     this.sentMessages = [];
     this.sentPhotos = [];
     this.editedMessages = [];
+    this.editedCaptions = [];
     this.callbackAnswers = [];
     this.otherCalls = [];
   }
@@ -286,6 +294,21 @@ export class TelegramStub {
       this.editedMessages.push({
         chatId: String(body.chat_id),
         text: body.text,
+        replyMarkup: body.reply_markup,
+      });
+      this.messageId += 1;
+      return this.ok(this.message(this.messageId, String(body.chat_id)));
+    }
+
+    if (method === 'editMessageCaption') {
+      const body = JSON.parse(String(init?.body)) as {
+        chat_id: number | string;
+        caption: string;
+        reply_markup?: CapturedCaptionEdit['replyMarkup'];
+      };
+      this.editedCaptions.push({
+        chatId: String(body.chat_id),
+        caption: body.caption,
         replyMarkup: body.reply_markup,
       });
       this.messageId += 1;

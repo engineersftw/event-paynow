@@ -33,6 +33,7 @@ describe('PaymentCallbackHandler', () => {
       } as CallbackQuery,
       answerCallbackQuery: vi.fn(),
       editMessageText: vi.fn(),
+      editMessageCaption: vi.fn(),
       reply: vi.fn(),
     } as unknown as Context;
   });
@@ -77,7 +78,16 @@ describe('PaymentCallbackHandler', () => {
       expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
         text: '✅ Payment marked as received!',
       });
-      expect(mockCtx.editMessageText).toHaveBeenCalled();
+      expect(mockCtx.editMessageCaption).toHaveBeenCalled();
+      const captionCall = vi.mocked(mockCtx.editMessageCaption).mock.calls[0]![0] as {
+        caption: string;
+        reply_markup: { inline_keyboard: unknown[][] };
+      };
+      expect(captionCall.caption).toContain('✅ Received');
+      expect(captionCall.caption).toContain('PAY123');
+      expect(captionCall.caption).toContain('SGD 10.00');
+      // Keyboard cleared
+      expect(captionCall.reply_markup.inline_keyboard.flat()).toHaveLength(0);
     });
 
     it('should reject if payment not found', async () => {

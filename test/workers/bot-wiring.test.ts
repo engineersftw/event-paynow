@@ -182,7 +182,12 @@ describe('bot wiring (src/bot.ts)', () => {
     await bot.handleUpdate(callbackUpdate(userId, 'mark_received:WIRE-003'));
 
     expect(stub.callbackAnswers).toContain('✅ Payment marked as received!');
-    expect(stub.editedMessages).toHaveLength(1);
+    expect(stub.editedCaptions).toHaveLength(1);
+    const captionEdit = stub.editedCaptions[0]!;
+    expect(captionEdit.caption).toContain('✅ Received');
+    expect(captionEdit.caption).toContain('WIRE-003');
+    expect(captionEdit.replyMarkup?.inline_keyboard).toEqual([]);
+
     const payment = await repo.getPaymentByRef('WIRE-003');
     expect(payment!.status).toBe('received');
     expect(payment!.receivedAt).not.toBeNull();
