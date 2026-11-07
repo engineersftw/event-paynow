@@ -178,8 +178,14 @@ export class PaybackCommandHandler {
     state: ConversationState
   ): Promise<void> {
     if (input.toLowerCase() === 'confirm') {
-      const paymentId = state.context.paymentId as number;
+      const paymentId = state.context.paymentId as number | undefined;
       const paymentAmount = state.context.paymentAmount as number;
+
+      if (!paymentId || !paymentAmount) {
+        await this.resetState();
+        await ctx.reply('❌ Payback session expired. Please start over with /payback <ref>.');
+        return;
+      }
 
       // Pre-check: show the current remaining bound. The authoritative re-check runs
       // inside the D1 transaction at final confirmation (createPaybackBounded).
@@ -226,8 +232,15 @@ export class PaybackCommandHandler {
     input: string,
     state: ConversationState
   ): Promise<void> {
-    const paymentId = state.context.paymentId as number;
+    const paymentId = state.context.paymentId as number | undefined;
     const paymentAmount = state.context.paymentAmount as number;
+
+    if (!paymentId || !paymentAmount) {
+      await this.resetState();
+      await ctx.reply('❌ Payback session expired. Please start over with /payback <ref>.');
+      return;
+    }
+
     const amountCents = parseAmount(input);
 
     if (amountCents === null) {
@@ -300,9 +313,15 @@ export class PaybackCommandHandler {
   private async createPaybackRecord(ctx: Context, state: ConversationState): Promise<void> {
     try {
       const paymentRef = state.context.paymentRef as string;
-      const paymentId = state.context.paymentId as number;
+      const paymentId = state.context.paymentId as number | undefined;
       const payerProxy = state.context.pendingPayer as { type: PayeeType; normalized: string };
       const paybackAmount = state.context.paybackAmount as number;
+
+      if (!paymentId) {
+        await this.resetState();
+        await ctx.reply('❌ Payback session expired. Please start over with /payback <ref>.');
+        return;
+      }
 
       const paybackRef = generateRef();
 
