@@ -98,7 +98,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
       );
       return;
     }
-    if (data.startsWith('start_pick:')) {
+    if (data.startsWith('start_pick:') || data === 'start_skip_name') {
       await new StartCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(
         ctx
       );
@@ -124,6 +124,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     }
     if (
       data.startsWith('payback_confirm_payer:') ||
+      data.startsWith('payback_change_payer:') ||
       data.startsWith('payback_cancel:') ||
       data.startsWith('payback_confirm_amount:') ||
       data.startsWith('payback_cancel_amount:')

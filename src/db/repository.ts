@@ -56,6 +56,9 @@ export interface Payment {
   status: PaymentStatus;
   source: ReceiptSource;
   qrPayload: string;
+  payerType?: PayeeType | null;
+  payerValue?: string | null;
+  payerName?: string | null;
   createdAt: string;
   receivedAt: string | null;
 }

@@ -52,6 +52,9 @@ const TEST_SCHEMA_STATEMENTS = [
     status TEXT NOT NULL CHECK(status IN ('pending', 'received')),
     source TEXT NOT NULL CHECK(source IN ('manual', 'notification')),
     qr_payload TEXT NOT NULL,
+    payer_type TEXT,
+    payer_value TEXT,
+    payer_name TEXT,
     created_at TEXT NOT NULL,
     received_at TEXT
   )`,

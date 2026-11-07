@@ -105,6 +105,9 @@ export class D1Repository implements Repository {
       status,
       source,
       qrPayload,
+      payerType,
+      payerValue,
+      payerName,
       timestamp,
     } = input;
 
@@ -118,6 +121,9 @@ export class D1Repository implements Repository {
       status,
       source,
       qrPayload,
+      payerType: payerType ?? null,
+      payerValue: payerValue ?? null,
+      payerName: payerName ?? null,
       createdAt: timestamp,
     };
     if (eventId !== undefined) {
@@ -518,6 +524,9 @@ function toPayment(row: typeof schema.payments.$inferSelect): Payment {
     status: row.status as Payment['status'],
     source: row.source as Payment['source'],
     qrPayload: row.qrPayload,
+    payerType: row.payerType as NonNullable<Payment['payerType']> | null,
+    payerValue: row.payerValue,
+    payerName: row.payerName,
     createdAt: row.createdAt,
     receivedAt: row.receivedAt,
   };

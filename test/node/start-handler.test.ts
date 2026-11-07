@@ -97,13 +97,13 @@ describe('StartCommandHandler', () => {
       expect(lastReply()).toContain('No open events');
     });
 
-    it('starts flow with single open event (auto-advance to amount)', async () => {
+    it('starts flow with single open event (auto-advance to payer)', async () => {
       vi.mocked(mockEventRepository.listOpenEventsByChat).mockResolvedValue([openEvent]);
 
       await handler.start(mockCtx);
 
       expect(mockEventRepository.listOpenEventsByChat).toHaveBeenCalled();
-      expect(lastReply()).toContain('Enter the amount');
+      expect(lastReply()).toContain("payer's PayNow");
     });
 
     it('shows event picker with multiple open events', async () => {
@@ -120,7 +120,7 @@ describe('StartCommandHandler', () => {
   });
 
   describe('handleCallback - event picker', () => {
-    it('picks an event and prompts for amount', async () => {
+    it('picks an event and prompts for payer', async () => {
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce({
           status: 200,
@@ -147,6 +147,75 @@ describe('StartCommandHandler', () => {
     });
   });
 
+  describe('handleInput - payer steps', () => {
+    const stateAt = (step: number, extra: Record<string, unknown> = {}) => ({
+      status: 200,
+      json: async () => ({
+        flow: 'start',
+        step,
+        context: {
+          userId: 123456789,
+          chatId: 123456789,
+          topicId: 0,
+          eventRef: 'EVT-TEST1234',
+          eventName: 'Test Event',
+          ...extra,
+        },
+        lastActivity: new Date().toISOString(),
+      }),
+    });
+    it('rejects an invalid payer and stays on the payer step', async () => {
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(stateAt(2) as never);
+      const ctx = { ...mockCtx, message: { text: 'nope' } } as unknown as Context;
+
+      expect(await handler.handleInput(ctx)).toBe(true);
+      expect(lastReply()).toContain('Invalid PayNow reference');
+      expect(mockConversationDO.fetch).toHaveBeenCalledTimes(1); // no state write
+    });
+
+    it('stores a normalized payer and asks for an optional name with Skip', async () => {
+      vi.mocked(mockConversationDO.fetch)
+        .mockResolvedValueOnce(stateAt(2) as never)
+        .mockResolvedValueOnce({ status: 200 } as never);
+      const ctx = { ...mockCtx, message: { text: '91234568' } } as unknown as Context;
+
+      await handler.handleInput(ctx);
+
+      expect(lastReply()).toContain('+6591234568');
+      expect(mockCtx.reply).toHaveBeenLastCalledWith(
+        expect.any(String),
+        expect.objectContaining({ reply_markup: expect.any(Object) })
+      );
+    });
+
+    it('skip button advances from the name step to the amount step', async () => {
+      vi.mocked(mockConversationDO.fetch)
+        .mockResolvedValueOnce(
+          stateAt(3, { payerType: 'mobile', payerValue: '+6591234568' }) as never
+        )
+        .mockResolvedValueOnce({ status: 200 } as never);
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'start_skip_name' },
+      } as unknown as Context;
+
+      expect(await handler.handleCallback(ctx)).toBe(true);
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('Enter the amount'),
+        expect.anything()
+      );
+    });
+
+    it('rejects an over-long name', async () => {
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(stateAt(3) as never);
+      const ctx = { ...mockCtx, message: { text: 'x'.repeat(41) } } as unknown as Context;
+
+      await handler.handleInput(ctx);
+
+      expect(lastReply()).toContain('too long');
+    });
+  });
+
   describe('handleInput - amount collection', () => {
     it('accepts valid amount and creates payment', async () => {
       vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent);
@@ -156,13 +225,16 @@ describe('StartCommandHandler', () => {
           status: 200,
           json: async () => ({
             flow: 'start',
-            step: 2,
+            step: 4,
             context: {
               userId: 123456789,
               chatId: 123456789,
               topicId: 0,
               eventRef: 'EVT-TEST1234',
               eventName: 'Test Event',
+              payerType: 'mobile',
+              payerValue: '+6591234568',
+              payerName: 'Alice',
             },
             lastActivity: new Date().toISOString(),
           }),
@@ -177,6 +249,8 @@ describe('StartCommandHandler', () => {
       const input = vi.mocked(mockRepository.createPayment).mock.calls[0]![0];
       expect(input.eventId).toBe(1);
       expect(input.description).toBe('Test Event');
+      expect(input.payerValue).toBe('+6591234568');
+      expect(input.payerName).toBe('Alice');
       expect(mockCtx.replyWithPhoto).toHaveBeenCalledTimes(1);
     });
 
@@ -185,7 +259,7 @@ describe('StartCommandHandler', () => {
         status: 200,
         json: async () => ({
           flow: 'start',
-          step: 2,
+          step: 4,
           context: {
             userId: 123456789,
             chatId: 123456789,

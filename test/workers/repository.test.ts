@@ -45,6 +45,9 @@ beforeAll(async () => {
       status TEXT NOT NULL CHECK(status IN ('pending', 'received')),
       source TEXT NOT NULL CHECK(source IN ('manual', 'notification')),
       qr_payload TEXT NOT NULL,
+      payer_type TEXT,
+      payer_value TEXT,
+      payer_name TEXT,
       created_at TEXT NOT NULL,
       received_at TEXT,
       FOREIGN KEY (user_id) REFERENCES users(telegram_id),
@@ -202,6 +205,27 @@ describe('D1Repository', () => {
       expect(payment.status).toBe('pending');
       expect(payment.receivedAt).toBeNull();
       expect(payment.createdAt).toBe(testTimestamp);
+    });
+
+    it('stores payer details when provided and null when absent', async () => {
+      const withPayer = makePayment();
+      const created = await repo.createPayment({
+        ...withPayer,
+        payerType: 'mobile',
+        payerValue: '+6591234567',
+        payerName: 'Alice',
+        timestamp: testTimestamp,
+      });
+      expect(created.payerType).toBe('mobile');
+      expect(created.payerValue).toBe('+6591234567');
+      expect(created.payerName).toBe('Alice');
+
+      const legacy = makePayment();
+      await repo.createPayment({ ...legacy, timestamp: testTimestamp });
+      const read = await repo.getPaymentByRef(legacy.ref);
+      expect(read!.payerType).toBeNull();
+      expect(read!.payerValue).toBeNull();
+      expect(read!.payerName).toBeNull();
     });
 
     it('retrieves a payment by ref', async () => {
