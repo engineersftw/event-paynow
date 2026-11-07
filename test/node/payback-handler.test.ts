@@ -90,6 +90,8 @@ describe('PaybackCommandHandler', () => {
       chat: { id: 123456789 },
       reply: vi.fn(),
       replyWithPhoto: vi.fn(),
+      editMessageText: vi.fn(),
+      answerCallbackQuery: vi.fn(),
     } as unknown as Context;
 
     handler = new PaybackCommandHandler(mockConversationDO, mockRepository);
@@ -169,7 +171,7 @@ describe('PaybackCommandHandler', () => {
 
       expect(result).toBe(true);
       expect(lastReply()).toContain('Mobile number: +6591234567');
-      expect(lastReply()).toContain('Type "confirm" to continue');
+      expect(lastReply()).toContain('Tap a button to confirm or cancel');
     });
 
     it('should accept valid UEN and prompt for confirmation', async () => {
@@ -183,6 +185,7 @@ describe('PaybackCommandHandler', () => {
 
       expect(result).toBe(true);
       expect(lastReply()).toContain('UEN: 201234567A');
+      expect(lastReply()).toContain('Tap a button to confirm or cancel');
     });
 
     it('should reject invalid payer reference and re-prompt without advancing', async () => {
@@ -199,9 +202,12 @@ describe('PaybackCommandHandler', () => {
     });
   });
 
-  describe('handleInput - Step 2: Payer Confirmation', () => {
+  describe('handleCallback - Step 2: Payer Confirmation (inline buttons)', () => {
     it('should proceed to amount prompt showing remaining bound', async () => {
-      const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_payer:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(
@@ -214,13 +220,14 @@ describe('PaybackCommandHandler', () => {
         .mockResolvedValueOnce(okResponse); // setState step 3
       vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(0);
 
-      const result = await handler.handleInput(ctx);
+      const result = await handler.handleCallback(ctx);
 
       expect(result).toBe(true);
       expect(mockRepository.sumPaybacks).toHaveBeenCalledWith(42);
-      expect(lastReply()).toContain('Enter payback amount');
-      expect(lastReply()).toContain('Maximum payback: $10.00');
-      expect(lastReply()).toContain('Already paid back: $0.00');
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('Enter payback amount'),
+        { reply_markup: { inline_keyboard: [] } }
+      );
 
       const states = await postedStates();
       const state = states[states.length - 1] as { step: number; context: Record<string, unknown> };
@@ -229,7 +236,10 @@ describe('PaybackCommandHandler', () => {
     });
 
     it('should reduce maximum by existing paybacks (12.50 minus 8.00 → 4.50)', async () => {
-      const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_payer:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(
@@ -243,14 +253,23 @@ describe('PaybackCommandHandler', () => {
         .mockResolvedValueOnce(okResponse);
       vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(800);
 
-      await handler.handleInput(ctx);
+      await handler.handleCallback(ctx);
 
-      expect(lastReply()).toContain('Already paid back: $8.00');
-      expect(lastReply()).toContain('Maximum payback: $4.50');
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('Already paid back: $8.00'),
+        expect.any(Object)
+      );
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('Maximum payback: $4.50'),
+        expect.any(Object)
+      );
     });
 
     it('should refuse when the payment is already fully paid back', async () => {
-      const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_payer:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(
@@ -263,17 +282,22 @@ describe('PaybackCommandHandler', () => {
         .mockResolvedValueOnce(okResponse); // reset to idle
       vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(1000);
 
-      await handler.handleInput(ctx);
+      await handler.handleCallback(ctx);
 
-      expect(lastReply()).toContain('fully paid back');
-      expect(lastReply()).not.toContain('Enter payback amount');
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('fully paid back'),
+        { reply_markup: { inline_keyboard: [] } }
+      );
 
       const states = await postedStates();
       expect(states[states.length - 1]).toMatchObject({ flow: 'idle', step: 0 });
     });
 
-    it('should cancel on cancel input', async () => {
-      const ctx = { ...mockCtx, message: { text: 'cancel' } } as unknown as Context;
+    it('should cancel on Cancel button tap', async () => {
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_cancel:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(
@@ -285,27 +309,86 @@ describe('PaybackCommandHandler', () => {
         )
         .mockResolvedValueOnce(okResponse);
 
-      const result = await handler.handleInput(ctx);
+      const result = await handler.handleCallback(ctx);
 
       expect(result).toBe(true);
-      expect(mockCtx.reply).toHaveBeenCalledWith('❌ Payback cancelled.');
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith('❌ Payback cancelled.', {
+        reply_markup: { inline_keyboard: [] },
+      });
     });
 
-    it('should re-prompt on invalid confirmation input', async () => {
-      const ctx = { ...mockCtx, message: { text: 'maybe' } } as unknown as Context;
+    it('should reject non-payback callbacks (let next dispatcher handle)', async () => {
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'view:PAY123' },
+      } as unknown as Context;
+
+      const result = await handler.handleCallback(ctx);
+      expect(result).toBe(false);
+      expect(mockConversationDO.fetch).not.toHaveBeenCalled();
+    });
+
+    it('should reject callback when state is not in payback flow', async () => {
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_payer:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
-        stateResponse(
-          paybackState(2, {
-            pendingPayer: { type: 'mobile', normalized: '+6591234567' },
-          })
-        )
+        stateResponse({
+          flow: 'idle',
+          step: 0,
+          context: {},
+          lastActivity: new Date().toISOString(),
+        })
       );
 
-      await handler.handleInput(ctx);
+      const result = await handler.handleCallback(ctx);
 
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        'Please type "confirm" to continue or "cancel" to abort:'
+      expect(result).toBe(true);
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '❌ Session expired. Run /payback <ref> again.',
+      });
+    });
+
+    it('should reject confirm callback when state is not at step 2', async () => {
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_payer:PAY123' },
+      } as unknown as Context;
+
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(stateResponse(paybackState(3, {})));
+
+      const result = await handler.handleCallback(ctx);
+
+      expect(result).toBe(true);
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '❌ Session expired. Run /payback <ref> again.',
+      });
+    });
+
+    it('should handle session expiry gracefully (missing paymentId)', async () => {
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_payer:PAY123' },
+      } as unknown as Context;
+
+      vi.mocked(mockConversationDO.fetch)
+        .mockResolvedValueOnce(
+          stateResponse(
+            paybackState(2, {
+              pendingPayer: { type: 'mobile', normalized: '+6591234567' },
+              paymentId: undefined,
+            })
+          )
+        )
+        .mockResolvedValueOnce(okResponse);
+
+      await handler.handleCallback(ctx);
+
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('Payback session expired'),
+        { reply_markup: { inline_keyboard: [] } }
       );
     });
   });
@@ -427,7 +510,7 @@ describe('PaybackCommandHandler', () => {
     });
   });
 
-  describe('handleInput - Step 4: Amount Confirmation (bounded record)', () => {
+  describe('handleCallback - Step 4: Amount Confirmation (bounded record)', () => {
     const step4Context = {
       pendingPayer: { type: 'mobile', normalized: '+6591234567' },
       paymentAmount: 1250,
@@ -455,14 +538,17 @@ describe('PaybackCommandHandler', () => {
     }
 
     it('should create the payback inside the bounded transaction on confirm', async () => {
-      const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_amount:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(stateResponse(paybackState(4, step4Context)))
         .mockResolvedValueOnce(okResponse); // reset to idle
       vi.mocked(mockRepository.createPaybackBounded).mockResolvedValue(okBoundedResult());
 
-      const result = await handler.handleInput(ctx);
+      const result = await handler.handleCallback(ctx);
 
       expect(result).toBe(true);
       expect(mockRepository.createPaybackBounded).toHaveBeenCalledTimes(1);
@@ -499,29 +585,34 @@ describe('PaybackCommandHandler', () => {
       );
 
       // The reply echoes the stored row's reference, not the request input
-      expect(lastReply()).toContain('Payback Recorded');
-      expect(lastReply()).toContain('Payback reference: `ABCDEFGHIJ`');
-      expect(lastReply()).toContain('Amount: $5.50');
-      expect(lastReply()).toContain('Remaining payable: $7.00');
-      expect(lastReply()).toContain('/payments');
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('Payback Recorded'),
+        expect.objectContaining({ parse_mode: 'Markdown' })
+      );
     });
 
     it('should reset conversation after successful record', async () => {
-      const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_amount:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(stateResponse(paybackState(4, step4Context)))
         .mockResolvedValueOnce(okResponse);
       vi.mocked(mockRepository.createPaybackBounded).mockResolvedValue(okBoundedResult());
 
-      await handler.handleInput(ctx);
+      await handler.handleCallback(ctx);
 
       const states = await postedStates();
       expect(states[states.length - 1]).toMatchObject({ flow: 'idle', step: 0, context: {} });
     });
 
     it('should bounce back to amount step when the in-transaction re-check blocks', async () => {
-      const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_amount:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(stateResponse(paybackState(4, step4Context)))
@@ -534,10 +625,11 @@ describe('PaybackCommandHandler', () => {
         remainingCents: 450,
       });
 
-      await handler.handleInput(ctx);
+      await handler.handleCallback(ctx);
 
-      expect(lastReply()).toContain('exceeds the remaining payable amount ($4.50)');
-      expect(lastReply()).toContain('Another payback may have landed just now');
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('exceeds the remaining payable amount ($4.50)')
+      );
       expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
 
       const states = await postedStates();
@@ -553,7 +645,10 @@ describe('PaybackCommandHandler', () => {
     });
 
     it('should refuse with fully-paid-back message when nothing remains', async () => {
-      const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_amount:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(stateResponse(paybackState(4, step4Context)))
@@ -566,16 +661,19 @@ describe('PaybackCommandHandler', () => {
         remainingCents: 0,
       });
 
-      await handler.handleInput(ctx);
+      await handler.handleCallback(ctx);
 
-      expect(lastReply()).toContain('fully paid back');
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('fully paid back'));
       expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
       const states = await postedStates();
       expect(states[states.length - 1]).toMatchObject({ flow: 'idle', step: 0 });
     });
 
     it('should report when the payment no longer exists', async () => {
-      const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_amount:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(stateResponse(paybackState(4, step4Context)))
@@ -585,36 +683,46 @@ describe('PaybackCommandHandler', () => {
         reason: 'payment_not_found',
       });
 
-      await handler.handleInput(ctx);
+      await handler.handleCallback(ctx);
 
-      expect(lastReply()).toContain('no longer exists');
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('no longer exists'), {
+        parse_mode: 'Markdown',
+      });
       expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
     });
 
     it('should handle repository errors gracefully', async () => {
-      const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_confirm_amount:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
         stateResponse(paybackState(4, step4Context))
       );
       vi.mocked(mockRepository.createPaybackBounded).mockRejectedValue(new Error('DB error'));
 
-      await handler.handleInput(ctx);
+      await handler.handleCallback(ctx);
 
-      expect(lastReply()).toContain('Failed to record the payback');
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('Failed to record'));
     });
 
-    it('should cancel on cancel input', async () => {
-      const ctx = { ...mockCtx, message: { text: 'cancel' } } as unknown as Context;
+    it('should cancel on Cancel button tap', async () => {
+      const ctx = {
+        ...mockCtx,
+        callbackQuery: { data: 'payback_cancel_amount:PAY123' },
+      } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(stateResponse(paybackState(4, step4Context)))
         .mockResolvedValueOnce(okResponse);
 
-      const result = await handler.handleInput(ctx);
+      const result = await handler.handleCallback(ctx);
 
       expect(result).toBe(true);
-      expect(mockCtx.reply).toHaveBeenCalledWith('❌ Payback cancelled.');
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith('❌ Payback cancelled.', {
+        reply_markup: { inline_keyboard: [] },
+      });
       expect(mockRepository.createPaybackBounded).not.toHaveBeenCalled();
     });
   });

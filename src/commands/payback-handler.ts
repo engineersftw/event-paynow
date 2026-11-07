@@ -1,5 +1,5 @@
 import type { Context } from 'grammy';
-import { InputFile } from 'grammy';
+import { InlineKeyboard, InputFile } from 'grammy';
 import { detectProxyType, generateRef } from '../db/proxy-validation.js';
 import type { PayeeType, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
@@ -122,13 +122,13 @@ export class PaybackCommandHandler {
         await this.handlePayerReferenceInput(ctx, text, state);
         break;
       case 2:
-        await this.handlePayerConfirmation(ctx, text, state);
+      case 4:
+        // Steps 2 and 4 now wait for button taps, not text input.
+        // If user types here, nudge them to use the buttons.
+        await ctx.reply('⏳ Waiting for confirmation. Please tap a button above.');
         break;
       case 3:
         await this.handleAmountInput(ctx, text, state);
-        break;
-      case 4:
-        await this.handleAmountConfirmation(ctx, text, state);
         break;
     }
 
@@ -164,58 +164,111 @@ export class PaybackCommandHandler {
     });
 
     const typeLabel = normalized.type === 'mobile' ? 'Mobile number' : 'UEN';
+    const keyboard = new InlineKeyboard()
+      .text('✅ Confirm', `payback_confirm_payer:${state.context.paymentRef as string}`)
+      .text('❌ Cancel', `payback_cancel:${state.context.paymentRef as string}`);
+
     await ctx.reply(
-      `📱 Payer ${typeLabel}: ${normalized.normalized}\n\nType "confirm" to continue, or "cancel" to abort:`
+      `📱 Payer ${typeLabel}: ${normalized.normalized}\n\nTap a button to confirm or cancel:`,
+      { reply_markup: keyboard }
     );
   }
 
   /**
-   * Step 2: Handle payer confirmation
+   * Step 2: Handle payer confirmation (via inline button callback)
    */
-  private async handlePayerConfirmation(
-    ctx: Context,
-    input: string,
-    state: ConversationState
-  ): Promise<void> {
-    if (input.toLowerCase() === 'confirm') {
-      const paymentId = state.context.paymentId as number;
-      const paymentAmount = state.context.paymentAmount as number;
-
-      // Pre-check: show the current remaining bound. The authoritative re-check runs
-      // inside the D1 transaction at final confirmation (createPaybackBounded).
-      // Both pending and sent paybacks count — sent only marks delivery.
-      const paidBack = await this.repository.sumPaybacks(paymentId);
-      const remaining = paymentAmount - paidBack;
-
-      if (remaining <= 0) {
-        await this.resetState();
-        await ctx.reply(
-          '⚠️ This payment has already been fully paid back. There is nothing left to pay.'
-        );
-        return;
-      }
-
-      await this.setState({
-        flow: 'payback',
-        step: 3,
-        context: { ...state.context, remainingCents: remaining },
-        lastActivity: new Date().toISOString(),
-      });
-
-      await ctx.reply(
-        `💵 Enter payback amount (in dollars):\n\n` +
-          `Original payment: $${formatCents(paymentAmount)}\n` +
-          `Already paid back: $${formatCents(paidBack)}\n` +
-          `Maximum payback: $${formatCents(remaining)}\n\n` +
-          `You can enter a partial amount or the full remaining amount.`,
-        { parse_mode: 'Markdown' }
-      );
-    } else if (input.toLowerCase() === 'cancel') {
-      await this.resetState();
-      await ctx.reply('❌ Payback cancelled.');
-    } else {
-      await ctx.reply('Please type "confirm" to continue or "cancel" to abort:');
+  async handleCallback(ctx: Context): Promise<boolean> {
+    const data = ctx.callbackQuery?.data;
+    if (
+      !data ||
+      (!data.startsWith('payback_confirm_payer:') &&
+        !data.startsWith('payback_cancel:') &&
+        !data.startsWith('payback_confirm_amount:') &&
+        !data.startsWith('payback_cancel_amount:'))
+    ) {
+      return false; // Not ours — let the next dispatcher try
     }
+
+    const state = await this.getState();
+    if (state?.flow !== 'payback') {
+      await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /payback <ref> again.' });
+      return true;
+    }
+
+    // Handle payer confirmation
+    if (data.startsWith('payback_confirm_payer:')) {
+      if (state.step !== 2) {
+        await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /payback <ref> again.' });
+        return true;
+      }
+      await this.proceedToAmountStep(ctx, state);
+      return true;
+    }
+
+    if (data.startsWith('payback_cancel:') || data.startsWith('payback_cancel_amount:')) {
+      await this.resetState();
+      await ctx.editMessageText('❌ Payback cancelled.', { reply_markup: { inline_keyboard: [] } });
+      return true;
+    }
+
+    // Handle amount confirmation
+    if (data.startsWith('payback_confirm_amount:')) {
+      if (state.step !== 4) {
+        await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /payback <ref> again.' });
+        return true;
+      }
+      await this.createPaybackRecord(ctx, state);
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Step 2 → 3: Payer confirmed, proceed to amount entry
+   */
+  private async proceedToAmountStep(ctx: Context, state: ConversationState): Promise<void> {
+    const paymentId = state.context.paymentId as number | undefined;
+    const paymentAmount = state.context.paymentAmount as number;
+
+    if (!paymentId || !paymentAmount) {
+      await this.resetState();
+      await ctx.editMessageText('❌ Payback session expired. Run /payback <ref> to start over.', {
+        reply_markup: { inline_keyboard: [] },
+      });
+      return;
+    }
+
+    // Pre-check: show the current remaining bound. The authoritative re-check runs
+    // inside the D1 transaction at final confirmation (createPaybackBounded).
+    // Both pending and sent paybacks count — sent only marks delivery.
+    const paidBack = await this.repository.sumPaybacks(paymentId);
+    const remaining = paymentAmount - paidBack;
+
+    if (remaining <= 0) {
+      await this.resetState();
+      await ctx.editMessageText(
+        '⚠️ This payment has already been fully paid back. There is nothing left to pay.',
+        { reply_markup: { inline_keyboard: [] } }
+      );
+      return;
+    }
+
+    await this.setState({
+      flow: 'payback',
+      step: 3,
+      context: { ...state.context, remainingCents: remaining },
+      lastActivity: new Date().toISOString(),
+    });
+
+    await ctx.editMessageText(
+      `💵 Enter payback amount (in dollars):\n\n` +
+        `Original payment: $${formatCents(paymentAmount)}\n` +
+        `Already paid back: $${formatCents(paidBack)}\n` +
+        `Maximum payback: $${formatCents(remaining)}\n\n` +
+        `You can enter a partial amount or the full remaining amount.`,
+      { reply_markup: { inline_keyboard: [] } }
+    );
   }
 
   /**
@@ -226,8 +279,15 @@ export class PaybackCommandHandler {
     input: string,
     state: ConversationState
   ): Promise<void> {
-    const paymentId = state.context.paymentId as number;
+    const paymentId = state.context.paymentId as number | undefined;
     const paymentAmount = state.context.paymentAmount as number;
+
+    if (!paymentId || !paymentAmount) {
+      await this.resetState();
+      await ctx.reply('❌ Payback session expired. Please start over with /payback <ref>.');
+      return;
+    }
+
     const amountCents = parseAmount(input);
 
     if (amountCents === null) {
@@ -268,29 +328,20 @@ export class PaybackCommandHandler {
       lastActivity: new Date().toISOString(),
     });
 
+    const keyboard = new InlineKeyboard()
+      .text('✅ Confirm', `payback_confirm_amount:${state.context.paymentRef as string}`)
+      .text('❌ Cancel', `payback_cancel_amount:${state.context.paymentRef as string}`);
+
     await ctx.reply(
-      `💰 Payback amount: $${formatCents(amountCents)}\n\n` +
-        `Type "confirm" to record the payback, or "cancel" to abort:`
+      `💰 Payback amount: $${formatCents(amountCents)}\n\nTap a button to confirm or cancel:`,
+      { reply_markup: keyboard }
     );
   }
 
   /**
-   * Step 4: Handle amount confirmation and create the bounded payback record
+   * Step 4: Handle amount confirmation via inline button callback
+   * (Routed through handleCallback)
    */
-  private async handleAmountConfirmation(
-    ctx: Context,
-    input: string,
-    state: ConversationState
-  ): Promise<void> {
-    if (input.toLowerCase() === 'confirm') {
-      await this.createPaybackRecord(ctx, state);
-    } else if (input.toLowerCase() === 'cancel') {
-      await this.resetState();
-      await ctx.reply('❌ Payback cancelled.');
-    } else {
-      await ctx.reply('Please type "confirm" to record the payback or "cancel" to abort:');
-    }
-  }
 
   /**
    * Tasks 7.2 + 7.3: build the payback SGQR payload (PAYER as payee proxy),
@@ -300,9 +351,15 @@ export class PaybackCommandHandler {
   private async createPaybackRecord(ctx: Context, state: ConversationState): Promise<void> {
     try {
       const paymentRef = state.context.paymentRef as string;
-      const paymentId = state.context.paymentId as number;
+      const paymentId = state.context.paymentId as number | undefined;
       const payerProxy = state.context.pendingPayer as { type: PayeeType; normalized: string };
       const paybackAmount = state.context.paybackAmount as number;
+
+      if (!paymentId) {
+        await this.resetState();
+        await ctx.reply('❌ Payback session expired. Please start over with /payback <ref>.');
+        return;
+      }
 
       const paybackRef = generateRef();
 
@@ -369,14 +426,14 @@ export class PaybackCommandHandler {
       });
 
       await this.resetState();
-      await ctx.reply(
+      await ctx.editMessageText(
         `✅ *Payback Recorded!*\n\n` +
           `Payback reference: \`${result.payback.ref}\`\n` +
           `Amount: $${formatCents(result.payback.amountCents)}\n` +
           `Payer (now payee): ${payerProxy.normalized}\n` +
           `Remaining payable: $${formatCents(result.remainingCents)}\n\n` +
           'Use /payments to track it.',
-        { parse_mode: 'Markdown' }
+        { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }
       );
     } catch (error) {
       console.error('Failed to create payback record:', error);

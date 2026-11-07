@@ -185,11 +185,11 @@ describe('bot wiring (src/bot.ts)', () => {
     await bot.handleUpdate(callbackUpdate(userId, 'mark_received:WIRE-003'));
 
     expect(stub.callbackAnswers).toContain('✅ Payment marked as received!');
-    expect(stub.editedCaptions).toHaveLength(1);
-    const captionEdit = stub.editedCaptions[0]!;
-    expect(captionEdit.caption).toContain('✅ Received');
-    expect(captionEdit.caption).toContain('WIRE-003');
-    expect(captionEdit.replyMarkup?.inline_keyboard).toEqual([]);
+    // QR photo replaced with text message
+    expect(stub.sentMessages.some((m) => m.text.includes('✅ Received'))).toBe(true);
+    expect(stub.sentMessages.some((m) => m.text.includes('WIRE-003'))).toBe(true);
+    // Original QR photo message deleted
+    expect(stub.deletedMessages).toHaveLength(1);
 
     const payment = await repo.getPaymentByRef('WIRE-003');
     expect(payment!.status).toBe('received');

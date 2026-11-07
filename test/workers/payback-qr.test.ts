@@ -5,7 +5,14 @@ import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PaybackCommandHandler } from '../../src/commands/payback-handler';
 import { D1Repository } from '../../src/db/drizzle-repository';
 import type { ConversationDO } from '../../src/worker/conversation-do';
-import { applyTestSchema, bmpToRgba, TEST_BOT_INFO, TelegramStub, textUpdate } from './harness';
+import {
+  applyTestSchema,
+  bmpToRgba,
+  callbackUpdate,
+  TEST_BOT_INFO,
+  TelegramStub,
+  textUpdate,
+} from './harness';
 
 /**
  * Task 7.3: payback QR generation end-to-end in the Workers runtime.
@@ -52,6 +59,9 @@ function makeHarness(userId: number): Harness {
   bot.on('message:text', (ctx) => {
     return handler.handleInput(ctx) as Promise<void>;
   });
+  bot.on('callback_query:data', (ctx) => {
+    return handler.handleCallback(ctx) as Promise<void>;
+  });
 
   return { repo, bot };
 }
@@ -94,9 +104,11 @@ async function runPaybackConversation(
 ): Promise<void> {
   await bot.handleUpdate(textUpdate(userId, `/payback ${paymentRef}`));
   await bot.handleUpdate(textUpdate(userId, payerMobile));
-  await bot.handleUpdate(textUpdate(userId, 'confirm'));
+  // Step 2: payer confirmation via inline button
+  await bot.handleUpdate(callbackUpdate(userId, `payback_confirm_payer:${paymentRef}`));
   await bot.handleUpdate(textUpdate(userId, amount));
-  await bot.handleUpdate(textUpdate(userId, 'confirm'));
+  // Step 4: amount confirmation via inline button
+  await bot.handleUpdate(callbackUpdate(userId, `payback_confirm_amount:${paymentRef}`));
 }
 
 describe('payback QR end-to-end (task 7.3)', () => {
@@ -148,8 +160,8 @@ describe('payback QR end-to-end (task 7.3)', () => {
     expect(await repo.sumPaybacks(payment.id)).toBe(500);
 
     // Final text reply + conversation reset
-    expect(stub.lastText()).toContain('Payback Recorded');
-    expect(stub.lastText()).toContain('Remaining payable: $7.50');
+    expect(stub.editedMessages.some((m) => m.text.includes('Payback Recorded'))).toBe(true);
+    expect(stub.editedMessages.some((m) => m.text.includes('Remaining payable: $7.50'))).toBe(true);
   });
 
   it('5.00 + 3.00 against 12.50 succeeds, then 5.00 is blocked (spec scenario, live path)', async () => {
@@ -162,13 +174,13 @@ describe('payback QR end-to-end (task 7.3)', () => {
 
     expect(stub.sentPhotos).toHaveLength(2);
     expect(await repo.sumPaybacks(payment.id)).toBe(800);
-    expect(stub.lastText()).toContain('Remaining payable: $4.50');
+    expect(stub.editedMessages.some((m) => m.text.includes('Remaining payable: $4.50'))).toBe(true);
 
     // Third payback of 5.00 exceeds the 4.50 remaining: rejected at the amount
     // step (step 3), so no final confirm is sent and nothing is recorded
     await bot.handleUpdate(textUpdate(userId, '/payback PAY73002'));
     await bot.handleUpdate(textUpdate(userId, '98765432'));
-    await bot.handleUpdate(textUpdate(userId, 'confirm'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_payer:PAY73002'));
     await bot.handleUpdate(textUpdate(userId, '5.00'));
 
     expect(stub.sentPhotos).toHaveLength(2); // no third upload
@@ -177,14 +189,14 @@ describe('payback QR end-to-end (task 7.3)', () => {
 
     // The blocked conversation may continue with a fitting amount
     await bot.handleUpdate(textUpdate(userId, '4.50'));
-    await bot.handleUpdate(textUpdate(userId, 'confirm'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_amount:PAY73002'));
     expect(stub.sentPhotos).toHaveLength(3);
     expect(await repo.sumPaybacks(payment.id)).toBe(1250);
 
     // Fully paid back: another attempt is refused with the spec message
     await runPaybackConversation(bot, userId, 'PAY73002', '98765432', '1.00');
     expect(stub.sentPhotos).toHaveLength(3);
-    expect(stub.lastText()).toContain('fully paid back');
+    expect(stub.editedMessages.some((m) => m.text.includes('fully paid back'))).toBe(true);
   });
 
   it('rejects a payback for someone else\u2019s payment', async () => {

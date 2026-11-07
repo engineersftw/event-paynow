@@ -1,10 +1,13 @@
 import qrcode from 'qrcode-generator';
+import { isLogoOpaque, LOGO_COLOR, logoHeight, logoWidth } from './paynow-logo.js';
 
 /**
- * Render a payload string as a QR code BMP image (Uint8Array).
+ * Render a payload string as a QR code BMP image (Uint8Array) with the PayNow
+ * logo overlaid in the center.
  *
- * Uses error correction level M (15% recovery) and version auto-detect.
- * Pure JS — no canvas, no Buffer, runs in Workers isolate.
+ * Uses error correction level H (30% recovery) so the center logo can be
+ * recovered by scanners. Pure JS — no canvas, no Buffer, runs in Workers
+ * isolate and in Node identically.
  *
  * BMP chosen for simplicity (no zlib/deflate needed for PNG).
  * Telegram accepts BMP in sendPhoto.
@@ -13,15 +16,30 @@ import qrcode from 'qrcode-generator';
  * @returns BMP image as Uint8Array.
  */
 export async function renderQrPng(payload: string): Promise<Uint8Array> {
-  // Generate QR matrix using qrcode-generator
-  // Type 0 = auto-detect version, "M" = error correction level
-  const qr = qrcode(0, 'M');
+  // Generate QR matrix using qrcode-generator.
+  // Type 0 = auto-detect version, "H" = 30% error correction (headroom for
+  // the center logo overlay).
+  const qr = qrcode(0, 'H');
   qr.addData(payload);
   qr.make();
 
   const moduleCount = qr.getModuleCount();
-  const scale = 10; // pixels per module (design §3: scale 8–12)
+  // 8 px/module (design §3: 8–12) keeps the uncompressed BMP under 1MB even at
+  // error-correction level H + the center logo overlay.
+  const scale = 8;
   const margin = 2; // modules of white border
+
+  // Center logo geometry (in modules), preserving the logo's aspect ratio.
+  const logoAspect = logoWidth / logoHeight;
+  const logoBoxW = Math.max(4, Math.floor(moduleCount * 0.24));
+  const logoBoxH = Math.max(2, Math.floor(logoBoxW / logoAspect));
+  const logoPad = 1; // modules of white padding around the logo
+  const centerX = moduleCount / 2;
+  const centerY = moduleCount / 2;
+  const halfLogoW = logoBoxW / 2;
+  const halfLogoH = logoBoxH / 2;
+  const halfClearW = halfLogoW + logoPad;
+  const halfClearH = halfLogoH + logoPad;
 
   const imageSize = moduleCount + margin * 2;
   const pixelSize = imageSize * scale;
@@ -61,28 +79,51 @@ export async function renderQrPng(payload: string): Promise<Uint8Array> {
   view.setUint32(46, 0, true); // colors in palette
   view.setUint32(50, 0, true); // important colors
 
+  const [logoR, logoG, logoB] = LOGO_COLOR;
+
   // Pixel data (24-bit BGR, top-down)
   let offset = 54;
   for (let y = 0; y < pixelSize; y++) {
-    const moduleY = Math.floor(y / scale) - margin;
+    const fy = y / scale - margin; // fractional module coordinate
+    const moduleY = Math.floor(fy);
     for (let x = 0; x < pixelSize; x++) {
-      const moduleX = Math.floor(x / scale) - margin;
+      const fx = x / scale - margin;
+      const moduleX = Math.floor(fx);
 
-      let isBlack = false;
-      if (moduleY >= 0 && moduleY < moduleCount && moduleX >= 0 && moduleX < moduleCount) {
-        isBlack = qr.isDark(moduleY, moduleX);
+      // Default to the QR module value (black on white).
+      let r = 255;
+      let g = 255;
+      let b = 255;
+
+      const dx = fx - centerX;
+      const dy = fy - centerY;
+
+      if (Math.abs(dx) < halfClearW && Math.abs(dy) < halfClearH) {
+        // Inside the white clear box behind the logo.
+        if (Math.abs(dx) < halfLogoW && Math.abs(dy) < halfLogoH) {
+          // Sample the logo mask and draw the brand color where opaque.
+          const u = (dx + halfLogoW) / logoBoxW;
+          const v = (dy + halfLogoH) / logoBoxH;
+          const lx = Math.min(logoWidth - 1, Math.max(0, Math.floor(u * logoWidth)));
+          const ly = Math.min(logoHeight - 1, Math.max(0, Math.floor(v * logoHeight)));
+          if (isLogoOpaque(lx, ly)) {
+            r = logoR;
+            g = logoG;
+            b = logoB;
+          }
+        }
+      } else if (moduleY >= 0 && moduleY < moduleCount && moduleX >= 0 && moduleX < moduleCount) {
+        if (qr.isDark(moduleY, moduleX)) {
+          r = 0;
+          g = 0;
+          b = 0;
+        }
       }
 
       // BMP is BGR
-      if (isBlack) {
-        view.setUint8(offset++, 0); // B
-        view.setUint8(offset++, 0); // G
-        view.setUint8(offset++, 0); // R
-      } else {
-        view.setUint8(offset++, 255); // B
-        view.setUint8(offset++, 255); // G
-        view.setUint8(offset++, 255); // R
-      }
+      view.setUint8(offset++, b);
+      view.setUint8(offset++, g);
+      view.setUint8(offset++, r);
     }
     // Row padding
     for (let p = 0; p < padding; p++) {
