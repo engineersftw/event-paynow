@@ -2,7 +2,15 @@ import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
 import { D1Repository } from '../../src/db/drizzle-repository';
 
-// Apply migrations once before all tests
+/**
+ * Repository integration tests against a real local D1 binding.
+ *
+ * Storage isolation is PER TEST FILE in the Workers Vitest integration
+ * (see docs isolation-and-concurrency), so every test seeds its own unique
+ * user ids / refs — state accumulates across tests within this file.
+ */
+
+// Apply schema once before all tests (idempotent)
 beforeAll(async () => {
   const statements = [
     `CREATE TABLE IF NOT EXISTS users (
@@ -46,7 +54,7 @@ beforeAll(async () => {
     `CREATE INDEX IF NOT EXISTS idx_paybacks_payment_id ON paybacks(payment_id)`,
     `CREATE INDEX IF NOT EXISTS idx_paybacks_ref ON paybacks(ref)`
   ];
-  
+
   for (const stmt of statements) {
     await env.DB.prepare(stmt).run();
   }
@@ -54,17 +62,45 @@ beforeAll(async () => {
 
 describe('D1Repository', () => {
   let repo: D1Repository;
-  const testUser = {
-    telegramId: 123456789,
-    payeeType: 'mobile' as const,
-    payeeValue: '+6591234567',
-    displayName: 'Test User',
-  };
   const testTimestamp = '2024-01-01T00:00:00Z';
 
-  beforeEach(() => {
-    // Database is seeded by beforeAll hook
+  // Per-test-unique fixtures (storage is shared across tests in this file)
+  let idSeq = 0;
+  const nextUserId = () => 500000000 + (++idSeq);
+  const nextRef = (prefix: string) => `${prefix}-${idSeq}-${++idSeq}`;
+
+  let testUser: {
+    telegramId: number;
+    payeeType: 'mobile';
+    payeeValue: string;
+    displayName: string;
+  };
+
+  function makePayment(overrides: Record<string, unknown> = {}) {
+    return {
+      ref: nextRef('pay-ref'),
+      userId: testUser.telegramId,
+      description: 'Test payment',
+      amountCents: 1000,
+      payeeType: 'mobile' as const,
+      payeeValue: '+6591234567',
+      status: 'pending' as const,
+      source: 'manual' as const,
+      qrPayload: '00020101021126380009SG.PAYNOW010100211+6591234567030115204000053037025802SG5908Test User6009Singapore63041234',
+      ...overrides,
+    };
+  }
+
+  beforeEach(async () => {
     repo = new D1Repository(env.DB);
+    testUser = {
+      telegramId: nextUserId(),
+      payeeType: 'mobile',
+      payeeValue: '+6591234567',
+      displayName: 'Test User',
+    };
+    // Seed a fresh user for every test
+    await repo.upsertUser({ ...testUser, timestamp: testTimestamp });
   });
 
   // ============================================================================
@@ -73,21 +109,18 @@ describe('D1Repository', () => {
 
   describe('Users', () => {
     it('creates a new user', async () => {
-      const user = await repo.upsertUser({ ...testUser, timestamp: testTimestamp });
+      const user = await repo.getUser(testUser.telegramId);
 
-      expect(user.telegramId).toBe(testUser.telegramId);
-      expect(user.payeeType).toBe(testUser.payeeType);
-      expect(user.payeeValue).toBe(testUser.payeeValue);
-      expect(user.displayName).toBe(testUser.displayName);
-      expect(user.createdAt).toBe(testTimestamp);
-      expect(user.updatedAt).toBe(testTimestamp);
+      expect(user).not.toBeNull();
+      expect(user!.telegramId).toBe(testUser.telegramId);
+      expect(user!.payeeType).toBe(testUser.payeeType);
+      expect(user!.payeeValue).toBe(testUser.payeeValue);
+      expect(user!.displayName).toBe(testUser.displayName);
+      expect(user!.createdAt).toBe(testTimestamp);
+      expect(user!.updatedAt).toBe(testTimestamp);
     });
 
     it('updates an existing user', async () => {
-      // Create user
-      await repo.upsertUser({ ...testUser, timestamp: testTimestamp });
-
-      // Update user
       const updatedUser = await repo.upsertUser({
         telegramId: testUser.telegramId,
         payeeType: 'uen',
@@ -104,8 +137,6 @@ describe('D1Repository', () => {
     });
 
     it('retrieves a user by telegramId', async () => {
-      await repo.upsertUser({ ...testUser, timestamp: testTimestamp });
-
       const user = await repo.getUser(testUser.telegramId);
 
       expect(user).not.toBeNull();
@@ -118,8 +149,8 @@ describe('D1Repository', () => {
     });
 
     it('enforces cross-user isolation', async () => {
-      const user1 = { telegramId: 111111111, payeeType: 'mobile' as const, payeeValue: '+6591111111', displayName: 'User 1' };
-      const user2 = { telegramId: 222222222, payeeType: 'uen' as const, payeeValue: '201111111A', displayName: 'User 2' };
+      const user1 = { telegramId: nextUserId(), payeeType: 'mobile' as const, payeeValue: '+6591111111', displayName: 'User 1' };
+      const user2 = { telegramId: nextUserId(), payeeType: 'uen' as const, payeeValue: '201111111A', displayName: 'User 2' };
 
       await repo.upsertUser({ ...user1, timestamp: testTimestamp });
       await repo.upsertUser({ ...user2, timestamp: testTimestamp });
@@ -137,43 +168,25 @@ describe('D1Repository', () => {
   // ============================================================================
 
   describe('Payments', () => {
-    const testPayment = {
-      ref: 'pay-ref-001',
-      userId: 123456789,
-      description: 'Test payment',
-      amountCents: 1000,
-      payeeType: 'mobile' as const,
-      payeeValue: '+6591234567',
-      status: 'pending' as const,
-      source: 'manual' as const,
-      qrPayload: '00020101021126380009SG.PAYNOW010100211+6591234567030115204000053037025802SG5908Test User6009Singapore63041234',
-    };
-
-    beforeEach(async () => {
-      // Create user for payment tests
-      await repo.upsertUser({ ...testUser, timestamp: testTimestamp });
-    });
-
     it('creates a new payment', async () => {
-      const payment = await repo.createPayment({
-        ...testPayment,
-        timestamp: testTimestamp,
-      });
+      const input = makePayment();
+      const payment = await repo.createPayment({ ...input, timestamp: testTimestamp });
 
-      expect(payment.ref).toBe(testPayment.ref);
-      expect(payment.userId).toBe(testPayment.userId);
+      expect(payment.ref).toBe(input.ref);
+      expect(payment.userId).toBe(testUser.telegramId);
       expect(payment.status).toBe('pending');
       expect(payment.receivedAt).toBeNull();
       expect(payment.createdAt).toBe(testTimestamp);
     });
 
     it('retrieves a payment by ref', async () => {
-      await repo.createPayment({ ...testPayment, timestamp: testTimestamp });
+      const input = makePayment();
+      await repo.createPayment({ ...input, timestamp: testTimestamp });
 
-      const payment = await repo.getPaymentByRef(testPayment.ref);
+      const payment = await repo.getPaymentByRef(input.ref);
 
       expect(payment).not.toBeNull();
-      expect(payment!.ref).toBe(testPayment.ref);
+      expect(payment!.ref).toBe(input.ref);
     });
 
     it('returns null for non-existent payment ref', async () => {
@@ -182,24 +195,16 @@ describe('D1Repository', () => {
     });
 
     it('lists payments by user', async () => {
-      await repo.createPayment({
-        ...testPayment,
-        ref: 'pay-ref-001',
-        timestamp: testTimestamp,
-      });
-      await repo.createPayment({
-        ...testPayment,
-        ref: 'pay-ref-002',
-        description: 'Second payment',
-        amountCents: 2000,
-        timestamp: testTimestamp,
-      });
+      const p1 = makePayment({ description: 'First' });
+      const p2 = makePayment({ description: 'Second', amountCents: 2000 });
+      await repo.createPayment({ ...p1, timestamp: testTimestamp });
+      await repo.createPayment({ ...p2, timestamp: testTimestamp });
 
-      const payments = await repo.listPaymentsByUser(testPayment.userId);
+      const payments = await repo.listPaymentsByUser(testUser.telegramId);
 
       expect(payments).toHaveLength(2);
-      expect(payments.map(p => p.ref)).toContain('pay-ref-001');
-      expect(payments.map(p => p.ref)).toContain('pay-ref-002');
+      expect(payments.map(p => p.ref)).toContain(p1.ref);
+      expect(payments.map(p => p.ref)).toContain(p2.ref);
     });
 
     it('returns empty array for user with no payments', async () => {
@@ -208,10 +213,11 @@ describe('D1Repository', () => {
     });
 
     it('updates payment status to received', async () => {
-      await repo.createPayment({ ...testPayment, timestamp: testTimestamp });
+      const input = makePayment();
+      await repo.createPayment({ ...input, timestamp: testTimestamp });
 
       const updated = await repo.updatePaymentStatus(
-        testPayment.ref,
+        input.ref,
         'received',
         'manual',
         '2024-01-02T00:00:00Z'
@@ -224,10 +230,11 @@ describe('D1Repository', () => {
     });
 
     it('updates payment status from notification source', async () => {
-      await repo.createPayment({ ...testPayment, timestamp: testTimestamp });
+      const input = makePayment();
+      await repo.createPayment({ ...input, timestamp: testTimestamp });
 
       const updated = await repo.updatePaymentStatus(
-        testPayment.ref,
+        input.ref,
         'received',
         'notification',
         '2024-01-02T00:00:00Z'
@@ -247,13 +254,11 @@ describe('D1Repository', () => {
     });
 
     it('enforces read-back-after-write consistency', async () => {
-      // Create payment
       const created = await repo.createPayment({
-        ...testPayment,
+        ...makePayment(),
         timestamp: testTimestamp,
       });
 
-      // Immediately read it back
       const retrieved = await repo.getPaymentByRef(created.ref);
 
       expect(retrieved).not.toBeNull();
@@ -262,33 +267,25 @@ describe('D1Repository', () => {
     });
 
     it('enforces cross-user isolation on payments', async () => {
-      const user1 = 111111111;
-      const user2 = 222222222;
+      const user1 = nextUserId();
+      const user2 = nextUserId();
 
       await repo.upsertUser({ telegramId: user1, payeeType: 'mobile', payeeValue: '+6591111111', displayName: 'User 1', timestamp: testTimestamp });
       await repo.upsertUser({ telegramId: user2, payeeType: 'uen', payeeValue: '201111111A', displayName: 'User 2', timestamp: testTimestamp });
 
-      await repo.createPayment({
-        ...testPayment,
-        userId: user1,
-        ref: 'user1-payment',
-        timestamp: testTimestamp,
-      });
-      await repo.createPayment({
-        ...testPayment,
-        userId: user2,
-        ref: 'user2-payment',
-        timestamp: testTimestamp,
-      });
+      const p1 = makePayment({ userId: user1, ref: nextRef('user1-payment') });
+      const p2 = makePayment({ userId: user2, ref: nextRef('user2-payment') });
+      await repo.createPayment({ ...p1, timestamp: testTimestamp });
+      await repo.createPayment({ ...p2, timestamp: testTimestamp });
 
       const user1Payments = await repo.listPaymentsByUser(user1);
       const user2Payments = await repo.listPaymentsByUser(user2);
 
       expect(user1Payments).toHaveLength(1);
-      expect(user1Payments[0].ref).toBe('user1-payment');
+      expect(user1Payments[0]!.ref).toBe(p1.ref);
 
       expect(user2Payments).toHaveLength(1);
-      expect(user2Payments[0].ref).toBe('user2-payment');
+      expect(user2Payments[0]!.ref).toBe(p2.ref);
     });
   });
 
@@ -297,32 +294,20 @@ describe('D1Repository', () => {
   // ============================================================================
 
   describe('Paybacks', () => {
-    const testPayment = {
-      ref: 'pay-ref-001',
-      userId: 123456789,
-      description: 'Test payment',
-      amountCents: 1000,
-      payeeType: 'mobile' as const,
-      payeeValue: '+6591234567',
-      status: 'received' as const,
-      source: 'manual' as const,
-      qrPayload: '00020101021126380009SG.PAYNOW010100211+6591234567030115204000053037025802SG5908Test User6009Singapore63041234',
-    };
-
     let paymentId: number;
 
     beforeEach(async () => {
-      await repo.upsertUser({ ...testUser, timestamp: testTimestamp });
       const payment = await repo.createPayment({
-        ...testPayment,
+        ...makePayment({ status: 'received' }),
         timestamp: testTimestamp,
       });
       paymentId = payment.id;
     });
 
     it('creates a new payback', async () => {
+      const ref = nextRef('payback-ref');
       const payback = await repo.createPayback({
-        ref: 'payback-ref-001',
+        ref,
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765432',
@@ -332,7 +317,7 @@ describe('D1Repository', () => {
         timestamp: testTimestamp,
       });
 
-      expect(payback.ref).toBe('payback-ref-001');
+      expect(payback.ref).toBe(ref);
       expect(payback.paymentId).toBe(paymentId);
       expect(payback.amountCents).toBe(500);
       expect(payback.status).toBe('pending');
@@ -340,8 +325,10 @@ describe('D1Repository', () => {
     });
 
     it('lists paybacks by payment', async () => {
+      const r1 = nextRef('payback-ref');
+      const r2 = nextRef('payback-ref');
       await repo.createPayback({
-        ref: 'payback-ref-001',
+        ref: r1,
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765432',
@@ -351,7 +338,7 @@ describe('D1Repository', () => {
         timestamp: testTimestamp,
       });
       await repo.createPayback({
-        ref: 'payback-ref-002',
+        ref: r2,
         paymentId,
         payerType: 'uen',
         payerValue: '201234567A',
@@ -364,8 +351,8 @@ describe('D1Repository', () => {
       const paybacks = await repo.listPaybacksByPayment(paymentId);
 
       expect(paybacks).toHaveLength(2);
-      expect(paybacks.map(p => p.ref)).toContain('payback-ref-001');
-      expect(paybacks.map(p => p.ref)).toContain('payback-ref-002');
+      expect(paybacks.map(p => p.ref)).toContain(r1);
+      expect(paybacks.map(p => p.ref)).toContain(r2);
     });
 
     it('returns empty array for payment with no paybacks', async () => {
@@ -375,7 +362,7 @@ describe('D1Repository', () => {
 
     it('sums paybacks across all statuses', async () => {
       await repo.createPayback({
-        ref: 'payback-ref-001',
+        ref: nextRef('payback-ref'),
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765432',
@@ -385,7 +372,7 @@ describe('D1Repository', () => {
         timestamp: testTimestamp,
       });
       await repo.createPayback({
-        ref: 'payback-ref-002',
+        ref: nextRef('payback-ref'),
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765433',
@@ -401,7 +388,7 @@ describe('D1Repository', () => {
 
     it('includes sent paybacks in sum (bound counts delivery-completed paybacks)', async () => {
       await repo.createPayback({
-        ref: 'payback-ref-001',
+        ref: nextRef('payback-ref'),
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765432',
@@ -411,7 +398,7 @@ describe('D1Repository', () => {
         timestamp: testTimestamp,
       });
       await repo.createPayback({
-        ref: 'payback-ref-002',
+        ref: nextRef('payback-ref'),
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765433',
@@ -435,8 +422,9 @@ describe('D1Repository', () => {
     // --------------------------------------------------------------------------
 
     it('retrieves a payback by its ref', async () => {
+      const ref = nextRef('pb-lookup');
       const created = await repo.createPayback({
-        ref: 'pb-lookup-001',
+        ref,
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765432',
@@ -446,10 +434,10 @@ describe('D1Repository', () => {
         timestamp: testTimestamp,
       });
 
-      const fetched = await repo.getPaybackByRef('pb-lookup-001');
+      const fetched = await repo.getPaybackByRef(ref);
       expect(fetched).not.toBeNull();
       expect(fetched!.id).toBe(created.id);
-      expect(fetched!.ref).toBe('pb-lookup-001');
+      expect(fetched!.ref).toBe(ref);
       expect(fetched!.paymentId).toBe(paymentId);
       expect(fetched!.status).toBe('pending');
       expect(fetched!.sentAt).toBeNull();
@@ -461,8 +449,9 @@ describe('D1Repository', () => {
     });
 
     it('marks a pending payback as sent with a timestamp', async () => {
+      const ref = nextRef('pb-sent');
       await repo.createPayback({
-        ref: 'pb-sent-001',
+        ref,
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765432',
@@ -472,14 +461,14 @@ describe('D1Repository', () => {
         timestamp: testTimestamp,
       });
 
-      const updated = await repo.updatePaybackStatus('pb-sent-001', 'sent', '2024-01-02T10:00:00Z');
+      const updated = await repo.updatePaybackStatus(ref, 'sent', '2024-01-02T10:00:00Z');
 
       expect(updated).not.toBeNull();
       expect(updated!.status).toBe('sent');
       expect(updated!.sentAt).toBe('2024-01-02T10:00:00Z');
 
       // Read back: transition persisted
-      const fetched = await repo.getPaybackByRef('pb-sent-001');
+      const fetched = await repo.getPaybackByRef(ref);
       expect(fetched!.status).toBe('sent');
       expect(fetched!.sentAt).toBe('2024-01-02T10:00:00Z');
 
@@ -488,8 +477,9 @@ describe('D1Repository', () => {
     });
 
     it('rejects a duplicate pending → sent transition (compare-and-set)', async () => {
+      const ref = nextRef('pb-sent');
       await repo.createPayback({
-        ref: 'pb-sent-002',
+        ref,
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765432',
@@ -499,15 +489,15 @@ describe('D1Repository', () => {
         timestamp: testTimestamp,
       });
 
-      const first = await repo.updatePaybackStatus('pb-sent-002', 'sent', '2024-01-02T10:00:00Z');
+      const first = await repo.updatePaybackStatus(ref, 'sent', '2024-01-02T10:00:00Z');
       expect(first).not.toBeNull();
 
       // Second tap: no longer eligible — guarded update matches nothing
-      const second = await repo.updatePaybackStatus('pb-sent-002', 'sent', '2024-01-02T10:05:00Z');
+      const second = await repo.updatePaybackStatus(ref, 'sent', '2024-01-02T10:05:00Z');
       expect(second).toBeNull();
 
       // Original timestamp survives — no overwrite
-      const fetched = await repo.getPaybackByRef('pb-sent-002');
+      const fetched = await repo.getPaybackByRef(ref);
       expect(fetched!.sentAt).toBe('2024-01-02T10:00:00Z');
     });
 
@@ -517,8 +507,9 @@ describe('D1Repository', () => {
     });
 
     it('concurrent duplicate taps yield exactly one winner', async () => {
+      const ref = nextRef('pb-sent');
       await repo.createPayback({
-        ref: 'pb-sent-race',
+        ref,
         paymentId,
         payerType: 'mobile',
         payerValue: '+6598765432',
@@ -529,14 +520,14 @@ describe('D1Repository', () => {
       });
 
       const [a, b] = await Promise.all([
-        repo.updatePaybackStatus('pb-sent-race', 'sent', '2024-01-02T10:00:00Z'),
-        repo.updatePaybackStatus('pb-sent-race', 'sent', '2024-01-02T10:00:01Z'),
+        repo.updatePaybackStatus(ref, 'sent', '2024-01-02T10:00:00Z'),
+        repo.updatePaybackStatus(ref, 'sent', '2024-01-02T10:00:01Z'),
       ]);
 
       const winners = [a, b].filter((r) => r !== null);
       expect(winners).toHaveLength(1);
 
-      const fetched = await repo.getPaybackByRef('pb-sent-race');
+      const fetched = await repo.getPaybackByRef(ref);
       expect(fetched!.status).toBe('sent');
     });
   });

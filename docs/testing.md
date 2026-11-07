@@ -1,6 +1,12 @@
 # Testing Strategy
 
-Two vitest pools configured via `vitest.workspace.ts`:
+Two vitest pools configured via `vitest.config.ts` projects
+(`vitest.node.config.ts` + `vitest.workers.config.ts`, the latter using the
+`cloudflareTest()` plugin from `@cloudflare/vitest-plugin`):
+
+**Storage isolation:** the Workers integration isolates D1/DO storage **per test
+file**, not per test — tests in one file share writes. Every test must seed its
+own unique user ids/refs (see `test/workers/repository.test.ts` factories).
 
 ## 1. Node pool — runtime-agnostic core
 

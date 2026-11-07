@@ -41,7 +41,7 @@ npm run db:generate    # drizzle-kit generate (create SQL migrations)
 
 ## Testing Strategy
 
-Two vitest pools configured via `vitest.workspace.ts`:
+Two vitest pools configured via `vitest.config.ts` projects:
 
 1. **Node pool** (`test/node/`) — Runtime-agnostic core: SGQR TLV/CRC16, amount parsing, proxy validation, QR rendering with jsQR round-trip verification.
 2. **Workers pool** (`test/workers/`) — Worker-runtime integration: D1 repository layer, Durable Object conversation FSM, webhook secret validation, concurrent payback serialization.
