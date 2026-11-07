@@ -136,6 +136,37 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(flattened.some((b) => b.callback_data === 'payback:WIRE-002')).toBe(true);
   });
 
+  it('pagination callback renders the next page with Prev button', async () => {
+    const userId = 800000011;
+    const { bot, repo } = makeWiredBot();
+    await repo.upsertUser({
+      telegramId: userId,
+      payeeType: 'mobile',
+      payeeValue: '+6591234567',
+      displayName: 'Wiring User',
+      timestamp: T0,
+    });
+    // Seed 6 payments to force 2 pages (pageSize = 5)
+    for (let i = 1; i <= 6; i++) {
+      await seedPayment(repo, userId, `PAGE-${String(i).padStart(3, '0')}`, 1000, 'pending');
+    }
+
+    // Page 1: Next button only
+    await bot.handleUpdate(textUpdate(userId, '/payments'));
+    const page1 = stub.sentMessages[stub.sentMessages.length - 1]!;
+    const kb1 = (page1.replyMarkup?.inline_keyboard ?? []).flat();
+    expect(kb1.some((b) => b.callback_data === 'payments:2')).toBe(true);
+    expect(kb1.some((b) => b.callback_data === 'payments:0')).toBe(false);
+
+    // Page 2 via callback: Prev button only, no PAGE-006 (it's on page 1)
+    await bot.handleUpdate(callbackUpdate(userId, 'payments:2'));
+    const page2 = stub.sentMessages[stub.sentMessages.length - 1]!;
+    expect(page2.text).toContain('Page 2 of 2');
+    const kb2 = (page2.replyMarkup?.inline_keyboard ?? []).flat();
+    expect(kb2.some((b) => b.callback_data === 'payments:1')).toBe(true);
+    expect(kb2.some((b) => b.callback_data?.startsWith('payments:3'))).toBe(false);
+  });
+
   it('callback_query mark_received transitions the payment through the wired bot', async () => {
     const userId = 800000003;
     const { bot, repo } = makeWiredBot();
