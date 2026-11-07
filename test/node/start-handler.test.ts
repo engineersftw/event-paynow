@@ -217,43 +217,6 @@ describe('StartCommandHandler', () => {
   });
 
   describe('handleInput - amount collection', () => {
-    it('accepts valid amount and creates payment', async () => {
-      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent);
-
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce({
-          status: 200,
-          json: async () => ({
-            flow: 'start',
-            step: 4,
-            context: {
-              userId: 123456789,
-              chatId: 123456789,
-              topicId: 0,
-              eventRef: 'EVT-TEST1234',
-              eventName: 'Test Event',
-              payerType: 'mobile',
-              payerValue: '+6591234568',
-              payerName: 'Alice',
-            },
-            lastActivity: new Date().toISOString(),
-          }),
-        })
-        .mockResolvedValueOnce({ status: 200 });
-
-      const ctx = { ...mockCtx, message: { text: '12.50' } } as unknown as Context;
-      const consumed = await handler.handleInput(ctx);
-
-      expect(consumed).toBe(true);
-      expect(mockRepository.createPayment).toHaveBeenCalled();
-      const input = vi.mocked(mockRepository.createPayment).mock.calls[0]![0];
-      expect(input.eventId).toBe(1);
-      expect(input.description).toBe('Test Event');
-      expect(input.payerValue).toBe('+6591234568');
-      expect(input.payerName).toBe('Alice');
-      expect(mockCtx.replyWithPhoto).toHaveBeenCalledTimes(1);
-    });
-
     it('rejects invalid amount', async () => {
       vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce({
         status: 200,
@@ -276,6 +239,186 @@ describe('StartCommandHandler', () => {
 
       expect(consumed).toBe(true);
       expect(lastReply()).toContain('Invalid amount');
+      expect(mockRepository.createPayment).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('confirmation step', () => {
+    const base = {
+      userId: 123456789,
+      chatId: 123456789,
+      topicId: 0,
+      eventRef: 'EVT-TEST1234',
+      eventName: 'Test Event',
+      payerType: 'mobile',
+      payerValue: '+6591234568',
+      payerName: 'Alice',
+    };
+    const at = (step: number, extra: Record<string, unknown> = {}) => ({
+      flow: 'start',
+      step,
+      context: { ...base, ...extra },
+      lastActivity: new Date().toISOString(),
+    });
+    const step5 = at(5, { amountCents: 1250, payeeValue: '+6591234567' });
+
+    /** DO double: GET → state, POST /state → recorded, POST /claim → 200 state or 409. */
+    function mockDo(state: unknown, claim: 'ok' | 'conflict' = 'ok') {
+      const posted: Array<Record<string, any>> = [];
+      vi.mocked(mockConversationDO.fetch).mockImplementation((async (req: Request) => {
+        const url = new URL(req.url);
+        if (url.pathname === '/claim') {
+          return claim === 'ok'
+            ? stateResponse(state)
+            : ({ status: 409, body: null } as unknown as Response);
+        }
+        if (req.method === 'POST') {
+          posted.push(JSON.parse(await req.text()));
+          return { status: 200 } as unknown as Response;
+        }
+        return stateResponse(state);
+      }) as never);
+      return posted;
+    }
+
+    const callback = (data: string) =>
+      ({ ...mockCtx, callbackQuery: { data } }) as unknown as Context;
+
+    it('a valid amount shows a summary with Confirm/Cancel and persists nothing', async () => {
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent);
+      const posted = mockDo(at(4));
+
+      const consumed = await handler.handleInput({
+        ...mockCtx,
+        message: { text: '12.50' },
+      } as unknown as Context);
+
+      expect(consumed).toBe(true);
+      expect(lastReply()).toBe(
+        '🧾 Confirm payment request\n\nEvent: Test Event\nPayer: Alice (+6591234568)\n' +
+          'Pay to: +6591234567\nAmount: SGD 12.50'
+      );
+      const opts = vi.mocked(mockCtx.reply).mock.calls.at(-1)![1] as {
+        reply_markup: { inline_keyboard: Array<Array<{ callback_data: string }>> };
+      };
+      expect(opts.reply_markup.inline_keyboard.flat().map((b) => b.callback_data)).toEqual([
+        'start_confirm',
+        'start_cancel',
+      ]);
+      expect(posted.at(-1)).toMatchObject({
+        step: 5,
+        context: { amountCents: 1250, payeeValue: '+6591234567' },
+      });
+      expect(mockRepository.createPayment).not.toHaveBeenCalled();
+      expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
+    });
+
+    it('does not show a summary when the event closed before the amount was entered', async () => {
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue({
+        ...openEvent,
+        status: 'closed',
+      });
+      const posted = mockDo(at(4));
+
+      await handler.handleInput({ ...mockCtx, message: { text: '12.50' } } as unknown as Context);
+
+      expect(lastReply()).toContain('event is closed');
+      expect(posted.at(-1)).toMatchObject({ flow: 'idle' });
+      expect(mockCtx.reply).toHaveBeenCalledTimes(1);
+    });
+
+    it('Confirm claims the step, creates one payment with the confirmed amount, and sends the QR', async () => {
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent);
+      mockDo(step5);
+
+      expect(await handler.handleCallback(callback('start_confirm'))).toBe(true);
+
+      expect(mockRepository.createPayment).toHaveBeenCalledTimes(1);
+      const input = vi.mocked(mockRepository.createPayment).mock.calls[0]![0];
+      expect(input).toMatchObject({
+        eventId: 1,
+        description: 'Test Event',
+        amountCents: 1250,
+        payerValue: '+6591234568',
+        payerName: 'Alice',
+      });
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('✅ Confirmed'),
+        expect.anything()
+      );
+      expect(mockCtx.replyWithPhoto).toHaveBeenCalledTimes(1);
+    });
+
+    it('a lost claim (double tap / expired) creates nothing', async () => {
+      mockDo(step5, 'conflict');
+
+      expect(await handler.handleCallback(callback('start_confirm'))).toBe(true);
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '⚠️ Already processed or expired. Run /start again.',
+      });
+      expect(mockRepository.createPayment).not.toHaveBeenCalled();
+      expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
+    });
+
+    it('Confirm on a now-closed event creates nothing', async () => {
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue({
+        ...openEvent,
+        status: 'closed',
+      });
+      mockDo(step5);
+
+      await handler.handleCallback(callback('start_confirm'));
+
+      expect(lastReply()).toContain('event is closed');
+      expect(mockRepository.createPayment).not.toHaveBeenCalled();
+      expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
+    });
+
+    it('a failure after the claim tells the user to run /start again', async () => {
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent);
+      vi.mocked(mockRepository.createPayment).mockRejectedValue(new Error('db down'));
+      mockDo(step5);
+
+      await handler.handleCallback(callback('start_confirm'));
+
+      expect(lastReply()).toBe('❌ Failed to create the payment. Please run /start again.');
+      expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
+    });
+
+    it('the Cancel button claims the step and creates nothing', async () => {
+      mockDo(step5);
+
+      expect(await handler.handleCallback(callback('start_cancel'))).toBe(true);
+
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        '❌ Start cancelled. No payment was created.',
+        expect.anything()
+      );
+      expect(mockRepository.createPayment).not.toHaveBeenCalled();
+    });
+
+    it('a stale Cancel tap is answered without side effects', async () => {
+      mockDo(step5, 'conflict');
+
+      await handler.handleCallback(callback('start_cancel'));
+
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: '⚠️ Already processed or expired.',
+      });
+      expect(mockCtx.editMessageText).not.toHaveBeenCalled();
+    });
+
+    it('text at the summary nudges; typed cancel ends the flow without a payment', async () => {
+      const posted = mockDo(step5);
+
+      await handler.handleInput({ ...mockCtx, message: { text: '20' } } as unknown as Context);
+      expect(lastReply()).toContain('tap Confirm or Cancel');
+      expect(posted).toHaveLength(0);
+
+      await handler.handleInput({ ...mockCtx, message: { text: 'cancel' } } as unknown as Context);
+      expect(lastReply()).toContain('Start cancelled');
+      expect(posted.at(-1)).toMatchObject({ flow: 'idle' });
       expect(mockRepository.createPayment).not.toHaveBeenCalled();
     });
   });

@@ -59,6 +59,8 @@ describe('end-to-end event flow (task 6.1)', () => {
     await bot.handleUpdate(callbackUpdate(userId, 'start_skip_name'));
 
     await bot.handleUpdate(textUpdate(userId, '10.00'));
+    expect(stub.sentPhotos).toHaveLength(0); // summary first
+    await bot.handleUpdate(callbackUpdate(userId, 'start_confirm'));
     expect(stub.sentPhotos).toHaveLength(1);
     const ref = stub.sentPhotos[0]!.caption.split(' / ')[2]!;
 

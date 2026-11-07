@@ -127,6 +127,11 @@ export class ConversationDO {
       return this.resetState();
     }
 
+    // Atomic compare-and-reset (exactly-once confirm taps)
+    if (method === 'POST' && url.pathname === '/claim') {
+      return this.claimState(request);
+    }
+
     return new Response('Not found', { status: 404 });
   }
 
@@ -223,6 +228,33 @@ export class ConversationDO {
     await this.scheduleAlarm();
 
     return new Response(JSON.stringify(state), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Atomically claim the conversation: if the stored state is exactly `{ flow, step }`,
+   * reset it to idle and return the previous state (200); otherwise 409. A DO handles one
+   * request at a time, so of N concurrent claims exactly one wins — the building block for
+   * "tap Confirm twice, create once".
+   */
+  private async claimState(request: Request): Promise<Response> {
+    let expected: { flow?: unknown; step?: unknown };
+    try {
+      expected = (await request.json()) as { flow?: unknown; step?: unknown };
+    } catch {
+      return new Response('Invalid claim', { status: 400 });
+    }
+
+    const stored = await this.state.storage.get<string>('conversation');
+    const current = stored ? this.serializer.deserialize(stored) : null;
+    if (!current || current.flow !== expected.flow || current.step !== expected.step) {
+      return new Response('Conflict', { status: 409 });
+    }
+
+    await this.saveState(this.serializer.initialState());
+    await this.scheduleAlarm();
+    return new Response(JSON.stringify(current), {
       headers: { 'Content-Type': 'application/json' },
     });
   }
