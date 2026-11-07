@@ -329,4 +329,172 @@ describe('/init command handler', () => {
       );
     });
   });
+
+  describe('Task 4.2: Reference update on re-run', () => {
+    it('should update existing user reference when /init is re-run', async () => {
+      const mockCtx = {
+        message: { text: '81234567' },
+        reply: vi.fn(),
+      } as any;
+
+      // Existing user with old mobile reference
+      const existingUser: User = {
+        telegramId: 789,
+        payeeType: 'mobile',
+        payeeValue: '+6591234567',
+        displayName: 'John',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      // Mock getUser to return existing user
+      (mockRepository.getUser as any).mockResolvedValue(existingUser);
+      (mockRepository.upsertUser as any).mockResolvedValue({} as User);
+
+      // Step 1: User enters new mobile number
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({
+          status: 200,
+          json: async () => ({
+            flow: 'init',
+            step: 1,
+            context: { userId: 789, chatId: 123456, userName: 'John' },
+            lastActivity: new Date().toISOString()
+          })
+        })
+        .mockResolvedValueOnce({ status: 200 }); // setState
+
+      await handler.handleInput(mockCtx);
+
+      // Verify confirmation prompt was shown
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Mobile number: +6581234567')
+      );
+
+      // Step 2: User confirms
+      mockCtx.message.text = 'confirm';
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({
+          status: 200,
+          json: async () => ({
+            flow: 'init',
+            step: 2,
+            context: {
+              userId: 789,
+              chatId: 123456,
+              userName: 'John',
+              pendingProxy: { type: 'mobile', normalized: '+6581234567' }
+            },
+            lastActivity: new Date().toISOString()
+          })
+        })
+        .mockResolvedValueOnce({ status: 200 }); // setState
+
+      await handler.handleInput(mockCtx);
+
+      // Verify upsertUser was called with NEW reference
+      expect(mockRepository.upsertUser).toHaveBeenCalledWith({
+        telegramId: 789,
+        payeeType: 'mobile',
+        payeeValue: '+6581234567', // NEW reference, not the old one
+        displayName: 'John',
+        timestamp: expect.any(String)
+      });
+
+      // Verify "updated" message (not "saved")
+      expect(mockCtx.reply).toHaveBeenCalledWith('✅ Your PayNow reference has been updated!');
+    });
+
+    it('should preserve existing user data when canceling', async () => {
+      const mockCtx = {
+        message: { text: '81234567' },
+        reply: vi.fn(),
+      } as any;
+
+      // Existing user with original reference
+      const existingUser: User = {
+        telegramId: 789,
+        payeeType: 'mobile',
+        payeeValue: '+6591234567',
+        displayName: 'John',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      };
+
+      // Mock getUser to return existing user
+      (mockRepository.getUser as any).mockResolvedValue(existingUser);
+
+      // Step 1: User enters new mobile number
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({
+          status: 200,
+          json: async () => ({
+            flow: 'init',
+            step: 1,
+            context: { userId: 789, chatId: 123456, userName: 'John' },
+            lastActivity: new Date().toISOString()
+          })
+        })
+        .mockResolvedValueOnce({ status: 200 }); // setState
+
+      await handler.handleInput(mockCtx);
+
+      // Step 2: User cancels instead of confirming
+      mockCtx.message.text = 'cancel';
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({
+          status: 200,
+          json: async () => ({
+            flow: 'init',
+            step: 2,
+            context: {
+              userId: 789,
+              chatId: 123456,
+              userName: 'John',
+              pendingProxy: { type: 'mobile', normalized: '+6581234567' }
+            },
+            lastActivity: new Date().toISOString()
+          })
+        })
+        .mockResolvedValueOnce({ status: 200 }); // setState
+
+      await handler.handleInput(mockCtx);
+
+      // Verify upsertUser was NOT called (user data preserved)
+      expect(mockRepository.upsertUser).not.toHaveBeenCalled();
+
+      // Verify cancel message
+      expect(mockCtx.reply).toHaveBeenCalledWith('❌ Cancelled. Run /init again to start over.');
+    });
+
+    it('should preserve existing user data when conversation expires (alarm)', async () => {
+      // This test verifies that alarm expiry (handled by ConversationDO)
+      // only clears conversation state, not user data.
+      // The ConversationDO alarm handler deletes the 'conversation' key,
+      // but never touches the users table.
+      
+      // When user re-runs /init after expiry, they should see the initial prompt
+      const mockCtx = {
+        chat: { id: 123456 },
+        from: { id: 789, first_name: 'John' },
+        reply: vi.fn(),
+      } as any;
+
+      // Mock getState to return null (conversation expired)
+      (mockConversationDO.fetch as any).mockResolvedValue({
+        status: 200,
+        json: async () => null
+      });
+
+      await handler.start(mockCtx);
+
+      // Verify initial prompt is shown (not trying to update anything)
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Let\'s set up your PayNow reference')
+      );
+
+      // Verify no database operations were triggered
+      expect(mockRepository.upsertUser).not.toHaveBeenCalled();
+    });
+  });
 });

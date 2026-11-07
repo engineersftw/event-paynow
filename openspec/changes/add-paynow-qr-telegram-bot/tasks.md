@@ -5,7 +5,7 @@
 - [x] 1.1 Create the TypeScript Worker project (src layout, strict tsconfig, ESLint, vitest workspace with both a Node pool for runtime-agnostic core and a `vitest-pool-workers` pool for Worker-runtime tests, `wrangler.toml` with D1 binding and DO binding stubs, `drizzle.config.ts` pointing at the D1 dialect) and add dependencies — runtime: `grammY`, `qrcode`, `drizzle-orm`, `zod`; dev: `drizzle-kit`, `wrangler`, `jsqr` — verify `npm run build`, `npm test` (both pools, empty skeleton) and `wrangler dev` all succeed; document the two-pool setup and update-fixture replay workflow in `docs/testing.md` and verify the documented commands run as written
 - [x] 1.2 Implement the webhook `fetch` entrypoint with grammY: validate `X-Telegram-Bot-Api-Secret-Token`, store the token via `wrangler secret put`, and register the webhook with `setWebhook` — verify with update-fixture replay against `wrangler dev` (`curl` POST with and without the secret header: dev-bot echo update round-trips; unsigned request rejected 403) plus a `vitest-pool-workers` test asserting the same 403 path
 - [ ] 1.3 Register the command list (`/init`, `/start`, `/payments`, `/payback`, `/cancel`) with BotFather and provision the D1 database (`wrangler d1 create`) — verify the commands appear in the bot's Telegram menu and `wrangler d1 migrations list` runs against the new DB
-- [ ] 1.4 Document the Workers topology (webhook entry, D1, per-chat DO, wrangler commands) in `docs/architecture.md` — verify a reviewer can name each component, its storage role, and the deploy command from the doc alone
+- [x] 1.4 Document the Workers topology (webhook entry, D1, per-chat DO, wrangler commands) in `docs/architecture.md` — verify a reviewer can name each component, its storage role, and the deploy command from the doc alone
 
 ## 2. SGQR payload and QR rendering core (runtime-agnostic)
 
@@ -25,7 +25,7 @@
 ## 4. Payee configuration (/init)
 
 - [x] 4.1 Implement the `/init` conversation on the DO-hosted state machine: prompt for reference, validate via 3.3, echo the normalized value for confirmation, then persist to `users` — verify with conversation tests covering mobile, UEN, invalid-input re-prompt, and confirmation-before-save behavior
-- [ ] 4.2 Implement reference update on re-run (`/init` again replaces the stored value; cancel/alarm expiry leaves the old reference intact) and verify by test that canceling after a new input preserves the previous stored value
+- [x] 4.2 Implement reference update on re-run (`/init` again replaces the stored value; cancel/alarm expiry leaves the old reference intact) and verify by test that canceling after a new input preserves the previous stored value
 
 ## 5. Payment issuance and sharing (/start)
 
@@ -36,13 +36,13 @@
 
 ## 6. Payment tracking (/payments)
 
-- [ ] 6.1 Implement `/payments` listing with per-payment inline buttons (View, Mark as received, Payback) showing status, description, amount, and date — verify with handler tests asserting only the requesting user's rows appear
-- [ ] 6.2 Wire the "Mark as received" button to `markPaymentReceived(ref, "manual")` with an ownership check routed through the owning chat's DO for serialization — verify tests for own payment, another user's payment id (rejected), and duplicate tap (already-received message, no change)
-- [ ] 6.3 Implement payment detail view (status, created/received timestamps, `source`, payback summary) and verify via handler test on a fixture payment
+- [x] 6.1 Implement `/payments` listing with per-payment inline buttons (View, Mark as received, Payback) showing status, description, amount, and date — verify with handler tests asserting only the requesting user's rows appear
+- [x] 6.2 Wire the "Mark as received" button to `markPaymentReceived(ref, "manual")` with an ownership check routed through the owning chat's DO for serialization — verify tests for own payment, another user's payment id (rejected), and duplicate tap (already-received message, no change)
+- [x] 6.3 Implement payment detail view (status, created/received timestamps, `source`, payback summary) and verify via handler test on a fixture payment
 
 ## 7. Payback generation (/payback)
 
-- [ ] 7.1 Implement the `/payback <ref-or-id>` conversation: prompt for payer proxy (validate via 3.3), echo for confirmation, prompt for amount defaulting to original — verify conversation tests for mobile and UEN payers and invalid-proxy re-prompt
+- [x] 7.1 Implement the `/payback <ref-or-id>` conversation: prompt for payer proxy (validate via 3.3), echo for confirmation, prompt for amount defaulting to original — verify conversation tests for mobile and UEN payers and invalid-proxy re-prompt
 - [ ] 7.2 Enforce payback bounds inside a D1 batch with the design's in-transaction re-check of `SUM(active paybacks)` — verify tests for exact, partial, second-partial, and blocked-over cases matching the spec scenarios (5+3 of 12.50, remaining 4.50) plus, in `vitest-pool-workers`, two concurrent payback requests routed through the chat DO asserted to serialize so the sum never exceeds the original
 - [ ] 7.3 Generate the payback QR using the 2.2 builder with the PAYER as payee proxy and payback `ref`, store the `paybacks` row (`pending`), and `sendPhoto` with caption — verify integration test round-tripping the payload as in 5.3
 - [ ] 7.4 Implement "Mark payback as sent" button and payback history rendering in payment detail — verify tests for transition, timestamp, and updated remaining total

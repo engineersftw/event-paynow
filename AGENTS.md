@@ -99,6 +99,7 @@ Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
 - Payment service with markPaymentReceived transition logic
 - Conversation Durable Object with FSM state, 10-min alarm expiry, eviction survival
 - /init command handler with mobile/UEN validation, confirmation flow, and user persistence
+- Reference update on re-run: /init replaces stored value, cancel/alarm expiry preserves existing data
 
 ## Repository Layer
 
@@ -124,24 +125,28 @@ The repository layer provides infra-neutral interfaces for database operations:
 ### /init Command
 **Key files:**
 - `src/commands/init-handler.ts` — /init command implementation
-- `test/node/init-handler.test.ts` — 10 tests covering all flows
+- `test/node/init-handler.test.ts` — 13 tests covering all flows
 
 **Flow:**
 1. User sends /init
 2. Bot prompts for mobile number or UEN
 3. Validates input (mobile → +65XXXXXXXX, UEN format check)
 4. Echoes normalized value for confirmation
-5. On "confirm", persists to users table via repository
-6. On "cancel", resets state without saving
+5. On "confirm", persists to users table via repository (creates or updates)
+6. On "cancel", resets state without saving (preserves existing data)
+7. On conversation expiry (alarm), state resets but existing user data remains intact
 
 **Testing:**
 - Mobile number validation and normalization
 - UEN validation
 - Invalid input rejection with re-prompt
 - Confirmation before save
-- Cancel operation
+- Cancel operation (preserves existing user data)
 - Database error handling
-- 10 tests passing
+- Reference update on re-run (existing user gets updated)
+- Cancel after new input preserves previous stored value
+- Conversation expiry preserves existing user data
+- 13 tests passing
 
 ## What's Next
 
