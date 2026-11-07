@@ -52,7 +52,7 @@
 │  │  • Infra-neutral interfaces                              │  │
 │  │  • Users: upsertUser, getUser                            │  │
 │  │  • Payments: create, list, update status                 │  │
-│  │  • Paybacks: create, list, sum active                    │  │
+│  │  • Paybacks: create, list, sum (pending + sent)           │  │
 │  └────────────────────┬─────────────────────────────────────┘  │
 │                       │                                         │
 │                       ▼                                         │
@@ -150,11 +150,11 @@
 - `updatePaymentStatus`: Transition payment status (pending → received)
 - `createPayback`: Create payback record
 - `createPaybackBounded`: Create payback inside a D1 batch with in-transaction
-  `SUM(active paybacks) <= amount` compare-and-set re-check (task 7.2)
+  `SUM(paybacks) <= amount` compare-and-set re-check (task 7.2; all statuses count)
 - `getPaybackByRef`: Look up a payback by its unique ref
 - `updatePaybackStatus`: Guarded `pending → sent` transition (compare-and-set);
   duplicate/concurrent taps yield exactly one winner (task 7.4)
-- `sumActivePaybacks`: Calculate total active (pending) paybacks for bounding
+- `sumPaybacks`: Total paybacks against a payment across ALL statuses (pending + sent) — the bounded quantity
 
 ### Drizzle ORM (src/db/drizzle-repository.ts)
 **Role**: Type-safe database queries
@@ -311,7 +311,7 @@ Handler sends payment reference + /payments tracking hint
 - **Payment records**: Reference number, user ID, amount, description, status, QR payload, timestamps
 - **Payback records**: Reference number, payment ID, payer reference, amount, status, QR payload, timestamps
 
-**Why D1**: Relational data with foreign keys, CHECK constraints, complex queries (list by user, sum active paybacks).
+**Why D1**: Relational data with foreign keys, CHECK constraints, complex queries (list by user, sum paybacks for bounding).
 
 ### What's stored in DO (transient)
 - **Conversation state**: Current flow, step, context data, last activity timestamp

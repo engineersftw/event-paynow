@@ -373,7 +373,7 @@ describe('D1Repository', () => {
       expect(paybacks).toEqual([]);
     });
 
-    it('sums active (pending) paybacks', async () => {
+    it('sums paybacks across all statuses', async () => {
       await repo.createPayback({
         ref: 'payback-ref-001',
         paymentId,
@@ -395,11 +395,11 @@ describe('D1Repository', () => {
         timestamp: testTimestamp,
       });
 
-      const sum = await repo.sumActivePaybacks(paymentId);
+      const sum = await repo.sumPaybacks(paymentId);
       expect(sum).toBe(500);
     });
 
-    it('excludes sent paybacks from sum', async () => {
+    it('includes sent paybacks in sum (bound counts delivery-completed paybacks)', async () => {
       await repo.createPayback({
         ref: 'payback-ref-001',
         paymentId,
@@ -416,17 +416,17 @@ describe('D1Repository', () => {
         payerType: 'mobile',
         payerValue: '+6598765433',
         amountCents: 200,
-        status: 'sent', // sent, not pending
+        status: 'sent', // sent counts too — status only tracks delivery
         qrPayload: 'payload2',
         timestamp: testTimestamp,
       });
 
-      const sum = await repo.sumActivePaybacks(paymentId);
-      expect(sum).toBe(300); // only the pending one
+      const sum = await repo.sumPaybacks(paymentId);
+      expect(sum).toBe(500); // pending + sent both count
     });
 
-    it('returns 0 for payment with no active paybacks', async () => {
-      const sum = await repo.sumActivePaybacks(999999);
+    it('returns 0 for payment with no paybacks', async () => {
+      const sum = await repo.sumPaybacks(999999);
       expect(sum).toBe(0);
     });
 
@@ -483,8 +483,8 @@ describe('D1Repository', () => {
       expect(fetched!.status).toBe('sent');
       expect(fetched!.sentAt).toBe('2024-01-02T10:00:00Z');
 
-      // Sent paybacks no longer count as active
-      expect(await repo.sumActivePaybacks(paymentId)).toBe(0);
+      // Sent paybacks still count toward the bound (status only tracks delivery)
+      expect(await repo.sumPaybacks(paymentId)).toBe(300);
     });
 
     it('rejects a duplicate pending → sent transition (compare-and-set)', async () => {

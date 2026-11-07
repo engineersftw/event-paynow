@@ -206,12 +206,12 @@ export class D1Repository implements Repository {
    * Task 7.2: payback bounding enforced inside one D1 batch (implicit transaction).
    *
    * The INSERT is a compare-and-set: `INSERT ... SELECT ... WHERE <guard>` only
-   * materializes the row when `SUM(active paybacks) + amount_cents <= payment.amount_cents`
-   * is evaluated inside the transaction, at commit time. A missing payment row makes the
+   * materializes the row when `SUM(paybacks) + amount_cents <= payment.amount_cents`
+   * is evaluated inside the transaction, at commit time. ALL paybacks count toward
+   * the bound — pending and sent — because status only tracks delivery, so marking
+   * a payback sent never frees room for another. A missing payment row makes the
    * guard NULL, so nothing is inserted (fail-closed). This closes cross-chat races on the
    * same payment even when the per-chat DO serialization does not apply (design §5).
-   *
-   * "Active" means status = 'pending', matching sumActivePaybacks().
    */
   async createPaybackBounded(
     input: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
@@ -224,18 +224,18 @@ export class D1Repository implements Repository {
          SELECT ?, ?, ?, ?, ?, ?, ?, ?
          WHERE (
            SELECT COALESCE(SUM(amount_cents), 0) FROM paybacks
-           WHERE payment_id = ? AND status = 'pending'
+           WHERE payment_id = ?
          ) + ? <= (SELECT amount_cents FROM payments WHERE id = ?)`
       )
       .bind(ref, paymentId, payerType, payerValue, amountCents, status, qrPayload, timestamp, paymentId, amountCents, paymentId);
 
-    // Totals read inside the same transaction: on success activeCents already includes
+    // Totals read inside the same transaction: on success this already includes
     // the new row; on failure it is the competing state that rejected the insert.
     const totals = this.d1
       .prepare(
         `SELECT amount_cents AS paymentAmountCents,
                 (SELECT COALESCE(SUM(amount_cents), 0) FROM paybacks p
-                 WHERE p.payment_id = payments.id AND p.status = 'pending') AS activeSumCents
+                 WHERE p.payment_id = payments.id) AS paidBackCents
          FROM payments
          WHERE id = ?`
       )
@@ -270,16 +270,16 @@ export class D1Repository implements Repository {
         throw new Error(`createPaybackBounded: insert reported changes but read-back for ${ref} was empty`);
       }
       const totalsRow = totalsResult.results?.[0] as
-        | { paymentAmountCents: number; activeSumCents: number }
+        | { paymentAmountCents: number; paidBackCents: number }
         | undefined;
       const remainingCents = totalsRow
-        ? Math.max(0, totalsRow.paymentAmountCents - totalsRow.activeSumCents)
+        ? Math.max(0, totalsRow.paymentAmountCents - totalsRow.paidBackCents)
         : 0;
       return { ok: true, payback: toPayback(row), remainingCents };
     }
 
     const totalsRow = totalsResult.results?.[0] as
-      | { paymentAmountCents: number; activeSumCents: number }
+      | { paymentAmountCents: number; paidBackCents: number }
       | undefined;
     if (!totalsRow) {
       return { ok: false, reason: 'payment_not_found' };
@@ -289,8 +289,8 @@ export class D1Repository implements Repository {
       ok: false,
       reason: 'over_bound',
       paymentAmountCents: totalsRow.paymentAmountCents,
-      activeSumCents: totalsRow.activeSumCents,
-      remainingCents: Math.max(0, totalsRow.paymentAmountCents - totalsRow.activeSumCents),
+      paidBackCents: totalsRow.paidBackCents,
+      remainingCents: Math.max(0, totalsRow.paymentAmountCents - totalsRow.paidBackCents),
     };
   }
 
@@ -340,18 +340,17 @@ export class D1Repository implements Repository {
     return results.map(toPayback);
   }
 
-  async sumActivePaybacks(paymentId: number): Promise<number> {
+  /**
+   * Total amount paid back against a payment across ALL statuses (pending +
+   * sent) — the quantity bounded by the payment amount (tasks 7.2, 7.4).
+   */
+  async sumPaybacks(paymentId: number): Promise<number> {
     const result = await this.db
       .select({
         total: sql<number>`COALESCE(SUM(${schema.paybacks.amountCents}), 0)`,
       })
       .from(schema.paybacks)
-      .where(
-        and(
-          eq(schema.paybacks.paymentId, paymentId),
-          eq(schema.paybacks.status, 'pending')
-        )
-      )
+      .where(eq(schema.paybacks.paymentId, paymentId))
       .get();
 
     return result?.total ?? 0;

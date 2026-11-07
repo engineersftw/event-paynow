@@ -151,7 +151,7 @@ describe('payback QR end-to-end (task 7.3)', () => {
     expect(row.payerType).toBe('mobile');
     expect(row.payerValue).toBe('+6598765432');
     expect(row.sentAt).toBeNull();
-    expect(await repo.sumActivePaybacks(payment.id)).toBe(500);
+    expect(await repo.sumPaybacks(payment.id)).toBe(500);
 
     // Final text reply + conversation reset
     expect(stub.lastText()).toContain('Payback Recorded');
@@ -167,7 +167,7 @@ describe('payback QR end-to-end (task 7.3)', () => {
     await runPaybackConversation(bot, userId, 'PAY73002', '91111111', '3.00');
 
     expect(stub.sentPhotos).toHaveLength(2);
-    expect(await repo.sumActivePaybacks(payment.id)).toBe(800);
+    expect(await repo.sumPaybacks(payment.id)).toBe(800);
     expect(stub.lastText()).toContain('Remaining payable: $4.50');
 
     // Third payback of 5.00 exceeds the 4.50 remaining: rejected at the amount
@@ -178,14 +178,14 @@ describe('payback QR end-to-end (task 7.3)', () => {
     await bot.handleUpdate(textUpdate(userId, '5.00'));
 
     expect(stub.sentPhotos).toHaveLength(2); // no third upload
-    expect(await repo.sumActivePaybacks(payment.id)).toBe(800);
+    expect(await repo.sumPaybacks(payment.id)).toBe(800);
     expect(stub.lastText()).toContain('exceeds the remaining payable amount ($4.50)');
 
     // The blocked conversation may continue with a fitting amount
     await bot.handleUpdate(textUpdate(userId, '4.50'));
     await bot.handleUpdate(textUpdate(userId, 'confirm'));
     expect(stub.sentPhotos).toHaveLength(3);
-    expect(await repo.sumActivePaybacks(payment.id)).toBe(1250);
+    expect(await repo.sumPaybacks(payment.id)).toBe(1250);
 
     // Fully paid back: another attempt is refused with the spec message
     await runPaybackConversation(bot, userId, 'PAY73002', '98765432', '1.00');

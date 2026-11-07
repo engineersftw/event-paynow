@@ -102,8 +102,9 @@ Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
 - Reference update on re-run: /init replaces stored value, cancel/alarm expiry preserves existing data
 - /payments listing with inline buttons (View / Mark as Received / Payback) and payment detail view
 - /payback 4-step conversation (payer proxy → confirm → amount → confirm) recording paybacks
-- Payback bounds: `createPaybackBounded()` enforces `SUM(active paybacks) <= payment.amount_cents`
-  inside one D1 batch via a compare-and-set guarded `INSERT ... SELECT` (task 7.2)
+- Payback bounds: `createPaybackBounded()` enforces `SUM(paybacks) <= payment.amount_cents`
+  (all statuses — pending and sent) inside one D1 batch via a compare-and-set guarded
+  `INSERT ... SELECT` (task 7.2)
 - /start payment issuance: guard requiring /init first, description + amount collection with
   validation, payment row with payee snapshot, SGQR payload + isolate-rendered BMP QR uploaded
   via sendPhoto (tasks 5.1, 5.2, 5.4 done; 5.3 stage (a) verified e2e in Workers pool)
@@ -135,19 +136,22 @@ real D1 + real CHAT_SESSION DO. Non-obvious requirements discovered (keep in min
    (`await response?.body?.cancel()`), otherwise vitest-pool-workers' stacked-storage isolation
    fails when popping DO snapshots ("Expected .sqlite, got …sqlite-shm").
 
-## Payback Bounds (task 7.2)
+## Payback Bounds (tasks 7.2 + 7.4)
 
 `D1Repository.createPaybackBounded()` runs a single `d1.batch([...])` transaction:
-1. Guarded insert — `INSERT INTO paybacks ... SELECT ... WHERE (SUM active) + amount <= payment.amount`
+1. Guarded insert — `INSERT INTO paybacks ... SELECT ... WHERE (SUM paybacks) + amount <= payment.amount`
    (materializes only if the in-transaction re-check holds; fail-closed for missing payments)
-2. Totals read — payment amount + active sum inside the same transaction
+2. Totals read — payment amount + paid-back sum inside the same transaction
 3. Row read-back by ref
 
-Returns `{ ok, payback, remainingCents }` or `{ ok: false, reason: 'over_bound' | 'payment_not_found', ... }`.
-"Active" = status `pending`, matching `sumActivePaybacks()` semantics. The handler pre-checks the bound
+Returns `{ ok, payback, remainingCents }` or `{ ok: false, reason: 'over_bound' | 'payment_not_found', ..., paidBackCents }`.
+The bound counts **all** paybacks (pending + sent): `updatePaybackStatus` marks delivery only, so
+marking a payback sent never frees room for another (decision 2026-11: "include sent in the bound";
+`sumPaybacks()` has no status filter and the guard SQL matches). The handler pre-checks the bound
 for UX; the transaction re-check is authoritative. Per-chat DO serialization covers same-chat writes;
 this CAS guard closes cross-chat races (design §5). Tests: `test/workers/payback-bounds.test.ts`
-(11 tests, spec scenarios 5+3 of 12.50 → remaining 4.50, blocked-over, concurrent races via `Promise.all`).
+(spec scenarios 5+3 of 12.50 → remaining 4.50, blocked-over, concurrent races via `Promise.all`,
+sent-still-counts regression).
 
 ## Repository Layer
 
@@ -161,7 +165,7 @@ The repository layer provides infra-neutral interfaces for database operations:
 **Operations:**
 - Users: upsertUser, getUser
 - Payments: createPayment, getPaymentByRef, listPaymentsByUser, updatePaymentStatus
-- Paybacks: createPayback, createPaybackBounded (transactional bound enforcement), getPaybackByRef, updatePaybackStatus (guarded pending→sent CAS, task 7.4), listPaybacksByPayment, sumActivePaybacks
+- Paybacks: createPayback, createPaybackBounded (transactional bound enforcement), getPaybackByRef, updatePaybackStatus (guarded pending→sent CAS, task 7.4), listPaybacksByPayment, sumPaybacks (all statuses — the bounded quantity)
 
 **Testing:**
 - 27 tests in `test/workers/repository.test.ts` cover all operations (incl. payback transitions + duplicate-tap race)
@@ -204,6 +208,5 @@ The repository layer provides infra-neutral interfaces for database operations:
 - Task 1.3: Cloudflare auth setup (blocked) — also verify deployed webhook works now that
   `src/bot.ts` routes real handlers (getMe on first request per isolate)
 - Tasks 8.1-8.3: Integration testing, scan validation, deploy pipeline
-- Open design question (7.2/7.4): `sumActivePaybacks` counts only `pending`; marking a payback
-  `sent` frees bound room again, which could allow paying back more than the original. Decide
-  whether sent paybacks should count toward the bound before 8.x.
+- Resolved 2026-11-07: payback bound counts ALL paybacks (pending + sent) —
+  `sumPaybacks()` and the `createPaybackBounded` guard have no status filter

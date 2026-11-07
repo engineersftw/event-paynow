@@ -5,10 +5,10 @@ import { D1Repository } from '../../src/db/drizzle-repository';
 /**
  * Task 7.2: payback bounds enforced inside a D1 batch (transaction).
  *
- * Design §5: `SUM(active paybacks) <= payment.amount_cents` runs inside a D1 batch
+ * Design §5: `SUM(paybacks) <= payment.amount_cents` runs inside a D1 batch
  * issued as a compare-and-set (guarded INSERT ... SELECT). Per-chat DO serialization
  * covers same-chat writes; this in-transaction re-check closes cross-chat races on
- * the same payment, so concurrent creates can never push the active sum over the
+ * the same payment, so concurrent creates can never push the total over the
  * original amount.
  *
  * Spec scenarios covered (payback-qr/spec.md):
@@ -145,8 +145,8 @@ describe('createPaybackBounded (task 7.2)', () => {
     if (!second.ok) return;
     expect(second.remainingCents).toBe(450);
 
-    // The two paybacks are visible, and the active sum matches
-    expect(await repo.sumActivePaybacks(paymentId)).toBe(800);
+    // The two paybacks are visible, and the total matches
+    expect(await repo.sumPaybacks(paymentId)).toBe(800);
     const paybacks = await repo.listPaybacksByPayment(paymentId);
     expect(paybacks).toHaveLength(2);
     expect(paybacks.map(p => p.amountCents).sort()).toEqual([300, 500]);
@@ -164,7 +164,7 @@ describe('createPaybackBounded (task 7.2)', () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.remainingCents).toBe(0);
-    expect(await repo.sumActivePaybacks(paymentId)).toBe(1250);
+    expect(await repo.sumPaybacks(paymentId)).toBe(1250);
   });
 
   it('accepts a payback that exactly fills the remaining balance', async () => {
@@ -176,11 +176,11 @@ describe('createPaybackBounded (task 7.2)', () => {
     expect(fill.ok).toBe(true);
     if (!fill.ok) return;
     expect(fill.remainingCents).toBe(0);
-    expect(await repo.sumActivePaybacks(paymentId)).toBe(1250);
+    expect(await repo.sumPaybacks(paymentId)).toBe(1250);
   });
 
   // ----------------------------------------------------------------------------
-  // Blocked-over: total active paybacks may never exceed the payment amount
+  // Blocked-over: total paybacks (pending + sent) may never exceed the payment amount
   // ----------------------------------------------------------------------------
 
   it('blocks a payback that would exceed the payment amount and writes nothing', async () => {
@@ -193,15 +193,15 @@ describe('createPaybackBounded (task 7.2)', () => {
     expect(result.reason).toBe('over_bound');
     if (result.reason !== 'over_bound') return;
     expect(result.paymentAmountCents).toBe(1250);
-    expect(result.activeSumCents).toBe(0);
+    expect(result.paidBackCents).toBe(0);
     expect(result.remainingCents).toBe(1250);
 
     // Nothing was created
-    expect(await repo.sumActivePaybacks(paymentId)).toBe(0);
+    expect(await repo.sumPaybacks(paymentId)).toBe(0);
     expect(await repo.listPaybacksByPayment(paymentId)).toEqual([]);
   });
 
-  it('blocks a third payback of 5.00 when 5.00 + 3.00 already active (would total 13.00 > 12.50)', async () => {
+  it('blocks a third payback of 5.00 when 5.00 + 3.00 already counted (would total 13.00 > 12.50)', async () => {
     const paymentId = await seedPayment(1250);
 
     await repo.createPaybackBounded(paybackInput(paymentId, 500));
@@ -212,11 +212,11 @@ describe('createPaybackBounded (task 7.2)', () => {
     if (blocked.ok) return;
     expect(blocked.reason).toBe('over_bound');
     if (blocked.reason !== 'over_bound') return;
-    expect(blocked.activeSumCents).toBe(800);
+    expect(blocked.paidBackCents).toBe(800);
     expect(blocked.remainingCents).toBe(450);
 
     // Still only the two accepted paybacks
-    expect(await repo.sumActivePaybacks(paymentId)).toBe(800);
+    expect(await repo.sumPaybacks(paymentId)).toBe(800);
     expect(await repo.listPaybacksByPayment(paymentId)).toHaveLength(2);
   });
 
@@ -236,6 +236,30 @@ describe('createPaybackBounded (task 7.2)', () => {
     expect(await repo.listPaybacksByPayment(paymentId)).toHaveLength(2);
   });
 
+  it('sent paybacks keep counting toward the bound — marking sent frees no room', async () => {
+    const paymentId = await seedPayment(1250);
+
+    // Pay back the full amount…
+    const first = await repo.createPaybackBounded(paybackInput(paymentId, 1250));
+    expect(first.ok).toBe(true);
+    if (!first.ok) return;
+
+    // …then mark it sent (delivery completed)
+    const updated = await repo.updatePaybackStatus(first.payback.ref, 'sent', '2024-01-02T00:00:00Z');
+    expect(updated).not.toBeNull();
+    expect(updated!.status).toBe('sent');
+
+    // The bound must NOT relax: another payback is refused with the full total counted
+    const again = await repo.createPaybackBounded(paybackInput(paymentId, 100));
+    expect(again.ok).toBe(false);
+    if (again.ok) return;
+    expect(again.reason).toBe('over_bound');
+    if (again.reason !== 'over_bound') return;
+    expect(again.paidBackCents).toBe(1250);
+    expect(again.remainingCents).toBe(0);
+    expect(await repo.listPaybacksByPayment(paymentId)).toHaveLength(1);
+  });
+
   // ----------------------------------------------------------------------------
   // Unknown payment: fail closed, create nothing
   // ----------------------------------------------------------------------------
@@ -250,7 +274,7 @@ describe('createPaybackBounded (task 7.2)', () => {
 
   // ----------------------------------------------------------------------------
   // Concurrency: two bounded creates racing on the same payment serialize in D1,
-  // so the active sum never exceeds the original amount. This is the cross-chat
+  // so the total never exceeds the original amount. This is the cross-chat
   // case the design closes with the in-transaction re-check (same-chat writes are
   // already serialized by the per-chat DO — see conversation-do.test.ts).
   // ----------------------------------------------------------------------------
@@ -273,8 +297,8 @@ describe('createPaybackBounded (task 7.2)', () => {
     expect(accepted).toHaveLength(1);
     expect(rejected).toHaveLength(1);
 
-    // Invariant: active paybacks never exceed the payment amount
-    const sum = await repo.sumActivePaybacks(paymentId);
+    // Invariant: paybacks never exceed the payment amount
+    const sum = await repo.sumPaybacks(paymentId);
     expect(sum).toBeLessThanOrEqual(1250);
     expect(sum).toBe(800);
     expect(await repo.listPaybacksByPayment(paymentId)).toHaveLength(1);
@@ -293,7 +317,7 @@ describe('createPaybackBounded (task 7.2)', () => {
 
     expect(a.ok).toBe(true);
     expect(b.ok).toBe(true);
-    expect(await repo.sumActivePaybacks(paymentId)).toBe(900);
+    expect(await repo.sumPaybacks(paymentId)).toBe(900);
   });
 
   // ----------------------------------------------------------------------------

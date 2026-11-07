@@ -270,7 +270,8 @@ describe('bot wiring (src/bot.ts)', () => {
     const row = await repo.getPaybackByRef('WIRE-PB-010');
     expect(row!.status).toBe('sent');
     expect(row!.sentAt).toMatch(/^\d{4}-\d{2}-\d{2}T/);
-    expect(await repo.sumActivePaybacks(payment.id)).toBe(0);
+    // Sent paybacks still count toward the bound
+    expect(await repo.sumPaybacks(payment.id)).toBe(2500);
 
     // 4. Re-rendered detail: sent marker + timestamp, remaining refreshed,
     //    no stale buttons

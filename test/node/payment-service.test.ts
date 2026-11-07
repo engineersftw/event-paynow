@@ -71,7 +71,7 @@ class MockRepository implements Repository {
   async listPaybacksByPayment(): Promise<Payback[]> {
     return [];
   }
-  async sumActivePaybacks(): Promise<number> {
+  async sumPaybacks(): Promise<number> {
     return 0;
   }
 }

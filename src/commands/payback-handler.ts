@@ -25,10 +25,11 @@ import type { Repository, PayeeType } from '../db/repository.js';
  *     via sendPhoto (task 7.3)
  *
  * Payback bounds (task 7.2): the amount step pre-checks against
- * `payment.amount_cents - SUM(active paybacks)`, but the authoritative enforcement is
+ * `payment.amount_cents - SUM(paybacks)`, but the authoritative enforcement is
  * `repository.createPaybackBounded()`, which re-checks the sum inside the same D1 batch
  * as the insert. A concurrent payback that lands between steps is caught there and the
- * row is refused, so the active total never exceeds the original amount.
+ * row is refused, so the total never exceeds the original amount. Both pending and sent
+ * paybacks count toward the bound; `sent` only marks delivery.
  */
 
 export class PaybackCommandHandler {
@@ -167,8 +168,9 @@ export class PaybackCommandHandler {
 
       // Pre-check: show the current remaining bound. The authoritative re-check runs
       // inside the D1 transaction at final confirmation (createPaybackBounded).
-      const activeSum = await this.repository.sumActivePaybacks(paymentId);
-      const remaining = paymentAmount - activeSum;
+      // Both pending and sent paybacks count — sent only marks delivery.
+      const paidBack = await this.repository.sumPaybacks(paymentId);
+      const remaining = paymentAmount - paidBack;
 
       if (remaining <= 0) {
         await this.resetState();
@@ -186,7 +188,7 @@ export class PaybackCommandHandler {
       await ctx.reply(
         `💵 Enter payback amount (in dollars):\n\n` +
         `Original payment: $${formatCents(paymentAmount)}\n` +
-        `Already paid back (active): $${formatCents(activeSum)}\n` +
+        `Already paid back: $${formatCents(paidBack)}\n` +
         `Maximum payback: $${formatCents(remaining)}\n\n` +
         `You can enter a partial amount or the full remaining amount.`,
         { parse_mode: 'Markdown' }
@@ -214,8 +216,8 @@ export class PaybackCommandHandler {
 
     // Pre-check against the freshest remaining bound; createPaybackBounded re-checks
     // it in-transaction on confirmation.
-    const activeSum = await this.repository.sumActivePaybacks(paymentId);
-    const remaining = paymentAmount - activeSum;
+    const paidBack = await this.repository.sumPaybacks(paymentId);
+    const remaining = paymentAmount - paidBack;
 
     if (remaining <= 0) {
       await this.resetState();
@@ -313,7 +315,7 @@ export class PaybackCommandHandler {
         if (result.remainingCents <= 0) {
           await this.resetState();
           await ctx.reply(
-            `⚠️ This payment has been fully paid back ($${formatCents(result.activeSumCents)} active paybacks). Payback blocked.`
+            `⚠️ This payment has been fully paid back ($${formatCents(result.paidBackCents)} paid back). Payback blocked.`
           );
         } else {
           // Send the user back to the amount step with the fresh bound.

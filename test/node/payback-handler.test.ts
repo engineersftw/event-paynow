@@ -80,7 +80,7 @@ describe('PaybackCommandHandler', () => {
 
     mockRepository = {
       getPaymentByRef: vi.fn(),
-      sumActivePaybacks: vi.fn().mockResolvedValue(0),
+      sumPaybacks: vi.fn().mockResolvedValue(0),
       createPaybackBounded: vi.fn(),
     } as unknown as Repository;
 
@@ -207,15 +207,15 @@ describe('PaybackCommandHandler', () => {
           pendingPayer: { type: 'mobile', normalized: '+6591234567' },
         })))
         .mockResolvedValueOnce(okResponse); // setState step 3
-      vi.mocked(mockRepository.sumActivePaybacks).mockResolvedValue(0);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(0);
 
       const result = await handler.handleInput(ctx);
 
       expect(result).toBe(true);
-      expect(mockRepository.sumActivePaybacks).toHaveBeenCalledWith(42);
+      expect(mockRepository.sumPaybacks).toHaveBeenCalledWith(42);
       expect(lastReply()).toContain('Enter payback amount');
       expect(lastReply()).toContain('Maximum payback: $10.00');
-      expect(lastReply()).toContain('Already paid back (active): $0.00');
+      expect(lastReply()).toContain('Already paid back: $0.00');
 
       const states = await postedStates();
       const state = states[states.length - 1] as { step: number; context: Record<string, unknown> };
@@ -223,7 +223,7 @@ describe('PaybackCommandHandler', () => {
       expect(state.context.remainingCents).toBe(1000);
     });
 
-    it('should reduce maximum by existing active paybacks (12.50 minus 8.00 → 4.50)', async () => {
+    it('should reduce maximum by existing paybacks (12.50 minus 8.00 → 4.50)', async () => {
       const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
@@ -232,11 +232,11 @@ describe('PaybackCommandHandler', () => {
           pendingPayer: { type: 'mobile', normalized: '+6591234567' },
         })))
         .mockResolvedValueOnce(okResponse);
-      vi.mocked(mockRepository.sumActivePaybacks).mockResolvedValue(800);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(800);
 
       await handler.handleInput(ctx);
 
-      expect(lastReply()).toContain('Already paid back (active): $8.00');
+      expect(lastReply()).toContain('Already paid back: $8.00');
       expect(lastReply()).toContain('Maximum payback: $4.50');
     });
 
@@ -248,7 +248,7 @@ describe('PaybackCommandHandler', () => {
           pendingPayer: { type: 'mobile', normalized: '+6591234567' },
         })))
         .mockResolvedValueOnce(okResponse); // reset to idle
-      vi.mocked(mockRepository.sumActivePaybacks).mockResolvedValue(1000);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(1000);
 
       await handler.handleInput(ctx);
 
@@ -302,7 +302,7 @@ describe('PaybackCommandHandler', () => {
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(stateResponse(paybackState(3, step3Context)))
         .mockResolvedValueOnce(okResponse);
-      vi.mocked(mockRepository.sumActivePaybacks).mockResolvedValue(0);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(0);
 
       const result = await handler.handleInput(ctx);
 
@@ -315,7 +315,7 @@ describe('PaybackCommandHandler', () => {
 
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(stateResponse(paybackState(3, step3Context)));
-      vi.mocked(mockRepository.sumActivePaybacks).mockResolvedValue(0);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(0);
 
       await handler.handleInput(ctx);
 
@@ -333,7 +333,7 @@ describe('PaybackCommandHandler', () => {
           paymentAmount: 1250,
           remainingCents: 450,
         })));
-      vi.mocked(mockRepository.sumActivePaybacks).mockResolvedValue(800);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(800);
 
       await handler.handleInput(ctx);
 
@@ -350,7 +350,7 @@ describe('PaybackCommandHandler', () => {
           remainingCents: 450,
         })))
         .mockResolvedValueOnce(okResponse);
-      vi.mocked(mockRepository.sumActivePaybacks).mockResolvedValue(800);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(800);
 
       await handler.handleInput(ctx);
 
@@ -366,7 +366,7 @@ describe('PaybackCommandHandler', () => {
       await handler.handleInput(ctx);
 
       expect(lastReply()).toContain('Invalid amount');
-      expect(mockRepository.sumActivePaybacks).not.toHaveBeenCalled();
+      expect(mockRepository.sumPaybacks).not.toHaveBeenCalled();
     });
 
     it('should reject amounts with more than 2 decimals (12.505)', async () => {
@@ -378,7 +378,7 @@ describe('PaybackCommandHandler', () => {
       await handler.handleInput(ctx);
 
       expect(lastReply()).toContain('Invalid amount');
-      expect(mockRepository.sumActivePaybacks).not.toHaveBeenCalled();
+      expect(mockRepository.sumPaybacks).not.toHaveBeenCalled();
     });
 
     it('should refuse when a concurrent payback fully used the bound mid-conversation', async () => {
@@ -387,7 +387,7 @@ describe('PaybackCommandHandler', () => {
       vi.mocked(mockConversationDO.fetch)
         .mockResolvedValueOnce(stateResponse(paybackState(3, step3Context)))
         .mockResolvedValueOnce(okResponse); // reset
-      vi.mocked(mockRepository.sumActivePaybacks).mockResolvedValue(1000);
+      vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(1000);
 
       await handler.handleInput(ctx);
 
@@ -500,7 +500,7 @@ describe('PaybackCommandHandler', () => {
         ok: false,
         reason: 'over_bound',
         paymentAmountCents: 1250,
-        activeSumCents: 800,
+        paidBackCents: 800,
         remainingCents: 450,
       });
 
@@ -528,7 +528,7 @@ describe('PaybackCommandHandler', () => {
         ok: false,
         reason: 'over_bound',
         paymentAmountCents: 1250,
-        activeSumCents: 1250,
+        paidBackCents: 1250,
         remainingCents: 0,
       });
 

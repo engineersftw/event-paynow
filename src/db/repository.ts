@@ -53,6 +53,8 @@ export interface Payback {
  * Outcome of a bounded payback creation (task 7.2).
  * `ok: true` carries the stored row and the payable amount remaining after it.
  * `over_bound` carries the in-transaction totals so callers can explain the refusal.
+ * The bound counts ALL paybacks (pending and sent): status only tracks delivery,
+ * so marking a payback sent never frees up room for another.
  */
 export type CreatePaybackBoundedResult =
   | { ok: true; payback: Payback; remainingCents: number }
@@ -60,7 +62,7 @@ export type CreatePaybackBoundedResult =
       ok: false;
       reason: 'over_bound';
       paymentAmountCents: number;
-      activeSumCents: number;
+      paidBackCents: number;
       remainingCents: number;
     }
   | { ok: false; reason: 'payment_not_found' };
@@ -83,10 +85,11 @@ export interface Repository {
   // Paybacks
   createPayback(payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }): Promise<Payback>;
   /**
-   * Create a payback only if `SUM(active paybacks) + amountCents <= payment.amountCents`
-   * still holds when the write commits. The re-check runs inside the same D1 batch
-   * (transaction) as the insert as a compare-and-set guard, so concurrent requests can
-   * never push the active total over the original amount (design §5, task 7.2).
+   * Create a payback only if `SUM(paybacks) + amountCents <= payment.amountCents`
+   * still holds when the write commits — counting both pending and sent rows.
+   * The re-check runs inside the same D1 batch (transaction) as the insert as a
+   * compare-and-set guard, so concurrent requests can never push the total over
+   * the original amount (design §5, task 7.2).
    */
   createPaybackBounded(payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }): Promise<CreatePaybackBoundedResult>;
   getPaybackByRef(ref: string): Promise<Payback | null>;
@@ -97,5 +100,9 @@ export interface Repository {
    */
   updatePaybackStatus(ref: string, status: PaybackStatus, timestamp: string): Promise<Payback | null>;
   listPaybacksByPayment(paymentId: number): Promise<Payback[]>;
-  sumActivePaybacks(paymentId: number): Promise<number>;
+  /**
+   * Total amount paid back against a payment across ALL statuses (pending + sent).
+   * This is the quantity bounded by the payment amount (task 7.2).
+   */
+  sumPaybacks(paymentId: number): Promise<number>;
 }
