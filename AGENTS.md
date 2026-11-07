@@ -61,6 +61,7 @@ This project uses OpenSpec for change management. All changes are archived:
 2. `add-event-management` (22 tasks) — archived 2026-11-07
 3. `add-payer-details-to-start` (14 tasks) — archived 2026-11-07
 4. `add-payback-confirm-and-cancel` (12 tasks) — archived 2026-11-08
+5. `show-payer-name-in-messages` (11 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -103,6 +104,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - **Proxy validation is format-only** — Mobile: `+65XXXXXXXX` (6/8/9 prefix). UEN: 9–13 alphanumeric.
 - **Infra-neutral interfaces** — Service layer depends on repository interfaces, not Drizzle types.
 - **No Node APIs in core** — `src/sgqr/` must run in Workers isolate.
+- **Names in messages** — captions and the text lines that replace photos carry the payer name only (`Payer: <name>` / `To: <name>`, segment omitted when unknown) and never a PayNow number, because they get forwarded; owner-facing messages show `Name (proxy)`. A payback recipient has a name only if its proxy equals the payment's stored payer (`recipientName()` in `src/commands/payer-label.ts`). Use `payerLabel` (Markdown-escaped) only with `parse_mode: 'Markdown'`, `plainPayerLabel` otherwise.
 
 ## Blocked Tasks
 
@@ -122,7 +124,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - Conversation Durable Object with FSM state, 10-min alarm expiry, eviction survival
 - public `alarm()` lifecycle method (workerd requirement, not a fetch route)
 - /init command with mobile/UEN validation, inline Confirm/Cancel buttons, in-place message updates, creates events
-- /start payment issuance with event picker, required payer PayNow proxy + optional payer name (snapshotted on the payment; kept out of the shareable QR caption), payee snapshot, SGQR payload + BMP QR uploaded via sendPhoto
+- /start payment issuance with event picker, required payer PayNow proxy + optional payer name (snapshotted on the payment; the name — never the number — appears in the shareable QR caption), payee snapshot, SGQR payload + BMP QR uploaded via sendPhoto
 - QR photo carries action buttons (✓ Received / Payback)
 - mark_received replaces QR photo with text summary (deleteMessage + reply)
 - /payments listing with pagination (5 per page), inline buttons, payment detail view

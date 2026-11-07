@@ -191,6 +191,8 @@ describe('PaybackCommandHandler', () => {
       expect(state!.step).toBe(2);
       expect(state!.context.pendingPayer).toEqual({ type: 'mobile', normalized: '+6591234568' });
       expect(state!.context.paymentId).toBe(42);
+      expect(state!.context.storedPayerValue).toBe('+6591234568');
+      expect(state!.context.storedPayerName).toBe('Alice');
     });
 
     it('beginFlow (button path) seeds the same state as /payback <ref>', async () => {
@@ -714,6 +716,93 @@ describe('PaybackCommandHandler', () => {
         expect.stringContaining('Payback Recorded'),
         expect.objectContaining({ parse_mode: 'Markdown' })
       );
+    });
+
+    describe('recipient name in captions and messages', () => {
+      const stored = { storedPayerValue: '+6591234567', storedPayerName: 'Al_ice' };
+
+      async function confirmWith(context: Record<string, unknown>) {
+        const ctx = {
+          ...mockCtx,
+          callbackQuery: { data: 'payback_confirm_amount:PAY123' },
+        } as unknown as Context;
+        vi.mocked(mockConversationDO.fetch)
+          .mockResolvedValueOnce(stateResponse(paybackState(4, { ...step4Context, ...context })))
+          .mockResolvedValueOnce(okResponse);
+        vi.mocked(mockRepository.createPaybackBounded).mockResolvedValue(okBoundedResult());
+        await handler.handleCallback(ctx);
+        const [, opts] = vi.mocked(mockCtx.replyWithPhoto).mock.calls[0]!;
+        return String((opts as { caption?: string }).caption);
+      }
+
+      it('caption carries "To: <name>" (no number) when the recipient is the stored payer', async () => {
+        const caption = await confirmWith(stored);
+
+        expect(caption).toBe(
+          'Payback for PAY123 / SGD 5.50 / ABCDEFGHIJ / To: Al_ice / Scan to send the money back'
+        );
+        expect(caption).not.toContain('91234567');
+        // Markdown message escapes the name and keeps the number (owner-facing)
+        const [text] = vi.mocked(mockCtx.editMessageText).mock.calls[0]!;
+        expect(text).toContain('Recipient: Al\\_ice (+6591234567)');
+      });
+
+      it('changed recipient has no name: caption unchanged, bare proxy in the message', async () => {
+        const caption = await confirmWith({
+          ...stored,
+          pendingPayer: { type: 'mobile', normalized: '+6598765432' },
+        });
+
+        expect(caption).toBe(
+          'Payback for PAY123 / SGD 5.50 / ABCDEFGHIJ / Scan to send the money back'
+        );
+        const [text] = vi.mocked(mockCtx.editMessageText).mock.calls[0]!;
+        expect(text).toContain('Recipient: +6598765432');
+        expect(text).not.toContain('Al');
+      });
+
+      it('legacy state without storedPayer* degrades to the bare proxy', async () => {
+        const caption = await confirmWith({});
+
+        expect(caption).not.toContain('To:');
+        const [text] = vi.mocked(mockCtx.editMessageText).mock.calls[0]!;
+        expect(text).toContain('Recipient: +6591234567');
+      });
+
+      it('amount prompt and amount confirmation show the recipient (plain text)', async () => {
+        // Amount prompt after confirming the payer (step 2 → 3)
+        vi.mocked(mockConversationDO.fetch)
+          .mockResolvedValueOnce(
+            stateResponse(
+              paybackState(2, {
+                pendingPayer: { type: 'mobile', normalized: '+6591234567' },
+                ...stored,
+              })
+            )
+          )
+          .mockResolvedValueOnce(okResponse);
+        await handler.handleCallback({
+          ...mockCtx,
+          callbackQuery: { data: 'payback_confirm_payer:PAY123' },
+        } as unknown as Context);
+        expect(vi.mocked(mockCtx.editMessageText).mock.calls[0]![0]).toContain(
+          'Recipient: Al_ice (+6591234567)'
+        );
+
+        // Amount confirmation (step 3 → 4)
+        vi.mocked(mockConversationDO.fetch)
+          .mockResolvedValueOnce(
+            stateResponse(
+              paybackState(3, {
+                pendingPayer: { type: 'mobile', normalized: '+6591234567' },
+                ...stored,
+              })
+            )
+          )
+          .mockResolvedValueOnce(okResponse);
+        await handler.handleInput({ ...mockCtx, message: { text: '5.50' } } as unknown as Context);
+        expect(lastReply()).toContain('Recipient: Al_ice (+6591234567)');
+      });
     });
 
     it('should reset conversation after successful record', async () => {

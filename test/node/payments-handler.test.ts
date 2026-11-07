@@ -129,6 +129,35 @@ describe('PaymentsCommandHandler', () => {
       );
     });
 
+    it('shows the (escaped) payer name in list entries and nothing extra without one', async () => {
+      const base: Payment = {
+        id: 1,
+        ref: 'PAY001',
+        userId: 123456789,
+        eventId: 1,
+        description: 'Lunch',
+        amountCents: 1500,
+        payeeType: 'mobile',
+        payeeValue: '+6591234567',
+        status: 'pending',
+        source: 'manual',
+        qrPayload: 'payload1',
+        createdAt: '2024-01-15T12:30:00Z',
+        receivedAt: null,
+      };
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
+      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([
+        { ...base, payerName: 'Al_ice' },
+        { ...base, id: 2, ref: 'PAY002', createdAt: '2024-01-14T12:30:00Z' },
+      ]);
+
+      await handler.handle(mockCtx, 'EVT-TEST0001');
+
+      const text = vi.mocked(mockCtx.reply).mock.calls[0]![0] as string;
+      expect(text).toContain('*$15.00* - Lunch (Al\\_ice)');
+      expect(text).toContain('*$15.00* - Lunch\n');
+    });
+
     it('should show empty message when event has no payments', async () => {
       vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
       vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([]);

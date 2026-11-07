@@ -2,6 +2,7 @@ import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { EventRepository, Repository } from '../db/repository.js';
 import { formatCents } from '../sgqr/amount.js';
+import { escapeMarkdown } from './payer-label.js';
 
 export class PaymentsCommandHandler {
   private repository: Repository;
@@ -107,7 +108,8 @@ export class PaymentsCommandHandler {
       const date = this.formatDate(payment.createdAt);
       const status = payment.status === 'pending' ? 'Pending' : 'Received';
 
-      lines.push(`${statusIcon} *${amount}* - ${payment.description}`);
+      const payer = payment.payerName ? ` (${escapeMarkdown(payment.payerName)})` : '';
+      lines.push(`${statusIcon} *${amount}* - ${payment.description}${payer}`);
       lines.push(`   Ref: \`${payment.ref}\` | ${status} | ${date}`);
       lines.push('');
 
