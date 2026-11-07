@@ -1,5 +1,5 @@
 import type { Context } from 'grammy';
-import { InputFile } from 'grammy';
+import { InlineKeyboard, InputFile } from 'grammy';
 import { generateRef } from '../db/proxy-validation.js';
 import type { Payment, Repository, User } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
@@ -223,16 +223,18 @@ export class StartCommandHandler {
       const bmpBytes = await renderQrPng(qrPayload);
       const caption = this.buildCaption(payment);
 
-      await ctx.replyWithPhoto(new InputFile(bmpBytes, 'paynow-qr.bmp'), { caption });
+      // Inline buttons on the QR photo so the creator can act on it without
+      // navigating back through /payments.
+      const keyboard = new InlineKeyboard()
+        .text('✓ Received', `mark_received:${payment.ref}`)
+        .text('Payback', `payback:${payment.ref}`);
+
+      await ctx.replyWithPhoto(new InputFile(bmpBytes, 'paynow-qr.bmp'), {
+        caption,
+        reply_markup: keyboard,
+      });
 
       await this.resetState();
-
-      await ctx.reply(
-        `🧾 Payment \`${ref}\` is pending.\n\n` +
-          'Scan the QR to pay, or forward the message to the payer.\n' +
-          'Use /payments to track it.',
-        { parse_mode: 'Markdown' }
-      );
     } catch (error) {
       console.error('Failed to create payment:', error);
       // Stay in the flow so the user can retry with a new amount
