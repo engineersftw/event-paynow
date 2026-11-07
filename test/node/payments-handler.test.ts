@@ -319,7 +319,10 @@ describe('PaymentsCommandHandler', () => {
     it('page 1 shows Next button only when total > pageSize', async () => {
       // 6 payments — one more than the page size of 5
       const payments = Array.from({ length: 6 }, (_, i) =>
-        makePayment(`P${String(i + 1).padStart(3, '0')}`, `2024-01-${String(10 + i).padStart(2, '0')}T00:00:00Z`)
+        makePayment(
+          `P${String(i + 1).padStart(3, '0')}`,
+          `2024-01-${String(10 + i).padStart(2, '0')}T00:00:00Z`
+        )
       );
       vi.mocked(mockRepository.getUser).mockResolvedValue(user);
       vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue(payments);
@@ -341,7 +344,10 @@ describe('PaymentsCommandHandler', () => {
 
     it('page 2 shows Prev button only when on last page', async () => {
       const payments = Array.from({ length: 6 }, (_, i) =>
-        makePayment(`P${String(i + 1).padStart(3, '0')}`, `2024-01-${String(10 + i).padStart(2, '0')}T00:00:00Z`)
+        makePayment(
+          `P${String(i + 1).padStart(3, '0')}`,
+          `2024-01-${String(10 + i).padStart(2, '0')}T00:00:00Z`
+        )
       );
       vi.mocked(mockRepository.getUser).mockResolvedValue(user);
       vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue(payments);
@@ -377,7 +383,10 @@ describe('PaymentsCommandHandler', () => {
 
     it('page 1 only shows the first pageSize payments (newest first)', async () => {
       const payments = Array.from({ length: 7 }, (_, i) =>
-        makePayment(`P${String(i + 1).padStart(3, '0')}`, `2024-01-${String(10 + i).padStart(2, '0')}T00:00:00Z`)
+        makePayment(
+          `P${String(i + 1).padStart(3, '0')}`,
+          `2024-01-${String(10 + i).padStart(2, '0')}T00:00:00Z`
+        )
       );
       vi.mocked(mockRepository.getUser).mockResolvedValue(user);
       vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue(payments);
