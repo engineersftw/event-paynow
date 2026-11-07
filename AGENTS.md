@@ -60,6 +60,7 @@ This project uses OpenSpec for change management. All changes are archived:
 1. `add-paynow-qr-telegram-bot` (29 tasks) — archived 2026-11-07
 2. `add-event-management` (22 tasks) — archived 2026-11-07
 3. `add-payer-details-to-start` (14 tasks) — archived 2026-11-07
+4. `add-payback-confirm-and-cancel` (12 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
