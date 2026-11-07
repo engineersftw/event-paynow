@@ -87,6 +87,48 @@ describe('PaymentCallbackHandler', () => {
       expect(mockCtx.api.deleteMessage).toHaveBeenCalledWith(123456789, 42);
     });
 
+    it('puts the payer name (not the number) in the received status line', async () => {
+      const payment: Payment = {
+        id: 1,
+        ref: 'PAY123',
+        userId: 123456789,
+        amountCents: 1000,
+        status: 'pending',
+        createdAt: new Date().toISOString(),
+        description: 'Test payment',
+        payeeType: 'mobile',
+        payeeValue: '+6512345678',
+        payerType: 'mobile',
+        payerValue: '+6591234568',
+        payerName: 'Alice',
+        qrPayload: 'test-payload',
+        source: 'manual',
+        receivedAt: null,
+      };
+      mockCtx.callbackQuery!.data = 'mark_received:PAY123';
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(payment);
+      vi.mocked(mockRepository.updatePaymentStatus).mockResolvedValue({
+        ...payment,
+        status: 'received',
+        receivedAt: new Date().toISOString(),
+      });
+
+      await handler.handleCallback(mockCtx);
+
+      const line = vi.mocked(mockCtx.reply).mock.calls[0]![0] as string;
+      expect(line).toMatch(/^Test payment \/ SGD 10\.00 \/ PAY123 \/ Payer: Alice \/ ✅ Received /);
+      expect(line).not.toContain('91234568');
+
+      // Without a name the line keeps the original format
+      vi.mocked(mockCtx.reply).mockClear();
+      const { payerName: _n, ...noName } = payment;
+      vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(noName);
+      await handler.handleCallback(mockCtx);
+      expect(vi.mocked(mockCtx.reply).mock.calls[0]![0]).toMatch(
+        /^Test payment \/ SGD 10\.00 \/ PAY123 \/ ✅ Received /
+      );
+    });
+
     it('should reject if payment not found', async () => {
       // Setup
       mockCtx.callbackQuery!.data = 'mark_received:PAY999';
@@ -567,6 +609,57 @@ describe('PaymentCallbackHandler', () => {
           'Payback for PAY123 / SGD 20.00 / PB2 / ❌ Cancelled'
         );
         expect(mockCtx.api.deleteMessage).toHaveBeenCalledWith(123456789, 77);
+      });
+
+      it('status lines carry "To: <name>" only when the recipient is the stored payer', async () => {
+        const named = {
+          ...detailPayment,
+          payerType: 'uen' as const,
+          payerValue: '201234567A',
+          payerName: 'Alice',
+        };
+        viewingPhoto('pb_cancel:PAY123:PB2');
+        vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(named);
+        vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue({
+          ...pendingPayback,
+          status: 'cancelled',
+        });
+
+        await handler.handleCallback(mockCtx);
+        expect(mockCtx.reply).toHaveBeenLastCalledWith(
+          'Payback for PAY123 / SGD 20.00 / PB2 / To: Alice / ❌ Cancelled'
+        );
+
+        // Recipient was changed to another proxy → no name segment
+        vi.mocked(mockRepository.getPaybackByRef).mockResolvedValue({
+          ...pendingPayback,
+          payerValue: '+6598765432',
+        });
+        await handler.handleCallback(mockCtx);
+        expect(mockCtx.reply).toHaveBeenLastCalledWith(
+          'Payback for PAY123 / SGD 20.00 / PB2 / ❌ Cancelled'
+        );
+      });
+
+      it('detail history shows "Name (proxy)" for the stored payer and the bare proxy otherwise', async () => {
+        const named = {
+          ...detailPayment,
+          payerType: 'uen' as const,
+          payerValue: '201234567A',
+          payerName: 'Al_ice',
+        };
+        mockCtx.callbackQuery!.data = 'view:PAY123';
+        vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(named);
+        vi.mocked(mockRepository.listPaybacksByPayment).mockResolvedValue([
+          pendingPayback,
+          { ...pendingPayback, id: 3, ref: 'PB3', payerValue: '+6598765432' },
+        ]);
+
+        await handler.handleCallback(mockCtx);
+
+        const message = vi.mocked(mockCtx.editMessageText).mock.calls[0]![0] as string;
+        expect(message).toContain('$20.00 to Al\\_ice (201234567A)');
+        expect(message).toContain('$20.00 to +6598765432');
       });
 
       it('still succeeds when the photo cannot be deleted', async () => {

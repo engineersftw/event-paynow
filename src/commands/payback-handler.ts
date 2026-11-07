@@ -6,7 +6,7 @@ import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
-import { payerLabel } from './payer-label.js';
+import { captionPart, payerLabel, plainPayerLabel, recipientName } from './payer-label.js';
 
 /**
  * /payback command handler - initiates payback flow for a payment
@@ -112,6 +112,9 @@ export class PaybackCommandHandler {
         context: {
           ...context,
           pendingPayer: { type: payment.payerType, normalized: payment.payerValue },
+          // Kept across "Change recipient" so only the stored payer resolves to a name
+          storedPayerValue: payment.payerValue,
+          storedPayerName: payment.payerName ?? null,
         },
         lastActivity: new Date().toISOString(),
       });
@@ -325,6 +328,7 @@ export class PaybackCommandHandler {
 
     await ctx.editMessageText(
       `💵 Enter payback amount (in dollars):\n\n` +
+        `Recipient: ${this.recipientText(state)}\n` +
         `Original payment: $${formatCents(paymentAmount)}\n` +
         `Already paid back: $${formatCents(paidBack)}\n` +
         `Maximum payback: $${formatCents(remaining)}\n\n` +
@@ -395,9 +399,27 @@ export class PaybackCommandHandler {
       .text('❌ Cancel', `payback_cancel_amount:${state.context.paymentRef as string}`);
 
     await ctx.reply(
-      `💰 Payback amount: $${formatCents(amountCents)}\n\nTap a button to confirm or cancel:`,
+      `💰 Payback amount: $${formatCents(amountCents)}\n` +
+        `Recipient: ${this.recipientText(state)}\n\nTap a button to confirm or cancel:`,
       { reply_markup: keyboard }
     );
+  }
+
+  /** Name (when the recipient is the stored payer) for the current conversation state. */
+  private recipientNameFor(state: ConversationState): string | null {
+    const proxy = state.context.pendingPayer as { normalized: string } | undefined;
+    if (!proxy) return null;
+    return recipientName(
+      state.context.storedPayerValue as string | undefined,
+      state.context.storedPayerName as string | null | undefined,
+      proxy.normalized
+    );
+  }
+
+  /** Plain-text "Name (proxy)" / bare proxy for the pending recipient. */
+  private recipientText(state: ConversationState): string {
+    const proxy = (state.context.pendingPayer as { normalized: string } | undefined)?.normalized;
+    return proxy ? plainPayerLabel(this.recipientNameFor(state), proxy) : 'unknown';
   }
 
   /**
@@ -424,6 +446,7 @@ export class PaybackCommandHandler {
       }
 
       const paybackRef = generateRef();
+      const recipient = this.recipientNameFor(state);
 
       // Payback QR encodes the PAYER as the payee proxy (spec: the collecting
       // user scans this in their own bank app and sends the money back)
@@ -482,9 +505,14 @@ export class PaybackCommandHandler {
       // Success: row recorded inside the transaction — deliver the QR image
       const qrBytes = await renderQrPng(result.payback.qrPayload);
       await ctx.replyWithPhoto(new InputFile(qrBytes, 'payback-qr.bmp'), {
-        caption:
-          `Payback for ${paymentRef} / SGD ${formatCents(result.payback.amountCents)} / ` +
-          `${result.payback.ref} / Scan to send the money back`,
+        // Name only (no number), segment omitted when the recipient has no known name
+        caption: [
+          `Payback for ${paymentRef}`,
+          `SGD ${formatCents(result.payback.amountCents)}`,
+          result.payback.ref,
+          ...captionPart('To', recipient),
+          'Scan to send the money back',
+        ].join(' / '),
         reply_markup: new InlineKeyboard()
           .text('✓ Sent', `pb_sent:${paymentRef}:${result.payback.ref}`)
           .text('✖ Cancel', `pb_cancel:${paymentRef}:${result.payback.ref}`),
@@ -495,7 +523,7 @@ export class PaybackCommandHandler {
         `✅ *Payback Recorded!*\n\n` +
           `Payback reference: \`${result.payback.ref}\`\n` +
           `Amount: $${formatCents(result.payback.amountCents)}\n` +
-          `Payer (now payee): ${payerProxy.normalized}\n` +
+          `Recipient: ${payerLabel(recipient, payerProxy.normalized)}\n` +
           `Remaining payable: $${formatCents(result.remainingCents)}\n\n` +
           'Use /payments to track it.',
         { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }

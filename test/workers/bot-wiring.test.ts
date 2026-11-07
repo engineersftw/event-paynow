@@ -436,4 +436,60 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(again).not.toBe(pbRef);
     expect(await repo.sumPaybacks(payment.id)).toBe(10000);
   });
+
+  it('names the stored payer in payback captions/status lines; a changed recipient has no name', async () => {
+    const userId = 800000040;
+    const { bot, repo } = makeWiredBot();
+    await seedPayment(repo, userId, 'WIRE-040', 10000, 'received', {
+      type: 'mobile',
+      value: '+6591234568',
+      name: 'Alice',
+    });
+
+    // 1. Stored payer: confirm → amount → confirm
+    await bot.handleUpdate(textUpdate(userId, '/payback WIRE-040'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_payer:WIRE-040'));
+    expect(stub.editedMessages.at(-1)!.text).toContain('Recipient: Alice (+6591234568)');
+    await bot.handleUpdate(textUpdate(userId, '10.00'));
+    expect(stub.lastText()).toContain('Recipient: Alice (+6591234568)');
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_amount:WIRE-040'));
+
+    const named = stub.sentPhotos.at(-1)!;
+    const pbRef = named.caption.split(' / ')[2]!;
+    expect(named.caption).toBe(
+      `Payback for WIRE-040 / SGD 10.00 / ${pbRef} / To: Alice / Scan to send the money back`
+    );
+    expect(named.caption).not.toContain('91234568');
+
+    await bot.handleUpdate(callbackUpdate(userId, `pb_sent:WIRE-040:${pbRef}`, 700, 30, true));
+    expect(stub.lastText()).toMatch(
+      new RegExp(`^Payback for WIRE-040 / SGD 10\\.00 / ${pbRef} / To: Alice / ✅ Sent `)
+    );
+
+    // 2. Change recipient → typed proxy has no name
+    await bot.handleUpdate(textUpdate(userId, '/payback WIRE-040'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_change_payer:WIRE-040'));
+    await bot.handleUpdate(textUpdate(userId, '98765432'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_payer:WIRE-040'));
+    await bot.handleUpdate(textUpdate(userId, '5.00'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_amount:WIRE-040'));
+    const other = stub.sentPhotos.at(-1)!;
+    expect(other.caption).not.toContain('To:');
+    expect(other.caption).toMatch(/^Payback for WIRE-040 \/ SGD 5\.00 \/ [A-Z2-7]{10} \/ Scan/);
+
+    // 3. Changing back to the stored proxy restores the name
+    await bot.handleUpdate(textUpdate(userId, '/payback WIRE-040'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_change_payer:WIRE-040'));
+    await bot.handleUpdate(textUpdate(userId, '91234568'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_payer:WIRE-040'));
+    await bot.handleUpdate(textUpdate(userId, '1.00'));
+    await bot.handleUpdate(callbackUpdate(userId, 'payback_confirm_amount:WIRE-040'));
+    expect(stub.sentPhotos.at(-1)!.caption).toContain('/ To: Alice /');
+
+    // 4. Detail history names only the stored payer
+    await bot.handleUpdate(callbackUpdate(userId, 'view:WIRE-040'));
+    const detail = stub.editedMessages.at(-1)!.text;
+    expect(detail).toContain('to Alice (+6591234568)');
+    expect(detail).toContain('to +6598765432');
+  });
 });

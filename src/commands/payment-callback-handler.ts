@@ -4,7 +4,7 @@ import type { Payback, Payment, Repository } from '../db/repository.js';
 import { formatCents } from '../sgqr/amount.js';
 import type { ConversationDO } from '../worker/conversation-do.js';
 import { PaybackCommandHandler } from './payback-handler.js';
-import { payerLabel } from './payer-label.js';
+import { captionPart, payerLabel, recipientName } from './payer-label.js';
 
 /**
  * Callback query handler for payment actions
@@ -160,7 +160,11 @@ export class PaymentCallbackHandler {
 
       for (const payback of paybacks) {
         const icon = { pending: '⏳', sent: '✅', cancelled: '❌' }[payback.status];
-        let line = `${icon} $${formatCents(payback.amountCents)} to ${payback.payerValue} — \`${payback.ref}\``;
+        const to = payerLabel(
+          recipientName(payment.payerValue, payment.payerName, payback.payerValue),
+          payback.payerValue
+        );
+        let line = `${icon} $${formatCents(payback.amountCents)} to ${to} — \`${payback.ref}\``;
         if (payback.status === 'sent' && payback.sentAt) {
           line += ` (sent ${this.formatDate(payback.sentAt)})`;
         } else if (payback.status === 'cancelled') {
@@ -241,7 +245,13 @@ export class PaymentCallbackHandler {
     // Replace the QR photo with a text message showing the payment summary
     if (ctx.callbackQuery?.message && 'message_id' in ctx.callbackQuery.message) {
       const receivedAt = this.formatDate(timestamp);
-      const summary = `${payment.description} / SGD ${formatCents(payment.amountCents)} / ${payment.ref} / ✅ Received ${receivedAt}`;
+      const summary = [
+        payment.description,
+        `SGD ${formatCents(payment.amountCents)}`,
+        payment.ref,
+        ...captionPart('Payer', payment.payerName),
+        `✅ Received ${receivedAt}`,
+      ].join(' / ');
       const chatId = ctx.callbackQuery.message.chat.id;
       const msgId = ctx.callbackQuery.message.message_id;
 
@@ -300,8 +310,15 @@ export class PaymentCallbackHandler {
     const message = ctx.callbackQuery?.message;
     if (message && 'photo' in message) {
       const label = target === 'sent' ? `✅ Sent ${this.formatDate(timestamp)}` : '❌ Cancelled';
+      const to = recipientName(payment.payerValue, payment.payerName, payback.payerValue);
       await ctx.reply(
-        `Payback for ${payment.ref} / SGD ${formatCents(payback.amountCents)} / ${payback.ref} / ${label}`
+        [
+          `Payback for ${payment.ref}`,
+          `SGD ${formatCents(payback.amountCents)}`,
+          payback.ref,
+          ...captionPart('To', to),
+          label,
+        ].join(' / ')
       );
       try {
         await ctx.api.deleteMessage(message.chat.id, message.message_id);

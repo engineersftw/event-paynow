@@ -6,6 +6,7 @@ import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
+import { captionPart } from './payer-label.js';
 
 const SHARE_HINT = 'Forward this message to share';
 const MAX_PAYER_NAME = 40;
@@ -307,7 +308,14 @@ export class StartCommandHandler {
       });
 
       const bmpBytes = await renderQrPng(qrPayload);
-      const caption = `${payment.description} / SGD ${formatCents(payment.amountCents)} / ${payment.ref} / ${SHARE_HINT}`;
+      // Name only: this caption is forwarded, so never include the payer's number
+      const caption = [
+        payment.description,
+        `SGD ${formatCents(payment.amountCents)}`,
+        payment.ref,
+        ...captionPart('Payer', payment.payerName),
+        SHARE_HINT,
+      ].join(' / ');
 
       const keyboard = new InlineKeyboard()
         .text('✓ Received', `mark_received:${payment.ref}`)

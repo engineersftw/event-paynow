@@ -133,7 +133,9 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(captionParts[0]).toBe('Dinner split');
     expect(captionParts[1]).toBe('SGD 12.50');
     expect(captionParts[2]).toMatch(/^[A-Z2-7]{10}$/);
-    expect(captionParts[3]).toBe('Forward this message to share');
+    // Payer name (never the number) sits after the ref; the hint follows
+    expect(captionParts[3]).toBe('Payer: Alice');
+    expect(captionParts[4]).toBe('Forward this message to share');
     const ref = captionParts[2]!;
 
     // --- QR bytes decode back via jsQR (2.4 path) --------------------------
@@ -217,6 +219,10 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     const payment = await repo.getPaymentByRef(ref);
     expect(payment!.payerValue).toBe('+6591234568');
     expect(payment!.payerName).toBeNull();
+    // No name ⇒ caption has no payer segment (identical to the pre-name format)
+    expect(stub.sentPhotos[0]!.caption).toBe(
+      `Dinner split / SGD 4.00 / ${ref} / Forward this message to share`
+    );
   });
 
   it('/cancel mid-flow ends the conversation and writes nothing (5.2)', async () => {
