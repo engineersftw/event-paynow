@@ -35,7 +35,7 @@
 
 ## 6. Integration + verification
 
-- [ ] 6.1 End-to-end Workers-pool test: drive a fresh chat through `/init` (create event) → `/start` (pick event, enter amount, receive QR) → `/payments` (drill in, see the payment) → `/end_event` (close) → `/start` again (rejected). Seed a second event in the same chat to verify `/start` shows a picker.
+- [x] 6.1 End-to-end Workers-pool test: drive a fresh chat through `/init` (create event) → `/start` (pick event, enter amount, receive QR) → `/payments` (drill in, see the payment) → `/end_event` (close) → `/start` again (rejected). Seed a second event in the same chat to verify `/start` shows a picker.
 - [x] 6.2 Update `docs/architecture.md`: add `events` table to the data model diagram, note event-scoped conversation flows, update "What's Working" section.
 - [x] 6.3 Update `AGENTS.md` Conventions if new patterns emerge (e.g., topic_id handling).
 - [x] 6.4 Full suite green: `npm run build && npm run check && npm test` — all Node + Workers pools pass.
