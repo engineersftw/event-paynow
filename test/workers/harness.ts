@@ -28,10 +28,23 @@ const TEST_SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
   )`,
+  `CREATE TABLE IF NOT EXISTS events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    ref TEXT NOT NULL UNIQUE,
+    chat_id INTEGER NOT NULL,
+    topic_id INTEGER NOT NULL DEFAULT 0,
+    name TEXT NOT NULL,
+    payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
+    payee_value TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
+    created_at TEXT NOT NULL,
+    closed_at TEXT
+  )`,
   `CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ref TEXT NOT NULL UNIQUE,
     user_id INTEGER NOT NULL,
+    event_id INTEGER,
     description TEXT NOT NULL,
     amount_cents INTEGER NOT NULL,
     payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
@@ -40,8 +53,7 @@ const TEST_SCHEMA_STATEMENTS = [
     source TEXT NOT NULL CHECK(source IN ('manual', 'notification')),
     qr_payload TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    received_at TEXT,
-    FOREIGN KEY (user_id) REFERENCES users(telegram_id)
+    received_at TEXT
   )`,
   `CREATE TABLE IF NOT EXISTS paybacks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

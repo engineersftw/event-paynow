@@ -1,62 +1,72 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
-import type { Payment, Repository } from '../db/repository.js';
-
-/**
- * /payments command handler - lists user's payments
- *
- * Flow:
- * 1. User sends /payments
- * 2. Bot checks if user exists (has run /init)
- * 3. Bot fetches all payments for the user
- * 4. Bot displays formatted list of payments
- */
+import type { EventRepository, Repository } from '../db/repository.js';
+import { formatCents } from '../sgqr/amount.js';
 
 export class PaymentsCommandHandler {
   private repository: Repository;
+  private eventRepository: EventRepository;
 
-  constructor(repository: Repository) {
+  constructor(repository: Repository, eventRepository: EventRepository) {
     this.repository = repository;
+    this.eventRepository = eventRepository;
   }
 
-  /** Max payments shown per list page — keeps the keyboard bounded. */
-  private readonly pageSize = 5;
-
   /**
-   * Handle /payments command (optionally with a page number for pagination).
+   * Handle /payments command.
+   * Top-level: list events. If an eventRef is provided (via callback), drill into that event's payments.
    */
-  async handle(ctx: Context, pageArg?: string): Promise<void> {
+  async handle(ctx: Context, eventRef?: string): Promise<void> {
     const userId = ctx.from!.id;
-    const page = Math.max(1, parseInt(pageArg ?? '1', 10) || 1);
 
     try {
-      const user = await this.repository.getUser(userId);
-      if (!user) {
+      // If an event ref is provided, drill into that event's payments
+      if (eventRef && eventRef !== 'list') {
+        await this.showEventPayments(ctx, eventRef, userId);
+        return;
+      }
+
+      // Top-level: list events for this chat+topic
+      const chatId = ctx.chat?.id ?? userId;
+      const topicId = ctx.message?.message_thread_id ?? 0;
+
+      const events = await this.eventRepository.listAllEventsByChat(chatId, topicId);
+
+      if (events.length === 0) {
         await ctx.reply(
-          "❓ You haven't set up your PayNow reference yet.\n\nPlease run /init first to configure your account."
+          "📭 You don't have any events yet.\n\nUse /init to create your first event!"
         );
         return;
       }
 
-      // Get all payments for this user, newest first
-      const payments = (await this.repository.listPaymentsByUser(userId)).sort(
+      // Sort by created_at DESC, limit to 10
+      const sorted = [...events].sort(
         (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
       );
+      const topEvents = sorted.slice(0, 10);
 
-      if (payments.length === 0) {
-        await ctx.reply(
-          "📭 You don't have any payments yet.\n\nUse /start to create your first payment request!"
+      const lines: string[] = ['💰 *Your Events*', ''];
+      const keyboard = new InlineKeyboard();
+
+      for (const event of topEvents) {
+        const stats = await this.eventRepository.getEventStats(event.id);
+        const statusIcon = event.status === 'open' ? '🟢' : '🔴';
+        const statusLabel = event.status === 'open' ? 'Open' : 'Closed';
+
+        lines.push(`${statusIcon} *${event.name}* (${statusLabel})`);
+        lines.push(
+          `   Payee: ${event.payeeValue} | ${stats.paymentCount} payments | $${formatCents(stats.collectedCents)} collected | $${formatCents(stats.pendingCents)} pending`
         );
-        return;
+        lines.push('');
+
+        keyboard.text(`View ${event.name}`, `event_view:${event.ref}`).row();
       }
 
-      const total = payments.length;
-      const offset = (page - 1) * this.pageSize;
-      const pagePayments = payments.slice(offset, offset + this.pageSize);
-      const { message, buttons } = this.formatPaymentsPage(pagePayments, page, total);
-      await ctx.reply(message, {
+      lines.push('Tap an event to see its payments.');
+
+      await ctx.reply(lines.join('\n'), {
         parse_mode: 'Markdown',
-        reply_markup: buttons,
+        reply_markup: keyboard,
       });
     } catch (error) {
       console.error('Failed to list payments:', error);
@@ -65,24 +75,35 @@ export class PaymentsCommandHandler {
   }
 
   /**
-   * Render one page of payments with per-row action buttons and Prev/Next nav.
+   * Show payments for a specific event.
    */
-  private formatPaymentsPage(
-    payments: Payment[],
-    page: number,
-    total: number
-  ): { message: string; buttons: InlineKeyboard } {
-    const lines: string[] = [
-      '💰 *Your Payments*',
-      `Page ${page} of ${this.totalPages(total)} (${total} total)`,
-      '',
-    ];
+  private async showEventPayments(ctx: Context, eventRef: string, userId: number): Promise<void> {
+    const event = await this.eventRepository.getEventByRef(eventRef);
+    if (!event) {
+      await ctx.reply('❌ Event not found.');
+      return;
+    }
 
+    // Get all payments for this user, filter by event
+    const allPayments = await this.repository.listPaymentsByUser(userId);
+    const eventPayments = allPayments.filter((p) => p.eventId === event.id);
+
+    if (eventPayments.length === 0) {
+      await ctx.reply(`📭 No payments for event "${event.name}" yet.\n\nUse /start to create one!`);
+      return;
+    }
+
+    // Sort by creation date (newest first)
+    const sorted = [...eventPayments].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    );
+
+    const lines: string[] = [`💰 *${event.name}*\n`];
     const keyboard = new InlineKeyboard();
 
-    for (const payment of payments) {
+    for (const payment of sorted) {
       const statusIcon = payment.status === 'pending' ? '⏳' : '✅';
-      const amount = this.formatAmount(payment.amountCents);
+      const amount = `$${formatCents(payment.amountCents)}`;
       const date = this.formatDate(payment.createdAt);
       const status = payment.status === 'pending' ? 'Pending' : 'Received';
 
@@ -90,7 +111,6 @@ export class PaymentsCommandHandler {
       lines.push(`   Ref: \`${payment.ref}\` | ${status} | ${date}`);
       lines.push('');
 
-      // One row of action buttons per payment
       keyboard.add({ text: 'View', callback_data: `view:${payment.ref}` });
       if (payment.status === 'pending') {
         keyboard.add({ text: '✓ Received', callback_data: `mark_received:${payment.ref}` });
@@ -99,32 +119,12 @@ export class PaymentsCommandHandler {
       keyboard.row();
     }
 
-    // Pagination row at the bottom
-    const totalPages = this.totalPages(total);
-    if (totalPages > 1) {
-      if (page > 1) {
-        keyboard.add({ text: '« Prev', callback_data: `payments:${page - 1}` });
-      }
-      if (page < totalPages) {
-        keyboard.add({ text: 'Next »', callback_data: `payments:${page + 1}` });
-      }
-      keyboard.row();
-    }
-
     lines.push('Tap a button to manage a payment.');
-    return { message: lines.join('\n'), buttons: keyboard };
-  }
 
-  private totalPages(total: number): number {
-    return Math.max(1, Math.ceil(total / this.pageSize));
-  }
-
-  /**
-   * Format amount in cents to dollars with 2 decimal places
-   */
-  private formatAmount(cents: number): string {
-    const dollars = cents / 100;
-    return `$${dollars.toFixed(2)}`;
+    await ctx.reply(lines.join('\n'), {
+      parse_mode: 'Markdown',
+      reply_markup: keyboard,
+    });
   }
 
   /**

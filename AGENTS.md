@@ -114,12 +114,14 @@ This project uses OpenSpec for change management. The current active change is `
 - Payment service with markPaymentReceived transition logic
 - Conversation Durable Object with FSM state, 10-min alarm expiry, eviction survival
 - public `alarm()` lifecycle method (workerd requirement, not a fetch route)
-- /init command with mobile/UEN validation, inline Confirm/Cancel buttons, in-place message updates
-- /start payment issuance with payee snapshot, SGQR payload + BMP QR uploaded via sendPhoto
+- /init command with mobile/UEN validation, inline Confirm/Cancel buttons, in-place message updates, creates events
+- /start payment issuance with event picker, payee snapshot, SGQR payload + BMP QR uploaded via sendPhoto
 - QR photo carries action buttons (✓ Received / Payback)
 - mark_received replaces QR photo with text summary (deleteMessage + reply)
 - /payments listing with pagination (5 per page), inline buttons, payment detail view
 - /payback 4-step conversation with inline buttons at payer and amount confirmation steps
+- /end_event command: close event with CAS, summary of payments collected/pending
+- Events scoped by (chat_id, topic_id) for chat+topic isolation
 - Payback bounds: `createPaybackBounded()` enforces `SUM(paybacks) <= payment.amount_cents`
   (all statuses — pending and sent) inside one D1 batch via a compare-and-set guarded
   `INSERT ... SELECT`
@@ -227,6 +229,6 @@ The repository layer provides infra-neutral interfaces for database operations:
 
 ## What's Next
 
-- Archive the `add-paynow-qr-telegram-bot` change (`/opsx-archive`)
-- Apply the `add-event-management` change: events table, `/init` creates events, `/start` picks event, `/end_event` closes event
+- Complete remaining test tasks (6.1-6.3) for event-management change
+- Apply the `add-event-management` change to production D1
 - README quick-start (BotFather setup, secrets, deploy commands)

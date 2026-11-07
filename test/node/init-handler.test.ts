@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InitCommandHandler } from '../../src/commands/init-handler';
-import type { Repository, User } from '../../src/db/repository';
+import type { Event, EventRepository, Repository } from '../../src/db/repository';
 import type { ConversationDO } from '../../src/worker/conversation-do';
 
-describe('/init command handler', () => {
+describe('/init command handler (event creation)', () => {
   let mockConversationDO: ConversationDO;
   let mockRepository: Repository;
+  let mockEventRepository: EventRepository;
   let handler: InitCommandHandler;
 
   beforeEach(() => {
@@ -18,7 +19,16 @@ describe('/init command handler', () => {
       upsertUser: vi.fn(),
     } as unknown as Repository;
 
-    handler = new InitCommandHandler(mockConversationDO, mockRepository);
+    mockEventRepository = {
+      createEvent: vi.fn(),
+      listOpenEventsByChat: vi.fn(),
+      listAllEventsByChat: vi.fn(),
+      getEventByRef: vi.fn(),
+      closeEvent: vi.fn(),
+      getEventStats: vi.fn(),
+    } as unknown as EventRepository;
+
+    handler = new InitCommandHandler(mockConversationDO, mockRepository, mockEventRepository);
   });
 
   // ============================================================================
@@ -26,7 +36,7 @@ describe('/init command handler', () => {
   // ============================================================================
 
   describe('start()', () => {
-    it('should initialize conversation state and prompt for reference', async () => {
+    it('should initialize conversation state and prompt for event name', async () => {
       const mockCtx = {
         chat: { id: 123456 },
         from: { id: 789, first_name: 'John' },
@@ -50,17 +60,117 @@ describe('/init command handler', () => {
       expect(fetchCall.method).toBe('POST');
 
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining("Let's set up your PayNow reference")
+        expect.stringContaining("Let's create a new event")
       );
     });
   });
 
   // ============================================================================
-  // handleInput() - Step 1: proxy entry
+  // handleInput() - Step 1: Event Name
   // ============================================================================
 
-  describe('handleInput() - Step 1: proxy entry', () => {
-    it('should accept valid mobile number and prompt with Confirm/Cancel buttons', async () => {
+  describe('handleInput() - Step 1: Event Name', () => {
+    it('should accept valid event name and prompt for payee', async () => {
+      const mockCtx = {
+        message: { text: 'Dinner split' },
+        reply: vi.fn(),
+      } as any;
+
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({
+          status: 200,
+          json: async () => ({
+            flow: 'init',
+            step: 1,
+            context: { userId: 789, chatId: 123456, userName: 'John', topicId: 0 },
+            lastActivity: new Date().toISOString(),
+          }),
+        })
+        .mockResolvedValueOnce({ status: 200 });
+
+      const result = await handler.handleInput(mockCtx);
+
+      expect(result).toBe(true);
+      expect(mockConversationDO.fetch).toHaveBeenCalledTimes(2);
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('Event: Dinner split'));
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('mobile number'));
+    });
+
+    it('should reject empty event name', async () => {
+      const mockCtx = {
+        message: { text: '   ' },
+        reply: vi.fn(),
+      } as any;
+
+      (mockConversationDO.fetch as any).mockResolvedValueOnce({
+        status: 200,
+        json: async () => ({
+          flow: 'init',
+          step: 1,
+          context: { userId: 789, chatId: 123456, userName: 'John', topicId: 0 },
+          lastActivity: new Date().toISOString(),
+        }),
+      });
+
+      const result = await handler.handleInput(mockCtx);
+
+      // Whitespace-only name is empty after trim → ignored, stays in flow
+      expect(result).toBe(true);
+    });
+
+    it('should reject event name longer than 50 chars', async () => {
+      const mockCtx = {
+        message: { text: 'A'.repeat(51) },
+        reply: vi.fn(),
+      } as any;
+
+      (mockConversationDO.fetch as any).mockResolvedValueOnce({
+        status: 200,
+        json: async () => ({
+          flow: 'init',
+          step: 1,
+          context: { userId: 789, chatId: 123456, userName: 'John', topicId: 0 },
+          lastActivity: new Date().toISOString(),
+        }),
+      });
+
+      const result = await handler.handleInput(mockCtx);
+
+      expect(result).toBe(true);
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Event name must be between 1 and 50 characters')
+      );
+    });
+
+    it('should reject invalid input and re-prompt (null text)', async () => {
+      const mockCtx = {
+        message: { text: '   ' },
+        reply: vi.fn(),
+      } as any;
+
+      (mockConversationDO.fetch as any).mockResolvedValueOnce({
+        status: 200,
+        json: async () => ({
+          flow: 'init',
+          step: 1,
+          context: { userId: 789, chatId: 123456, userName: 'John', topicId: 0 },
+          lastActivity: new Date().toISOString(),
+        }),
+      });
+
+      const result = await handler.handleInput(mockCtx);
+
+      // Whitespace-only name is empty after trim → rejected
+      expect(result).toBe(true);
+    });
+  });
+
+  // ============================================================================
+  // handleInput() - Step 2: Payee Proxy
+  // ============================================================================
+
+  describe('handleInput() - Step 2: Payee Proxy', () => {
+    it('should accept valid mobile number and prompt with buttons', async () => {
       const mockCtx = {
         message: { text: '91234567' },
         reply: vi.fn(),
@@ -71,8 +181,14 @@ describe('/init command handler', () => {
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 1,
-            context: { userId: 789, chatId: 123456, userName: 'John' },
+            step: 2,
+            context: {
+              userId: 789,
+              chatId: 123456,
+              userName: 'John',
+              topicId: 0,
+              eventName: 'Dinner split',
+            },
             lastActivity: new Date().toISOString(),
           }),
         })
@@ -81,7 +197,6 @@ describe('/init command handler', () => {
       const result = await handler.handleInput(mockCtx);
 
       expect(result).toBe(true);
-      expect(mockConversationDO.fetch).toHaveBeenCalledTimes(2);
       expect(mockCtx.reply).toHaveBeenCalledWith(
         expect.stringContaining('Mobile number: +6591234567'),
         expect.objectContaining({ reply_markup: expect.any(Object) })
@@ -99,8 +214,14 @@ describe('/init command handler', () => {
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 1,
-            context: { userId: 789, chatId: 123456, userName: 'John' },
+            step: 2,
+            context: {
+              userId: 789,
+              chatId: 123456,
+              userName: 'John',
+              topicId: 0,
+              eventName: 'Dinner split',
+            },
             lastActivity: new Date().toISOString(),
           }),
         })
@@ -115,37 +236,9 @@ describe('/init command handler', () => {
       );
     });
 
-    it('should reject invalid input and re-prompt', async () => {
+    it('should reject invalid proxy and re-prompt', async () => {
       const mockCtx = {
         message: { text: 'invalid' },
-        reply: vi.fn(),
-      } as any;
-
-      (mockConversationDO.fetch as any).mockResolvedValueOnce({
-        status: 200,
-        json: async () => ({
-          flow: 'init',
-          step: 1,
-          context: { userId: 789, chatId: 123456, userName: 'John' },
-          lastActivity: new Date().toISOString(),
-        }),
-      });
-
-      const result = await handler.handleInput(mockCtx);
-
-      expect(result).toBe(true);
-      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('Invalid reference'));
-    });
-  });
-
-  // ============================================================================
-  // handleInput() - Step 2 (text typed while buttons are pending)
-  // ============================================================================
-
-  describe('handleInput() - Step 2 (text while buttons pending)', () => {
-    it('should nudge the user to tap a button instead of typing', async () => {
-      const mockCtx = {
-        message: { text: 'anything', message_id: 42 },
         reply: vi.fn(),
       } as any;
 
@@ -158,6 +251,42 @@ describe('/init command handler', () => {
             userId: 789,
             chatId: 123456,
             userName: 'John',
+            topicId: 0,
+            eventName: 'Dinner split',
+          },
+          lastActivity: new Date().toISOString(),
+        }),
+      });
+
+      const result = await handler.handleInput(mockCtx);
+
+      expect(result).toBe(true);
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('Invalid reference'));
+    });
+  });
+
+  // ============================================================================
+  // handleInput() - Step 3: text while buttons pending
+  // ============================================================================
+
+  describe('handleInput() - Step 3: text while buttons pending', () => {
+    it('should nudge the user to tap a button instead of typing', async () => {
+      const mockCtx = {
+        message: { text: 'anything', message_id: 42 },
+        reply: vi.fn(),
+      } as any;
+
+      (mockConversationDO.fetch as any).mockResolvedValueOnce({
+        status: 200,
+        json: async () => ({
+          flow: 'init',
+          step: 3,
+          context: {
+            userId: 789,
+            chatId: 123456,
+            userName: 'John',
+            topicId: 0,
+            eventName: 'Dinner split',
             pendingProxy: { type: 'mobile', normalized: '+6591234567' },
           },
           lastActivity: new Date().toISOString(),
@@ -174,218 +303,13 @@ describe('/init command handler', () => {
   });
 
   // ============================================================================
-  // handleCallback() - Confirm / Cancel buttons
-  // All outcomes update the original confirmation message in place via
-  // editMessageText (text + cleared keyboard); no extra chat bubbles.
-  // ============================================================================
-
-  describe('handleCallback() - Confirm / Cancel buttons', () => {
-    it('should ignore non-init callbacks (let next dispatcher handle)', async () => {
-      const mockCtx = {
-        callbackQuery: { data: 'view:some-ref' },
-        editMessageText: vi.fn(),
-      } as any;
-
-      const result = await handler.handleCallback(mockCtx);
-      expect(result).toBe(false);
-      expect(mockConversationDO.fetch).not.toHaveBeenCalled();
-    });
-
-    it('should save user on Confirm tap and reset state', async () => {
-      const mockCtx = {
-        from: { id: 789 },
-        callbackQuery: { data: 'init_confirm:789' },
-        editMessageText: vi.fn(),
-      } as any;
-
-      (mockConversationDO.fetch as any)
-        .mockResolvedValueOnce({
-          status: 200,
-          json: async () => ({
-            flow: 'init',
-            step: 2,
-            context: {
-              userId: 789,
-              chatId: 123456,
-              userName: 'John',
-              pendingProxy: { type: 'mobile', normalized: '+6591234567' },
-            },
-            lastActivity: new Date().toISOString(),
-          }),
-        })
-        .mockResolvedValueOnce({ status: 200 });
-
-      (mockRepository.getUser as any).mockResolvedValue(null);
-      (mockRepository.upsertUser as any).mockResolvedValue({} as User);
-
-      const result = await handler.handleCallback(mockCtx);
-
-      expect(result).toBe(true);
-      expect(mockRepository.upsertUser).toHaveBeenCalledWith({
-        telegramId: 789,
-        payeeType: 'mobile',
-        payeeValue: '+6591234567',
-        displayName: 'John',
-        timestamp: expect.any(String),
-      });
-      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('✅ Reference saved.'),
-        { reply_markup: { inline_keyboard: [] } }
-      );
-    });
-
-    it('should update existing user on Confirm tap', async () => {
-      const mockCtx = {
-        from: { id: 789 },
-        callbackQuery: { data: 'init_confirm:789' },
-        editMessageText: vi.fn(),
-      } as any;
-
-      const existingUser: User = {
-        telegramId: 789,
-        payeeType: 'mobile',
-        payeeValue: '+6591234567',
-        displayName: 'John',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      (mockConversationDO.fetch as any)
-        .mockResolvedValueOnce({
-          status: 200,
-          json: async () => ({
-            flow: 'init',
-            step: 2,
-            context: {
-              userId: 789,
-              chatId: 123456,
-              userName: 'John',
-              pendingProxy: { type: 'uen', normalized: '201234567A' },
-            },
-            lastActivity: new Date().toISOString(),
-          }),
-        })
-        .mockResolvedValueOnce({ status: 200 });
-
-      (mockRepository.getUser as any).mockResolvedValue(existingUser);
-      (mockRepository.upsertUser as any).mockResolvedValue({} as User);
-
-      await handler.handleCallback(mockCtx);
-
-      expect(mockRepository.upsertUser).toHaveBeenCalled();
-      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('✅ Reference updated.'),
-        { reply_markup: { inline_keyboard: [] } }
-      );
-    });
-
-    it('should cancel on Cancel tap and reset state in place', async () => {
-      const mockCtx = {
-        from: { id: 789 },
-        callbackQuery: { data: 'init_cancel:789' },
-        editMessageText: vi.fn(),
-      } as any;
-
-      (mockConversationDO.fetch as any)
-        .mockResolvedValueOnce({
-          status: 200,
-          json: async () => ({
-            flow: 'init',
-            step: 2,
-            context: {
-              userId: 789,
-              chatId: 123456,
-              userName: 'John',
-              pendingProxy: { type: 'mobile', normalized: '+6591234567' },
-            },
-            lastActivity: new Date().toISOString(),
-          }),
-        })
-        .mockResolvedValueOnce({ status: 200 });
-
-      const result = await handler.handleCallback(mockCtx);
-
-      expect(result).toBe(true);
-      expect(mockRepository.upsertUser).not.toHaveBeenCalled();
-      // Single in-place edit — no toast, no separate reply, no keyboard-only edit
-      expect(mockCtx.editMessageText).toHaveBeenCalledTimes(1);
-      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('❌ Cancelled'),
-        { reply_markup: { inline_keyboard: [] } }
-      );
-    });
-
-    it('should replace the message on expired session taps', async () => {
-      const mockCtx = {
-        from: { id: 789 },
-        callbackQuery: { data: 'init_confirm:789' },
-        editMessageText: vi.fn(),
-      } as any;
-
-      // State is back to idle (e.g., after alarm or /cancel)
-      (mockConversationDO.fetch as any).mockResolvedValueOnce({
-        status: 200,
-        json: async () => ({
-          flow: 'idle',
-          step: 0,
-          context: {},
-          lastActivity: new Date().toISOString(),
-        }),
-      });
-
-      const result = await handler.handleCallback(mockCtx);
-
-      expect(result).toBe(true);
-      expect(mockRepository.upsertUser).not.toHaveBeenCalled();
-      expect(mockCtx.editMessageText).toHaveBeenCalledWith('❌ Session expired. Run /init again.', {
-        reply_markup: { inline_keyboard: [] },
-      });
-    });
-
-    it('should handle database errors gracefully on Confirm (in place)', async () => {
-      const mockCtx = {
-        from: { id: 789 },
-        callbackQuery: { data: 'init_confirm:789' },
-        editMessageText: vi.fn(),
-      } as any;
-
-      (mockConversationDO.fetch as any)
-        .mockResolvedValueOnce({
-          status: 200,
-          json: async () => ({
-            flow: 'init',
-            step: 2,
-            context: {
-              userId: 789,
-              chatId: 123456,
-              userName: 'John',
-              pendingProxy: { type: 'mobile', normalized: '+6591234567' },
-            },
-            lastActivity: new Date().toISOString(),
-          }),
-        })
-        .mockResolvedValueOnce({ status: 200 });
-
-      (mockRepository.getUser as any).mockResolvedValue(null);
-      (mockRepository.upsertUser as any).mockRejectedValue(new Error('DB error'));
-
-      await handler.handleCallback(mockCtx);
-
-      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('❌ Failed to save'),
-        { reply_markup: { inline_keyboard: [] } }
-      );
-    });
-  });
-
-  // ============================================================================
   // handleInput() - Not in init flow
   // ============================================================================
 
   describe('handleInput() - Not in init flow', () => {
     it('should return false when not in init flow', async () => {
       const mockCtx = {
-        message: { text: '91234567' },
+        message: { text: 'Dinner split' },
         reply: vi.fn(),
       } as any;
 
@@ -407,166 +331,172 @@ describe('/init command handler', () => {
   });
 
   // ============================================================================
-  // Task 4.2: Reference update on re-run + cancel preserves existing data
+  // handleCallback() - Confirm / Cancel buttons
   // ============================================================================
 
-  describe('Task 4.2: Reference update on re-run', () => {
-    it('should update existing user reference when /init is re-run and Confirm tapped', async () => {
-      const existingUser: User = {
-        telegramId: 789,
-        payeeType: 'mobile',
-        payeeValue: '+6591234567',
-        displayName: 'John',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
+  describe('handleCallback() - Confirm / Cancel buttons', () => {
+    it('should ignore non-init callbacks', async () => {
+      const mockCtx = {
+        callbackQuery: { data: 'view:some-ref' },
+        editMessageText: vi.fn(),
+      } as any;
 
-      (mockRepository.getUser as any).mockResolvedValue(existingUser);
-      (mockRepository.upsertUser as any).mockResolvedValue({} as User);
+      const result = await handler.handleCallback(mockCtx);
+      expect(result).toBe(false);
+      expect(mockConversationDO.fetch).not.toHaveBeenCalled();
+    });
 
-      // Step 1: user enters new mobile
-      const inputCtx: any = {
-        message: { text: '81234567' },
-        reply: vi.fn(),
-      };
-      (mockConversationDO.fetch as any)
-        .mockResolvedValueOnce({
-          status: 200,
-          json: async () => ({
-            flow: 'init',
-            step: 1,
-            context: { userId: 789, chatId: 123456, userName: 'John' },
-            lastActivity: new Date().toISOString(),
-          }),
-        })
-        .mockResolvedValueOnce({ status: 200 });
-
-      await handler.handleInput(inputCtx);
-
-      expect(inputCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Mobile number: +6581234567'),
-        expect.any(Object)
-      );
-
-      // Step 2: Confirm callback
-      const callbackCtx: any = {
+    it('should create event on Confirm tap', async () => {
+      const mockCtx = {
         from: { id: 789 },
         callbackQuery: { data: 'init_confirm:789' },
         editMessageText: vi.fn(),
-      };
+      } as any;
+
       (mockConversationDO.fetch as any)
         .mockResolvedValueOnce({
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 2,
+            step: 3,
             context: {
               userId: 789,
               chatId: 123456,
+              topicId: 0,
               userName: 'John',
-              pendingProxy: { type: 'mobile', normalized: '+6581234567' },
+              eventName: 'Dinner split',
+              pendingProxy: { type: 'mobile', normalized: '+6591234567' },
             },
             lastActivity: new Date().toISOString(),
           }),
         })
         .mockResolvedValueOnce({ status: 200 });
 
-      await handler.handleCallback(callbackCtx);
-
-      expect(mockRepository.upsertUser).toHaveBeenCalledWith({
-        telegramId: 789,
+      (mockEventRepository.createEvent as any).mockResolvedValue({
+        id: 1,
+        ref: 'EVT-TEST1234',
+        chatId: 123456,
+        topicId: 0,
+        name: 'Dinner split',
         payeeType: 'mobile',
-        payeeValue: '+6581234567',
-        displayName: 'John',
-        timestamp: expect.any(String),
-      });
-      expect(callbackCtx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('✅ Reference updated.'),
-        { reply_markup: { inline_keyboard: [] } }
+        payeeValue: '+6591234567',
+        status: 'open',
+        createdAt: new Date().toISOString(),
+        closedAt: null,
+      } as Event);
+
+      const result = await handler.handleCallback(mockCtx);
+
+      expect(result).toBe(true);
+      expect(mockEventRepository.createEvent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          name: 'Dinner split',
+          payeeType: 'mobile',
+          payeeValue: '+6591234567',
+          status: 'open',
+        })
+      );
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('Event created'),
+        expect.objectContaining({ parse_mode: 'Markdown' })
       );
     });
 
-    it('should preserve existing user data when Cancel tapped', async () => {
-      const existingUser: User = {
-        telegramId: 789,
-        payeeType: 'mobile',
-        payeeValue: '+6591234567',
-        displayName: 'John',
-        createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString(),
-      };
-
-      (mockRepository.getUser as any).mockResolvedValue(existingUser);
-
-      // Step 1: user enters new mobile
-      const inputCtx: any = {
-        message: { text: '81234567' },
-        reply: vi.fn(),
-      };
-      (mockConversationDO.fetch as any)
-        .mockResolvedValueOnce({
-          status: 200,
-          json: async () => ({
-            flow: 'init',
-            step: 1,
-            context: { userId: 789, chatId: 123456, userName: 'John' },
-            lastActivity: new Date().toISOString(),
-          }),
-        })
-        .mockResolvedValueOnce({ status: 200 });
-
-      await handler.handleInput(inputCtx);
-
-      // Step 2: Cancel callback
-      const callbackCtx: any = {
+    it('should cancel on Cancel tap and reset state', async () => {
+      const mockCtx = {
         from: { id: 789 },
         callbackQuery: { data: 'init_cancel:789' },
         editMessageText: vi.fn(),
-      };
+      } as any;
+
       (mockConversationDO.fetch as any)
         .mockResolvedValueOnce({
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 2,
+            step: 3,
             context: {
               userId: 789,
               chatId: 123456,
+              topicId: 0,
               userName: 'John',
-              pendingProxy: { type: 'mobile', normalized: '+6581234567' },
+              eventName: 'Dinner split',
+              pendingProxy: { type: 'mobile', normalized: '+6591234567' },
             },
             lastActivity: new Date().toISOString(),
           }),
         })
         .mockResolvedValueOnce({ status: 200 });
 
-      await handler.handleCallback(callbackCtx);
+      const result = await handler.handleCallback(mockCtx);
 
-      expect(mockRepository.upsertUser).not.toHaveBeenCalled();
-      expect(callbackCtx.editMessageText).toHaveBeenCalledWith(
-        expect.stringContaining('❌ Cancelled'),
-        { reply_markup: { inline_keyboard: [] } }
-      );
+      expect(result).toBe(true);
+      expect(mockEventRepository.createEvent).not.toHaveBeenCalled();
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(expect.stringContaining('Cancelled'), {
+        reply_markup: { inline_keyboard: [] },
+      });
     });
 
-    it('should preserve existing user data when conversation expires (alarm)', async () => {
+    it('should reject expired session taps', async () => {
       const mockCtx = {
-        chat: { id: 123456 },
-        from: { id: 789, first_name: 'John' },
-        reply: vi.fn(),
+        from: { id: 789 },
+        callbackQuery: { data: 'init_confirm:789' },
+        editMessageText: vi.fn(),
       } as any;
 
-      (mockConversationDO.fetch as any).mockResolvedValue({
+      (mockConversationDO.fetch as any).mockResolvedValueOnce({
         status: 200,
-        json: async () => null,
+        json: async () => ({
+          flow: 'idle',
+          step: 0,
+          context: {},
+          lastActivity: new Date().toISOString(),
+        }),
       });
 
-      await handler.start(mockCtx);
+      const result = await handler.handleCallback(mockCtx);
 
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining("Let's set up your PayNow reference")
+      expect(result).toBe(true);
+      expect(mockEventRepository.createEvent).not.toHaveBeenCalled();
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith('❌ Session expired. Run /init again.', {
+        reply_markup: { inline_keyboard: [] },
+      });
+    });
+
+    it('should handle database errors gracefully on Confirm', async () => {
+      const mockCtx = {
+        from: { id: 789 },
+        callbackQuery: { data: 'init_confirm:789' },
+        editMessageText: vi.fn(),
+      } as any;
+
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({
+          status: 200,
+          json: async () => ({
+            flow: 'init',
+            step: 3,
+            context: {
+              userId: 789,
+              chatId: 123456,
+              topicId: 0,
+              userName: 'John',
+              eventName: 'Dinner split',
+              pendingProxy: { type: 'mobile', normalized: '+6591234567' },
+            },
+            lastActivity: new Date().toISOString(),
+          }),
+        })
+        .mockResolvedValueOnce({ status: 200 });
+
+      (mockEventRepository.createEvent as any).mockRejectedValue(new Error('DB error'));
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('❌ Failed to create event'),
+        { reply_markup: { inline_keyboard: [] } }
       );
-      expect(mockRepository.upsertUser).not.toHaveBeenCalled();
     });
   });
 });
