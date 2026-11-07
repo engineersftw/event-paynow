@@ -104,6 +104,28 @@ Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
 - /payback 4-step conversation (payer proxy → confirm → amount → confirm) recording paybacks
 - Payback bounds: `createPaybackBounded()` enforces `SUM(active paybacks) <= payment.amount_cents`
   inside one D1 batch via a compare-and-set guarded `INSERT ... SELECT` (task 7.2)
+- /start payment issuance: guard requiring /init first, description + amount collection with
+  validation, payment row with payee snapshot, SGQR payload + isolate-rendered BMP QR uploaded
+  via sendPhoto (tasks 5.1, 5.2, 5.4 done; 5.3 stage (a) verified e2e in Workers pool)
+- `ChatSessionDO` binding serves the real conversation FSM (`src/index.ts` re-exports
+  `ConversationDO` from `src/worker/conversation-do.ts`)
+
+## Workers e2e Bot Harness (task 5.3 stage a)
+
+`test/workers/start-flow.test.ts` drives real grammY updates through `bot.handleUpdate` with
+real D1 + real CHAT_SESSION DO. Non-obvious requirements discovered (keep in mind for 8.1):
+
+1. **Stub fetch via `client: { fetch }`** in the `Bot` constructor — grammY's web bundle resolves
+   `fetch` at import time, so patching `globalThis.fetch` later has no effect.
+2. **Pass `botInfo`** in Bot config to skip the `getMe` bootstrap (the stub never serves it).
+3. **`bot.command()` only matches updates carrying a `bot_command` MessageEntity** — synthetic
+   test updates must include `entities: [{ type: 'bot_command', offset: 0, length }]`.
+4. **File uploads use `attach://` indirection**: grammY hand-rolls a multipart byte stream where
+   the `photo` part contains `attach://<token>` and the actual bytes arrive as a separate stream
+   part named `<token>`; capture by parsing the `ReadableStream` body.
+5. **Drain DO responses**: handler POSTs to a DO stub must consume or cancel the response body
+   (`await response?.body?.cancel()`), otherwise vitest-pool-workers' stacked-storage isolation
+   fails when popping DO snapshots ("Expected .sqlite, got …sqlite-shm").
 
 ## Payback Bounds (task 7.2)
 
@@ -169,8 +191,10 @@ The repository layer provides infra-neutral interfaces for database operations:
 
 ## What's Next
 
-- Tasks 5.1-5.4: /start payment issuance flow (conversation, QR render, sendPhoto)
+- Task 5.3 stage (b): live `cloudflared` dev-bot check that the photo arrives in Telegram
+  (blocked on task 1.3, Cloudflare auth)
 - Task 7.3: payback QR generation + sendPhoto (replaces the `PAYBACK-PENDING:<ref>` placeholder payload)
 - Task 7.4: "Mark payback as sent" button and payback history in payment detail
 - Task 1.3: Cloudflare auth setup (blocked)
+- Task 8.0 (implicit): wire command handlers into `src/bot.ts` (currently only ping/echo stubs)
 - Tasks 8.1-8.3: Integration testing, scan validation, deploy pipeline

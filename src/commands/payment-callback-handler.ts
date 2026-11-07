@@ -180,7 +180,7 @@ export class PaymentCallbackHandler {
    */
   private async handlePayback(ctx: Context, payment: Payment): Promise<void> {
     // Start payback conversation flow
-    await this.conversationDO.fetch(new Request('http://localhost/state', {
+    const response = await this.conversationDO.fetch(new Request('http://localhost/state', {
       method: 'POST',
       body: JSON.stringify({
         flow: 'payback',
@@ -189,6 +189,8 @@ export class PaymentCallbackHandler {
         lastActivity: new Date().toISOString()
       })
     }));
+    // Drain the response so cross-isolate streams don't pin DO storage
+    await response?.body?.cancel();
 
     await ctx.answerCallbackQuery({ text: '🔄 Starting payback flow...' });
     

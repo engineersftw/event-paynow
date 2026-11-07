@@ -350,10 +350,12 @@ export class PaybackCommandHandler {
    * Set conversation state in DO
    */
   private async setState(state: ConversationState): Promise<void> {
-    await this.conversationDO.fetch(new Request('http://localhost/state', {
+    const response = await this.conversationDO.fetch(new Request('http://localhost/state', {
       method: 'POST',
       body: JSON.stringify(state)
     }));
+    // Drain the response so cross-isolate streams don't pin DO storage
+    await response?.body?.cancel();
   }
 
   /**

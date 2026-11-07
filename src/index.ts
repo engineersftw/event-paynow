@@ -1,18 +1,13 @@
-import type { Env } from "./env";
+import { ConversationDO } from "./worker/conversation-do";
 
-export class ChatSessionDO {
-  state: DurableObjectState;
-  env: Env;
-
-  constructor(state: DurableObjectState, env: Env) {
-    this.state = state;
-    this.env = env;
-  }
-
-  async fetch(request: Request): Promise<Response> {
-    // TODO: conversation FSM (task 3.5)
-    return new Response("OK", { status: 200 });
-  }
-}
+/**
+ * Worker entry + Durable Object exports.
+ *
+ * `ChatSessionDO` is the class name registered in `wrangler.toml`
+ * ([durable_objects] binding `CHAT_SESSION`). The FSM implementation lives in
+ * `src/worker/conversation-do.ts` (task 3.5); it is exported here under the
+ * registered name so the deployed binding serves real conversation state.
+ */
+export { ConversationDO as ChatSessionDO };
 
 export { default } from "./worker";
