@@ -126,40 +126,48 @@
 
 **Role**: Implement user-facing bot commands
 
-**`/init` handler**:
+**`/init` handler** (event creation):
 
-- Collects mobile number or UEN from user
-- Validates and normalizes input (mobile → `+65XXXXXXXX`, UEN → uppercase)
-- Echoes normalized value with **inline Confirm/Cancel buttons**
-- All outcomes (confirm, cancel, expired, error) update the original message in place via `editMessageText`
-- Updates existing user or creates new user
+- Collects event name (non-empty, ≤ 50 chars)
+- Collects mobile number or UEN (payee for this event)
+- Echoes name + payee for confirmation via inline Confirm/Cancel buttons
+- Creates an `events` row on confirm (status: open)
+- Events are scoped by (chat_id, topic_id)
+- All outcomes update the original message in place via `editMessageText`
 
 **`/start` handler**:
 
-- Guard: unconfigured users are prompted to run `/init` first
-- Collects description, then amount (integer cents, ≤ 2 decimals)
-- Creates the payment record with payee snapshot + embedded base32 `ref`
-- Renders the SGQR PayNow QR (BMP, pure JS, with PayNow logo overlay) and uploads via `sendPhoto`
+- Fetches open events for the chat+topic
+- If 1 event: auto-advance to amount step
+- If N > 1: inline event picker buttons
+- If 0 events: prompts user to run /init
+- Collects amount (integer cents, ≤ 2 decimals)
+- Creates payment with event_id and event name as description
+- Renders SGQR PayNow QR (BMP, pure JS, with PayNow logo) and uploads via sendPhoto
 - QR photo carries inline action buttons (✓ Received / Payback)
 - On "✓ Received": QR photo is deleted and replaced with a text summary
-- "Payback" button starts the payback flow
 
 **`/payments` handler**:
 
-- Lists events/payments with per-payment inline buttons (View / ✓ Received / Payback)
-- **Paginated at 5 payments per page** with « Prev / Next » navigation
+- Top-level lists events with payment counts, collected/pending totals
+- Drill into event → per-event payment list with inline buttons (View / ✓ Received / Payback)
 - Payment detail view shows status, timestamps, source, and payback summary
-- Detail view renders a "Mark payback as sent" button per pending payback (task 7.4);
-  tapping performs a guarded `pending → sent` transition and re-renders the history with
-  sent timestamps and the refreshed remaining total
+
+**`/end_event` handler** (new):
+
+- Lists open events for the chat+topic
+- Inline picker if multiple events
+- Confirm/cancel via inline buttons
+- Close via guarded CAS (status: open → closed)
+- Summary: payments count, collected, pending
+- Closed events reject new /start requests
 
 **`/payback` handler**:
 
 - 4-step conversation: payer proxy → confirm → amount → confirm
-- Steps 2 and 4 use **inline Confirm/Cancel buttons** (not text input)
-- Outcomes update the confirmation message in place via `editMessageText`
-- Payback row created inside the bounded D1 transaction (task 7.2)
-- Generates QR encoding the PAYER as payee proxy and uploads via `sendPhoto`
+- Steps 2 and 4 use inline Confirm/Cancel buttons
+- Payback row created inside the bounded D1 transaction
+- Generates QR encoding the PAYER as payee proxy and uploads via sendPhoto
 
 ### Repository Layer (src/db/repository.ts)
 
@@ -197,12 +205,25 @@
 **Role**: Persistent storage
 
 - Serverless SQLite database on Cloudflare
-- Three tables: `users`, `payments`, `paybacks`
+- Four tables: `users`, `events`, `payments`, `paybacks`
 - CHECK constraints enforce valid states
 
 **Schema**:
 
 ```sql
+events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  ref TEXT NOT NULL UNIQUE,
+  chat_id INTEGER NOT NULL,
+  topic_id INTEGER NOT NULL DEFAULT 0,
+  name TEXT NOT NULL,
+  payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
+  payee_value TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
+  created_at TEXT NOT NULL,
+  closed_at TEXT
+)
+
 users (
   telegram_id INTEGER PRIMARY KEY,
   payee_type TEXT CHECK(payee_type IN ('mobile', 'uen')),
@@ -216,6 +237,7 @@ payments (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ref TEXT NOT NULL UNIQUE,
   user_id INTEGER NOT NULL,
+  event_id INTEGER,
   description TEXT NOT NULL,
   amount_cents INTEGER NOT NULL,
   payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
@@ -225,7 +247,8 @@ payments (
   qr_payload TEXT NOT NULL,
   created_at TEXT NOT NULL,
   received_at TEXT,
-  FOREIGN KEY (user_id) REFERENCES users(telegram_id)
+  FOREIGN KEY (user_id) REFERENCES users(telegram_id),
+  FOREIGN KEY (event_id) REFERENCES events(id)
 )
 
 paybacks (
@@ -247,8 +270,11 @@ paybacks (
 
 - `payments(user_id)` - Fast user payment lookup
 - `payments(ref)` - Fast payment by reference
+- `payments(event_id)` - Fast event payment lookup
 - `paybacks(payment_id)` - Fast payback lookup
 - `paybacks(ref)` - Fast payback by reference
+- `events(chat_id, topic_id)` - Fast event lookup by chat
+- `events(ref)` - Fast event by reference
 
 ### SGQR Builder (src/sgqr/)
 
