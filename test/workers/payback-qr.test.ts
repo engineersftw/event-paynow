@@ -21,7 +21,7 @@ import { applyTestSchema, bmpToRgba, TEST_BOT_INFO, TelegramStub, textUpdate } f
  */
 
 beforeAll(async () => {
-  await applyTestSchema(env.DB);
+  await applyTestSchema(env.paynow_db);
 });
 
 const T0 = '2024-01-01T00:00:00Z';
@@ -37,7 +37,7 @@ interface Harness {
 }
 
 function makeHarness(userId: number): Harness {
-  const repo = new D1Repository(env.DB);
+  const repo = new D1Repository(env.paynow_db);
   const doStub = env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`chat-${userId}`));
   const handler = new PaybackCommandHandler(doStub as unknown as ConversationDO, repo);
 

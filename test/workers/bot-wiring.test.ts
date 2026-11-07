@@ -19,7 +19,7 @@ import {
  */
 
 beforeAll(async () => {
-  await applyTestSchema(env.DB);
+  await applyTestSchema(env.paynow_db);
 });
 
 const T0 = '2024-01-01T00:00:00Z';
@@ -34,7 +34,7 @@ function makeWiredBot() {
     botInfo: TEST_BOT_INFO,
     client: { fetch: stub.fetch },
   });
-  const repo = new D1Repository(env.DB);
+  const repo = new D1Repository(env.paynow_db);
   return { bot, repo };
 }
 

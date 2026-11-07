@@ -5,16 +5,17 @@ compatibility_flags = ["nodejs_compat"]
 
 # Placeholder IDs — replace after `wrangler d1 create` and `wrangler whoami`
 [[d1_databases]]
-binding = "DB"
+binding = "paynow_db"
 database_name = "paynow-db"
-database_id = "00000000-0000-0000-0000-000000000000"
+database_id = "c0387aac-9b54-4329-9355-d2e5572e0eab"
+migrations_dir = "drizzle"
 
 [durable_objects]
 bindings = [{ name = "CHAT_SESSION", class_name = "ChatSessionDO" }]
 
 [[migrations]]
 tag = "v1"
-new_classes = ["ChatSessionDO"]
+new_sqlite_classes = ["ChatSessionDO"]
 
 [vars]
 BOT_USERNAME = "event_paynow_bot"

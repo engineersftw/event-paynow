@@ -56,7 +56,7 @@ beforeAll(async () => {
   ];
 
   for (const stmt of statements) {
-    await env.DB.prepare(stmt).run();
+    await env.paynow_db.prepare(stmt).run();
   }
 });
 
@@ -93,7 +93,7 @@ describe('D1Repository', () => {
   }
 
   beforeEach(async () => {
-    repo = new D1Repository(env.DB);
+    repo = new D1Repository(env.paynow_db);
     testUser = {
       telegramId: nextUserId(),
       payeeType: 'mobile',

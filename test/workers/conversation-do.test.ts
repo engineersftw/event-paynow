@@ -224,10 +224,10 @@ describe('ConversationDO', () => {
       const alarmTime = Date.now() - 1 * 60 * 1000; // 1 minute ago
       await conversationDO.state.storage.setAlarm(alarmTime);
 
-      // Trigger alarm
+      // Trigger alarm directly — workerd calls `alarm()` as a lifecycle
+      // callback; there's no fetch route for it.
       await conversationDO.state.storage.triggerAlarm();
-      const alarmRequest = new Request('http://localhost/alarm', { method: 'GET' });
-      await conversationDO.fetch(alarmRequest);
+      await conversationDO.alarm();
 
       // Check if state was cleared
       const stateJson = await conversationDO.state.storage.get<string>('conversation');
@@ -250,10 +250,7 @@ describe('ConversationDO', () => {
 
       // Trigger alarm immediately (before 10 minutes)
       await conversationDO.state.storage.triggerAlarm();
-      const alarmRequest = new Request('http://localhost/alarm', { method: 'GET' });
-      const response = await conversationDO.fetch(alarmRequest);
-
-      expect(await response.text()).toBe('State still active');
+      await conversationDO.alarm();
 
       // State should still exist
       const stateJson = await conversationDO.state.storage.get<string>('conversation');

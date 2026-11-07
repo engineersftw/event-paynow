@@ -41,6 +41,12 @@
   },
   "overrides": [
     {
+      "includes": ["**/*.md"],
+      "formatter": { "enabled": false },
+      "linter": { "enabled": false },
+      "assist": { "enabled": false }
+    },
+    {
       "includes": ["test/**"],
       "linter": {
         "rules": {
