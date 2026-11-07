@@ -116,7 +116,8 @@ export class InitCommandHandler {
 
   /**
    * Handle Confirm / Cancel inline-button taps.
-   * Called from the callback-query dispatcher in bot.ts.
+   * All outcomes update the original confirmation message in place
+   * (editMessageText with buttons cleared) — no extra chat bubbles.
    */
   async handleCallback(ctx: Context): Promise<boolean> {
     const data = ctx.callbackQuery?.data;
@@ -126,7 +127,10 @@ export class InitCommandHandler {
 
     const state = await this.getState();
     if (state?.flow !== 'init' || state.step !== 2) {
-      await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /init again.' });
+      // Session gone — replace the confirmation message with an expired note.
+      await ctx.editMessageText('❌ Session expired. Run /init again.', {
+        reply_markup: { inline_keyboard: [] },
+      });
       return true;
     }
 
@@ -136,22 +140,25 @@ export class InitCommandHandler {
     if (confirmed) {
       await this.saveUser(ctx, pendingProxy, state);
     } else {
+      // Reset state first so a double-tap sees idle.
       await this.setState({
         flow: 'idle',
         step: 0,
         context: {},
         lastActivity: new Date().toISOString(),
       });
-      await ctx.answerCallbackQuery({ text: 'Cancelled' });
-      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
-      await ctx.reply('❌ Cancelled. Run /init again to start over.');
+      const proxyLabel = pendingProxy.type === 'mobile' ? 'Mobile number' : 'UEN';
+      await ctx.editMessageText(
+        `📱 ${proxyLabel}: ${pendingProxy.normalized}\n\n❌ Cancelled. Run /init again to start over.`,
+        { reply_markup: { inline_keyboard: [] } }
+      );
     }
 
     return true;
   }
 
   /**
-   * Save user to database
+   * Save user to database — outcome replaces the confirmation message in place.
    */
   private async saveUser(
     ctx: Context,
@@ -161,6 +168,7 @@ export class InitCommandHandler {
     const userId = state.context.userId as number;
     const userName = state.context.userName as string;
     const isNew = !(await this.repository.getUser(userId));
+    const proxyLabel = proxy.type === 'mobile' ? 'Mobile number' : 'UEN';
 
     try {
       await this.repository.upsertUser({
@@ -171,8 +179,8 @@ export class InitCommandHandler {
         timestamp: new Date().toISOString(),
       });
 
-      // Reset conversation state BEFORE answering the callback, so a double-tap
-      // races to a non-init state and gets the "expired" reply instead of a
+      // Reset conversation state BEFORE editing the message, so a double-tap
+      // races to a non-init state and sees "Session expired" instead of a
       // second upsert.
       await this.setState({
         flow: 'idle',
@@ -181,13 +189,16 @@ export class InitCommandHandler {
         lastActivity: new Date().toISOString(),
       });
 
-      await ctx.answerCallbackQuery({
-        text: isNew ? '✅ Reference saved' : '✅ Reference updated',
+      const outcome = isNew ? '✅ Reference saved.' : '✅ Reference updated.';
+      await ctx.editMessageText(`📱 ${proxyLabel}: ${proxy.normalized}\n\n${outcome}`, {
+        reply_markup: { inline_keyboard: [] },
       });
-      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
     } catch (error) {
       console.error('Failed to save user:', error);
-      await ctx.reply('❌ Failed to save your reference. Please try again with /init.');
+      await ctx.editMessageText(
+        `📱 ${proxyLabel}: ${proxy.normalized}\n\n❌ Failed to save your reference. Try /init again.`,
+        { reply_markup: { inline_keyboard: [] } }
+      );
     }
   }
 

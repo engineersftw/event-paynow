@@ -87,8 +87,11 @@ describe('bot wiring (src/bot.ts)', () => {
       .find((b) => b.text.startsWith('✅'))!.callback_data;
     await bot.handleUpdate(callbackUpdate(userId, confirmData));
 
-    // Success is delivered via answerCallbackQuery (toast), no extra chat message
-    expect(stub.callbackAnswers).toContain('✅ Reference saved');
+    // Success updates the original confirmation message in place — no extra
+    // chat message, no toast.
+    expect(stub.editedMessages).toHaveLength(1);
+    expect(stub.editedMessages[0]!.text).toContain('✅ Reference saved.');
+    expect(stub.editedMessages[0]!.replyMarkup?.inline_keyboard).toEqual([]);
 
     // users row persisted
     const user = await repo.getUser(userId);

@@ -175,13 +175,15 @@ describe('/init command handler', () => {
 
   // ============================================================================
   // handleCallback() - Confirm / Cancel buttons
+  // All outcomes update the original confirmation message in place via
+  // editMessageText (text + cleared keyboard); no extra chat bubbles.
   // ============================================================================
 
   describe('handleCallback() - Confirm / Cancel buttons', () => {
     it('should ignore non-init callbacks (let next dispatcher handle)', async () => {
       const mockCtx = {
         callbackQuery: { data: 'view:some-ref' },
-        answerCallbackQuery: vi.fn(),
+        editMessageText: vi.fn(),
       } as any;
 
       const result = await handler.handleCallback(mockCtx);
@@ -193,9 +195,7 @@ describe('/init command handler', () => {
       const mockCtx = {
         from: { id: 789 },
         callbackQuery: { data: 'init_confirm:789' },
-        answerCallbackQuery: vi.fn(),
-        editMessageReplyMarkup: vi.fn(),
-        reply: vi.fn(),
+        editMessageText: vi.fn(),
       } as any;
 
       (mockConversationDO.fetch as any)
@@ -228,16 +228,17 @@ describe('/init command handler', () => {
         displayName: 'John',
         timestamp: expect.any(String),
       });
-      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({ text: '✅ Reference saved' });
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('✅ Reference saved.'),
+        { reply_markup: { inline_keyboard: [] } }
+      );
     });
 
     it('should update existing user on Confirm tap', async () => {
       const mockCtx = {
         from: { id: 789 },
         callbackQuery: { data: 'init_confirm:789' },
-        answerCallbackQuery: vi.fn(),
-        editMessageReplyMarkup: vi.fn(),
-        reply: vi.fn(),
+        editMessageText: vi.fn(),
       } as any;
 
       const existingUser: User = {
@@ -272,16 +273,17 @@ describe('/init command handler', () => {
       await handler.handleCallback(mockCtx);
 
       expect(mockRepository.upsertUser).toHaveBeenCalled();
-      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({ text: '✅ Reference updated' });
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('✅ Reference updated.'),
+        { reply_markup: { inline_keyboard: [] } }
+      );
     });
 
-    it('should cancel on Cancel tap and reset state', async () => {
+    it('should cancel on Cancel tap and reset state in place', async () => {
       const mockCtx = {
         from: { id: 789 },
         callbackQuery: { data: 'init_cancel:789' },
-        answerCallbackQuery: vi.fn(),
-        editMessageReplyMarkup: vi.fn(),
-        reply: vi.fn(),
+        editMessageText: vi.fn(),
       } as any;
 
       (mockConversationDO.fetch as any)
@@ -305,18 +307,19 @@ describe('/init command handler', () => {
 
       expect(result).toBe(true);
       expect(mockRepository.upsertUser).not.toHaveBeenCalled();
-      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'Cancelled' });
-      expect(mockCtx.editMessageReplyMarkup).toHaveBeenCalledWith({
-        reply_markup: { inline_keyboard: [] },
-      });
-      expect(mockCtx.reply).toHaveBeenCalledWith('❌ Cancelled. Run /init again to start over.');
+      // Single in-place edit — no toast, no separate reply, no keyboard-only edit
+      expect(mockCtx.editMessageText).toHaveBeenCalledTimes(1);
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('❌ Cancelled'),
+        { reply_markup: { inline_keyboard: [] } }
+      );
     });
 
-    it('should reject expired session taps', async () => {
+    it('should replace the message on expired session taps', async () => {
       const mockCtx = {
         from: { id: 789 },
         callbackQuery: { data: 'init_confirm:789' },
-        answerCallbackQuery: vi.fn(),
+        editMessageText: vi.fn(),
       } as any;
 
       // State is back to idle (e.g., after alarm or /cancel)
@@ -334,17 +337,16 @@ describe('/init command handler', () => {
 
       expect(result).toBe(true);
       expect(mockRepository.upsertUser).not.toHaveBeenCalled();
-      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
-        text: '❌ Session expired. Run /init again.',
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith('❌ Session expired. Run /init again.', {
+        reply_markup: { inline_keyboard: [] },
       });
     });
 
-    it('should handle database errors gracefully on Confirm', async () => {
+    it('should handle database errors gracefully on Confirm (in place)', async () => {
       const mockCtx = {
         from: { id: 789 },
         callbackQuery: { data: 'init_confirm:789' },
-        answerCallbackQuery: vi.fn(),
-        reply: vi.fn(),
+        editMessageText: vi.fn(),
       } as any;
 
       (mockConversationDO.fetch as any)
@@ -369,8 +371,9 @@ describe('/init command handler', () => {
 
       await handler.handleCallback(mockCtx);
 
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        '❌ Failed to save your reference. Please try again with /init.'
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('❌ Failed to save'),
+        { reply_markup: { inline_keyboard: [] } }
       );
     });
   });
@@ -449,8 +452,7 @@ describe('/init command handler', () => {
       const callbackCtx: any = {
         from: { id: 789 },
         callbackQuery: { data: 'init_confirm:789' },
-        answerCallbackQuery: vi.fn(),
-        reply: vi.fn(),
+        editMessageText: vi.fn(),
       };
       (mockConversationDO.fetch as any)
         .mockResolvedValueOnce({
@@ -478,9 +480,10 @@ describe('/init command handler', () => {
         displayName: 'John',
         timestamp: expect.any(String),
       });
-      expect(callbackCtx.answerCallbackQuery).toHaveBeenCalledWith({
-        text: '✅ Reference updated',
-      });
+      expect(callbackCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('✅ Reference updated.'),
+        { reply_markup: { inline_keyboard: [] } }
+      );
     });
 
     it('should preserve existing user data when Cancel tapped', async () => {
@@ -518,9 +521,7 @@ describe('/init command handler', () => {
       const callbackCtx: any = {
         from: { id: 789 },
         callbackQuery: { data: 'init_cancel:789' },
-        answerCallbackQuery: vi.fn(),
-        editMessageReplyMarkup: vi.fn(),
-        reply: vi.fn(),
+        editMessageText: vi.fn(),
       };
       (mockConversationDO.fetch as any)
         .mockResolvedValueOnce({
@@ -542,8 +543,9 @@ describe('/init command handler', () => {
       await handler.handleCallback(callbackCtx);
 
       expect(mockRepository.upsertUser).not.toHaveBeenCalled();
-      expect(callbackCtx.reply).toHaveBeenCalledWith(
-        '❌ Cancelled. Run /init again to start over.'
+      expect(callbackCtx.editMessageText).toHaveBeenCalledWith(
+        expect.stringContaining('❌ Cancelled'),
+        { reply_markup: { inline_keyboard: [] } }
       );
     });
 
