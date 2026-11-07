@@ -75,10 +75,19 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(stub.lastText()).toContain('set up your PayNow reference');
 
     await bot.handleUpdate(textUpdate(userId, '91234567'));
-    expect(stub.lastText()).toContain('+6591234567');
+    const confirmMessage = stub.sentMessages[stub.sentMessages.length - 1]!;
+    expect(confirmMessage.text).toContain('+6591234567');
 
-    await bot.handleUpdate(textUpdate(userId, 'confirm'));
-    expect(stub.lastText()).toContain('reference has been saved');
+    // Tap the Confirm button (inline keyboard from the previous message)
+    const keyboard = confirmMessage.replyMarkup as {
+      inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+    };
+    const confirmData = keyboard.inline_keyboard.flat().find((b) => b.text.startsWith('✅'))!
+      .callback_data;
+    await bot.handleUpdate(callbackUpdate(userId, confirmData));
+
+    // Success is delivered via answerCallbackQuery (toast), no extra chat message
+    expect(stub.callbackAnswers).toContain('✅ Reference saved');
 
     // users row persisted
     const user = await repo.getUser(userId);

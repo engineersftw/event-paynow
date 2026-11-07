@@ -1,4 +1,5 @@
 import type { Context } from 'grammy';
+import { InlineKeyboard } from 'grammy';
 import { detectProxyType } from '../db/proxy-validation.js';
 import type { Repository } from '../db/repository.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
@@ -65,7 +66,9 @@ export class InitCommandHandler {
         await this.handleReferenceInput(ctx, text, state);
         break;
       case 2:
-        await this.handleConfirmation(ctx, text, state);
+        // Step 2 is now button-driven; text input here means the user typed
+        // something after the buttons appeared. Re-show the prompt silently.
+        await ctx.reply('⏳ Waiting for confirmation. Please tap a button above.');
         break;
     }
 
@@ -73,7 +76,7 @@ export class InitCommandHandler {
   }
 
   /**
-   * Step 1: Validate and echo reference for confirmation
+   * Step 1: Validate and echo reference with Confirm / Cancel buttons.
    */
   private async handleReferenceInput(
     ctx: Context,
@@ -89,7 +92,7 @@ export class InitCommandHandler {
       return;
     }
 
-    // Store normalized proxy for confirmation
+    // Store normalized proxy for the button callback to pick up
     await this.setState({
       flow: 'init',
       step: 2,
@@ -101,34 +104,50 @@ export class InitCommandHandler {
     });
 
     const typeLabel = normalized.type === 'mobile' ? 'Mobile number' : 'UEN';
+    const keyboard = new InlineKeyboard()
+      .text('✅ Confirm', `init_confirm:${state.context.userId as number}`)
+      .text('❌ Cancel', `init_cancel:${state.context.userId as number}`);
+
     await ctx.reply(
-      `📱 ${typeLabel}: ${normalized.normalized}\n\nType "confirm" to save, or "cancel" to start over:`
+      `📱 ${typeLabel}: ${normalized.normalized}\n\nTap a button to confirm or cancel:`,
+      { reply_markup: keyboard }
     );
   }
 
   /**
-   * Step 2: Handle confirmation
+   * Handle Confirm / Cancel inline-button taps.
+   * Called from the callback-query dispatcher in bot.ts.
    */
-  private async handleConfirmation(
-    ctx: Context,
-    input: string,
-    state: ConversationState
-  ): Promise<void> {
-    const pendingProxy = state.context.pendingProxy as { type: string; normalized: string };
+  async handleCallback(ctx: Context): Promise<boolean> {
+    const data = ctx.callbackQuery?.data;
+    if (!data || !data.startsWith('init_confirm:') && !data.startsWith('init_cancel:')) {
+      return false; // Not ours — let the next dispatcher try
+    }
 
-    if (input.toLowerCase() === 'confirm') {
+    const state = await this.getState();
+    if (state?.flow !== 'init' || state.step !== 2) {
+      await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /init again.' });
+      return true;
+    }
+
+    const pendingProxy = state.context.pendingProxy as { type: string; normalized: string };
+    const confirmed = data.startsWith('init_confirm:');
+
+    if (confirmed) {
       await this.saveUser(ctx, pendingProxy, state);
-    } else if (input.toLowerCase() === 'cancel') {
+    } else {
       await this.setState({
         flow: 'idle',
         step: 0,
         context: {},
         lastActivity: new Date().toISOString(),
       });
+      await ctx.answerCallbackQuery({ text: 'Cancelled' });
+      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
       await ctx.reply('❌ Cancelled. Run /init again to start over.');
-    } else {
-      await ctx.reply('Please type "confirm" to save or "cancel" to start over:');
     }
+
+    return true;
   }
 
   /**
@@ -141,40 +160,31 @@ export class InitCommandHandler {
   ): Promise<void> {
     const userId = state.context.userId as number;
     const userName = state.context.userName as string;
+    const isNew = !(await this.repository.getUser(userId));
 
     try {
-      // Check if user exists
-      const existingUser = await this.repository.getUser(userId);
+      await this.repository.upsertUser({
+        telegramId: userId,
+        payeeType: proxy.type as 'mobile' | 'uen',
+        payeeValue: proxy.normalized,
+        displayName: userName,
+        timestamp: new Date().toISOString(),
+      });
 
-      if (existingUser) {
-        // Update existing user
-        await this.repository.upsertUser({
-          telegramId: userId,
-          payeeType: proxy.type as 'mobile' | 'uen',
-          payeeValue: proxy.normalized,
-          displayName: userName,
-          timestamp: new Date().toISOString(),
-        });
-        await ctx.reply('✅ Your PayNow reference has been updated!');
-      } else {
-        // Create new user
-        await this.repository.upsertUser({
-          telegramId: userId,
-          payeeType: proxy.type as 'mobile' | 'uen',
-          payeeValue: proxy.normalized,
-          displayName: userName,
-          timestamp: new Date().toISOString(),
-        });
-        await ctx.reply('✅ Your PayNow reference has been saved!');
-      }
-
-      // Reset conversation state
+      // Reset conversation state BEFORE answering the callback, so a double-tap
+      // races to a non-init state and gets the "expired" reply instead of a
+      // second upsert.
       await this.setState({
         flow: 'idle',
         step: 0,
         context: {},
         lastActivity: new Date().toISOString(),
       });
+
+      await ctx.answerCallbackQuery({
+        text: isNew ? '✅ Reference saved' : '✅ Reference updated',
+      });
+      await ctx.editMessageReplyMarkup({ reply_markup: { inline_keyboard: [] } });
     } catch (error) {
       console.error('Failed to save user:', error);
       await ctx.reply('❌ Failed to save your reference. Please try again with /init.');
