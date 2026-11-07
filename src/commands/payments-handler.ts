@@ -19,14 +19,17 @@ export class PaymentsCommandHandler {
     this.repository = repository;
   }
 
+  /** Max payments shown per list page — keeps the keyboard bounded. */
+  private readonly pageSize = 5;
+
   /**
-   * Handle /payments command
+   * Handle /payments command (optionally with a page number for pagination).
    */
-  async handle(ctx: Context): Promise<void> {
+  async handle(ctx: Context, pageArg?: string): Promise<void> {
     const userId = ctx.from!.id;
+    const page = Math.max(1, parseInt(pageArg ?? '1', 10) || 1);
 
     try {
-      // Check if user exists
       const user = await this.repository.getUser(userId);
       if (!user) {
         await ctx.reply(
@@ -35,8 +38,10 @@ export class PaymentsCommandHandler {
         return;
       }
 
-      // Get all payments for this user
-      const payments = await this.repository.listPaymentsByUser(userId);
+      // Get all payments for this user, newest first
+      const payments = (await this.repository.listPaymentsByUser(userId)).sort(
+        (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+      );
 
       if (payments.length === 0) {
         await ctx.reply(
@@ -45,8 +50,10 @@ export class PaymentsCommandHandler {
         return;
       }
 
-      // Format and display payments with inline buttons
-      const { message, buttons } = this.formatPaymentsList(payments);
+      const total = payments.length;
+      const offset = (page - 1) * this.pageSize;
+      const pagePayments = payments.slice(offset, offset + this.pageSize);
+      const { message, buttons } = this.formatPaymentsPage(pagePayments, page, total);
       await ctx.reply(message, {
         parse_mode: 'Markdown',
         reply_markup: buttons,
@@ -58,19 +65,22 @@ export class PaymentsCommandHandler {
   }
 
   /**
-   * Format payments list for display with inline buttons
+   * Render one page of payments with per-row action buttons and Prev/Next nav.
    */
-  private formatPaymentsList(payments: Payment[]): { message: string; buttons: InlineKeyboard } {
-    const lines: string[] = ['💰 *Your Payments*', ''];
+  private formatPaymentsPage(
+    payments: Payment[],
+    page: number,
+    total: number
+  ): { message: string; buttons: InlineKeyboard } {
+    const lines: string[] = [
+      '💰 *Your Payments*',
+      `Page ${page} of ${this.totalPages(total)} (${total} total)`,
+      '',
+    ];
 
     const keyboard = new InlineKeyboard();
 
-    // Sort by creation date (newest first)
-    const sorted = [...payments].sort(
-      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-    );
-
-    for (const payment of sorted) {
+    for (const payment of payments) {
       const statusIcon = payment.status === 'pending' ? '⏳' : '✅';
       const amount = this.formatAmount(payment.amountCents);
       const date = this.formatDate(payment.createdAt);
@@ -80,18 +90,33 @@ export class PaymentsCommandHandler {
       lines.push(`   Ref: \`${payment.ref}\` | ${status} | ${date}`);
       lines.push('');
 
-      // Add buttons for each payment
-      keyboard.add({ text: `View`, callback_data: `view:${payment.ref}` });
+      // One row of action buttons per payment
+      keyboard.add({ text: 'View', callback_data: `view:${payment.ref}` });
       if (payment.status === 'pending') {
-        keyboard.add({ text: `Mark as Received`, callback_data: `mark_received:${payment.ref}` });
+        keyboard.add({ text: '✓ Received', callback_data: `mark_received:${payment.ref}` });
       }
-      keyboard.add({ text: `Payback`, callback_data: `payback:${payment.ref}` });
+      keyboard.add({ text: 'Payback', callback_data: `payback:${payment.ref}` });
       keyboard.row();
     }
 
-    lines.push('Use the buttons above to manage your payments.');
+    // Pagination row at the bottom
+    const totalPages = this.totalPages(total);
+    if (totalPages > 1) {
+      if (page > 1) {
+        keyboard.add({ text: '« Prev', callback_data: `payments:${page - 1}` });
+      }
+      if (page < totalPages) {
+        keyboard.add({ text: 'Next »', callback_data: `payments:${page + 1}` });
+      }
+      keyboard.row();
+    }
 
+    lines.push('Tap a button to manage a payment.');
     return { message: lines.join('\n'), buttons: keyboard };
+  }
+
+  private totalPages(total: number): number {
+    return Math.max(1, Math.ceil(total / this.pageSize));
   }
 
   /**
