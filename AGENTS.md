@@ -73,10 +73,16 @@ This project uses OpenSpec for change management. The current active change is `
 ## Key Design Decisions
 
 1. **SGQR payload builder is runtime-agnostic** — No Node APIs, runs in both vitest and Workers isolate. CRC16-CCITT-FALSE, uppercase hex, computed over payload + "6304".
-2. **QR rendering uses BMP in Workers, PNG in Node** — `qrcode-generator` is pure JS (works in Workers), outputs BMP via custom builder. Node tests use `qrcode` + `pngjs` + `jsqr` for PNG round-trip verification.
-3. **Conversation state lives in Durable Objects** — Per-chat DO holds FSM state, 10-min alarm expiry, survives cold starts and deploys.
+2. **QR rendering uses BMP in Workers, PNG in Node** — `qrcode-generator` is pure JS (works in Workers), outputs BMP via custom builder. Node tests use `qrcode` + `pngjs` + `jsqr` for PNG round-trip verification. QR codes overlay a PayNow logo in the center using error correction level H (30% recovery).
+3. **Conversation state lives in Durable Objects** — Per-chat DO holds FSM state, 10-min alarm expiry, survives cold starts and deploys. The `alarm()` lifecycle method is required by workerd (not a fetch route).
 4. **Drizzle ORM over D1** — Schema in `src/db/schema.ts`, migrations in `drizzle/`, repository layer abstracts queries behind infra-neutral interfaces.
-5. **Secret validation before bot creation** — Webhook handler validates `X-Telegram-Bot-Api-Secret-Token` before instantiating grammY bot to avoid "Empty token" errors in tests.
+5. **Secret validation before bot creation** — Webhook handler validates `X-Telegram-Bot-Api-Secret-Token` against the separate `TELEGRAM_WEBHOOK_SECRET` binding before instantiating grammY bot.
+6. **Inline-button UX pattern** — Confirm/cancel steps use `InlineKeyboard` with callback data instead of text input. Outcomes update the original message in place via `editMessageText` (no extra chat bubbles). QR photos carry action buttons (✓ Received / Payback); marking received replaces the photo with a text summary.
+7. **Payback bounds count all statuses** — `SUM(paybacks)` (pending + sent) inside a single D1 batch via compare-and-set guarded INSERT.
+8. **Biome for lint + format** — Single quotes, 2-space indent, 100-col line width, semicolons, es5 trailing commas.
+9. **npm audit: 0 vulnerabilities** — zod 4.6.7, drizzle-orm 0.45.4, vitest 5.1, wrangler 4.158, drizzle-kit 0.31, eslint 10; overrides force minimatch ≥11 and esbuild ≥0.25.
+10. **D1 binding: `paynow_db`** — renamed from `DB`; `migrations_dir = "drizzle"` in wrangler.toml.
+11. **GitHub Actions CI** — Two jobs (checks + tests) on PRs and main pushes; branch protection on main (2 required checks, linear history, enforce admins).
 
 ## Conventions
 
@@ -93,43 +99,41 @@ This project uses OpenSpec for change management. The current active change is `
 
 ## Blocked Tasks
 
-Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
-
-- `wrangler login` or `CLOUDFLARE_API_TOKEN` env var
-- BotFather command registration via Telegram
+(none — task 1.3 completed: D1 provisioned, BotFather commands registered, live webhook set, all 29 tasks done)
 
 ## What's Working
 
 - All SGQR payload generation (CRC16, TLV, PayNow templates, amount handling)
-- QR rendering (BMP in Workers, PNG round-trip verified in Node)
-- Webhook secret validation
-- Project scaffolding (wrangler, vitest 2-pool, TypeScript)
+- QR rendering (BMP in Workers, PNG round-trip verified in Node) with PayNow logo overlay
+- Webhook secret validation (separate `TELEGRAM_WEBHOOK_SECRET` binding)
+- Project scaffolding (wrangler 4, vitest 5, Biome, TypeScript)
 - Database schema with Drizzle ORM (users, payments, paybacks tables with CHECK constraints)
-- Repository layer with infra-neutral interfaces (D1Repository implementation, 27 passing tests)
+- Repository layer with infra-neutral interfaces (D1Repository, 38 passing tests)
 - Proxy validation and normalization (mobile → +65XXXXXXXX, UEN validation)
 - 10-char base32 reference generator using crypto.getRandomValues
-- Payment service with markPaymentReceived transition logic (routes through `updatePaymentStatus`)
+- Payment service with markPaymentReceived transition logic
 - Conversation Durable Object with FSM state, 10-min alarm expiry, eviction survival
-- /init command handler with mobile/UEN validation, confirmation flow, and user persistence
-- Reference update on re-run: /init replaces stored value, cancel/alarm expiry preserves existing data
-- /payments listing with inline buttons (View / Mark as Received / Payback) and payment detail view
-- /payback 4-step conversation (payer proxy → confirm → amount → confirm) recording paybacks
+- public `alarm()` lifecycle method (workerd requirement, not a fetch route)
+- /init command with mobile/UEN validation, inline Confirm/Cancel buttons, in-place message updates
+- /start payment issuance with payee snapshot, SGQR payload + BMP QR uploaded via sendPhoto
+- QR photo carries action buttons (✓ Received / Payback)
+- mark_received replaces QR photo with text summary (deleteMessage + reply)
+- /payments listing with pagination (5 per page), inline buttons, payment detail view
+- /payback 4-step conversation with inline buttons at payer and amount confirmation steps
 - Payback bounds: `createPaybackBounded()` enforces `SUM(paybacks) <= payment.amount_cents`
   (all statuses — pending and sent) inside one D1 batch via a compare-and-set guarded
-  `INSERT ... SELECT` (task 7.2)
-- /start payment issuance: guard requiring /init first, description + amount collection with
-  validation, payment row with payee snapshot, SGQR payload + isolate-rendered BMP QR uploaded
-  via sendPhoto (tasks 5.1, 5.2, 5.4 done; 5.3 stage (a) verified e2e in Workers pool)
-- /payback QR (task 7.3): real SGQR payload encoding the PAYER as payee proxy, delivered via
-  sendPhoto with caption; jsQR round-trip verified in `test/workers/payback-qr.test.ts`
-- `src/bot.ts` wires all commands (/init, /start, /payments, /payback <ref>, /cancel, /help,
-  /ping), inline-button callbacks, and free-text conversation routing; bot cached per isolate
-  with a single `bot.init()` getMe
-- Mark payback as sent (task 7.4): detail view renders per-pending-payback buttons;
-  `updatePaybackStatus(ref, 'sent', ts)` is a guarded CAS transition (duplicate taps →
-  exactly one winner, loser sees "already marked"); re-render shows sent timestamps + refreshed remaining
-- `ChatSessionDO` binding serves the real conversation FSM (`src/index.ts` re-exports
-  `ConversationDO` from `src/worker/conversation-do.ts`)
+  `INSERT ... SELECT`
+- Payback QR: real SGQR payload encoding the PAYER as payee proxy, delivered via sendPhoto
+- Mark payback as sent: guarded CAS transition, duplicate taps handled, history re-render
+- `src/bot.ts` wires all commands (/init, /start, /payments, /payback <ref>, /cancel, /help, /ping),
+  inline-button callbacks (init_*, payments:N, payback_*, view/mark_received/payback/pb_sent),
+  and free-text conversation routing; bot cached per isolate
+- `ChatSessionDO` binding serves the real conversation FSM
+- GitHub Actions CI: type-check + lint/format + both vitest pools on PRs and main pushes
+- Branch protection on `main` (2 required checks, linear history, enforce admins)
+- D1 provisioned on Cloudflare with migrations applied
+- Live webhook at `https://event-paynow.mcheng-work.workers.dev/webhook`
+- All 29 tasks in `add-paynow-qr-telegram-bot` complete
 
 ## Workers e2e Bot Harness (task 5.3 stage a)
 
@@ -223,10 +227,6 @@ The repository layer provides infra-neutral interfaces for database operations:
 
 ## What's Next
 
-- Task 5.3 stage (b): live `cloudflared` dev-bot check that the photo arrives in Telegram
-  (blocked on task 1.3, Cloudflare auth)
-- Task 1.3: Cloudflare auth setup (blocked) — also verify deployed webhook works now that
-  `src/bot.ts` routes real handlers (getMe on first request per isolate)
-- Tasks 8.1-8.3: Integration testing, scan validation, deploy pipeline
-- Resolved 2026-11-07: payback bound counts ALL paybacks (pending + sent) —
-  `sumPaybacks()` and the `createPaybackBounded` guard have no status filter
+- Archive the `add-paynow-qr-telegram-bot` change (`/opsx-archive`)
+- Apply the `add-event-management` change: events table, `/init` creates events, `/start` picks event, `/end_event` closes event
+- README quick-start (BotFather setup, secrets, deploy commands)

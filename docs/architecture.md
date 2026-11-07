@@ -89,22 +89,27 @@
 
 **Role**: Entry point for all HTTP requests
 
-- Validates Telegram webhook secret token before processing
+- Validates Telegram webhook secret token before processing (against `TELEGRAM_WEBHOOK_SECRET` binding)
 - Routes health checks (`GET /`) and webhook posts (`POST /webhook`)
 - Returns 404 for unknown paths
 
-**Key behavior**: Secret validation happens BEFORE bot instantiation to avoid "Empty token" errors in tests.
+**Key behavior**: Secret validation happens BEFORE bot instantiation to avoid "Empty token" errors in tests. The webhook URL must include the `/webhook` path.
 
 ### grammY Bot (src/bot.ts)
 
 **Role**: Telegram Bot framework integration
 
 - Creates Bot instance with webhook callback
-- Registers command handlers (`/init`, `/start`, `/payments`, `/payback`)
+- Registers command handlers (`/init`, `/start`, `/payments`, `/payback`, `/cancel`, `/help`, `/ping`)
+- Registers inline-button callback dispatcher with prefix-based routing:
+  - `init_confirm:` / `init_cancel:` → InitCommandHandler
+  - `payments:N` → PaymentsCommandHandler (pagination)
+  - `payback_confirm_payer:` / `payback_cancel:` / `payback_confirm_amount:` / `payback_cancel_amount:` → PaybackCommandHandler
+  - `view:` / `mark_received:` / `payback:` / `pb_sent:` → PaymentCallbackHandler
 - Registers message handlers for conversation flows
-- Sends QR images via `sendPhoto` with FormData
+- Sends QR images via `sendPhoto` with FormData + inline action buttons
 
-**Key behavior**: Uses `webhookCallback` adapter for Cloudflare Workers.
+**Key behavior**: Uses `webhookCallback` adapter for Cloudflare Workers. Bot instance cached per isolate (single `bot.init()` getMe).
 
 ### Conversation DO (src/worker/conversation-do.ts)
 
@@ -115,7 +120,7 @@
 - Automatically expires idle conversations after 10 minutes
 - Survives cold starts and deployments (persistent storage)
 
-**Key behavior**: Get-or-create pattern - first access creates state, subsequent accesses retrieve it. Alarm-based expiry clears state but preserves user data in D1.
+**Key behavior**: Get-or-create pattern - first access creates state, subsequent accesses retrieve it. Alarm-based expiry clears state but preserves user data in D1. The `alarm()` lifecycle method is required by workerd (not a fetch route).
 
 ### Command Handlers (src/commands/)
 
@@ -125,29 +130,36 @@
 
 - Collects mobile number or UEN from user
 - Validates and normalizes input (mobile → `+65XXXXXXXX`, UEN → uppercase)
-- Requires confirmation before saving
+- Echoes normalized value with **inline Confirm/Cancel buttons**
+- All outcomes (confirm, cancel, expired, error) update the original message in place via `editMessageText`
 - Updates existing user or creates new user
 
-**`/start` handler** (implemented):
+**`/start` handler**:
 
 - Guard: unconfigured users are prompted to run `/init` first
 - Collects description, then amount (integer cents, ≤ 2 decimals)
 - Creates the payment record with payee snapshot + embedded base32 `ref`
-- Renders the SGQR PayNow QR (BMP, pure JS) and uploads it via `sendPhoto`
+- Renders the SGQR PayNow QR (BMP, pure JS, with PayNow logo overlay) and uploads via `sendPhoto`
+- QR photo carries inline action buttons (✓ Received / Payback)
+- On "✓ Received": QR photo is deleted and replaced with a text summary
+- "Payback" button starts the payback flow
 
-**`/payments` handler** (implemented):
+**`/payments` handler**:
 
-- Lists all payments for the user with inline buttons (View / Mark as received / Payback)
+- Lists events/payments with per-payment inline buttons (View / ✓ Received / Payback)
+- **Paginated at 5 payments per page** with « Prev / Next » navigation
 - Payment detail view shows status, timestamps, source, and payback summary
 - Detail view renders a "Mark payback as sent" button per pending payback (task 7.4);
   tapping performs a guarded `pending → sent` transition and re-renders the history with
   sent timestamps and the refreshed remaining total
 
-**`/payback` handler** (implemented):
+**`/payback` handler**:
 
 - 4-step conversation: payer proxy → confirm → amount → confirm
+- Steps 2 and 4 use **inline Confirm/Cancel buttons** (not text input)
+- Outcomes update the confirmation message in place via `editMessageText`
 - Payback row created inside the bounded D1 transaction (task 7.2)
-- Generates QR encoding the PAYER as payee proxy and uploads via `sendPhoto` (task 7.3)
+- Generates QR encoding the PAYER as payee proxy and uploads via `sendPhoto`
 
 ### Repository Layer (src/db/repository.ts)
 
@@ -250,7 +262,7 @@ paybacks (
 - **Amount parser** (`amount.ts`): Converts dollars to integer cents
 - **Proxy validation** (`proxy-validation.ts`): Validates mobile/UEN format
 - **Ref generator** (`proxy-validation.ts`): 10-char base32 reference
-- **QR renderer** (`qr-render.ts`): Renders QR as BMP (Workers) or PNG (Node)
+- **QR renderer** (`qr-render.ts`): Renders QR as BMP (Workers) or PNG (Node); overlays PayNow logo in center (EC level H)
 
 **Key behavior**: Runtime-agnostic - no Node APIs, runs in both vitest and Workers isolate.
 
@@ -263,7 +275,7 @@ User sends /init
   ↓
 Worker receives webhook POST /webhook
   ↓
-Secret validation passes
+Secret validation passes (TELEGRAM_WEBHOOK_SECRET)
   ↓
 grammY routes to /init command handler
   ↓
@@ -275,23 +287,23 @@ Handler updates state (flow: 'init', step: 1)
   ↓
 Handler prompts user for mobile/UEN
   ↓
-User sends mobile number
+User sends mobile number or UEN
   ↓
 Handler validates input via proxy-validation
   ↓
 Handler updates state (step: 2, context.pendingProxy)
   ↓
-Handler echoes normalized value for confirmation
+Handler echoes normalized value with inline Confirm/Cancel buttons
   ↓
-User sends "confirm"
+User taps Confirm button (callback_query)
+  ↓
+Handler updates state (flow: 'idle', step: 0)
   ↓
 Handler calls repository.upsertUser()
   ↓
 D1 stores user record
   ↓
-Handler resets state (flow: 'idle', step: 0)
-  ↓
-Handler sends success message
+Handler updates original message in place with success text
 ```
 
 ### /start Command Flow
@@ -315,7 +327,7 @@ Handler validates amount via amount parser (integer cents)
   ↓
 Handler generates unique ref (10-char base32)
   ↓
-Handler builds SGQR PayNow payload
+Handler builds SGQR PayNow payload (with PayNow logo overlay on QR)
   ↓
 Handler renders QR as BMP
   ↓
@@ -323,9 +335,69 @@ Handler creates payment record (status: 'pending')
   ↓
 D1 stores payment record
   ↓
-Handler sends QR image via sendPhoto
+Handler sends QR image via sendPhoto with inline buttons (✓ Received / Payback)
   ↓
-Handler sends payment reference + /payments tracking hint
+User taps "✓ Received" button
+  ↓
+Handler marks payment as received
+  ↓
+QR photo deleted, text summary sent in its place
+```
+
+### /payments Command Flow
+
+```
+User sends /payments
+  ↓
+Handler fetches all payments for user (sorted newest-first)
+  ↓
+Handler paginates at 5 per page
+  ↓
+Handler renders list with per-payment inline buttons (View / ✓ Received / Payback)
+  ↓
+Handler sends message with keyboard + Prev/Next navigation
+  ↓
+User taps page button (payments:N callback)
+  ↓
+Handler re-renders the list at the requested page
+  ↓
+User taps View / Mark as received / Payback
+  ↓
+Callback handler processes action (mark_received deletes photo + sends text)
+```
+
+### /payback Command Flow
+
+```
+User sends /payback <ref>
+  ↓
+Handler verifies payment exists and belongs to user
+  ↓
+Handler prompts for payer proxy (mobile/UEN)
+  ↓
+User sends payer reference
+  ↓
+Handler validates and echoes with inline Confirm/Cancel buttons
+  ↓
+User taps Confirm (callback_query)
+  ↓
+Handler checks remaining payback bound
+  ↓
+Handler prompts for amount (with bound info)
+  ↓
+User sends amount
+  ↓
+Handler validates amount against remaining bound
+  ↓
+Handler shows amount with inline Confirm/Cancel buttons
+  ↓
+User taps Confirm
+  ↓
+Handler calls createPaybackBounded() in D1 batch
+  ↓
+Handler renders payback QR (payer as payee proxy) and uploads via sendPhoto
+  ↓
+Handler updates confirmation message with success summary
 ```
 
 ## Storage Strategy
@@ -383,7 +455,7 @@ wrangler deploy
 
 # 7. Set webhook URL in Telegram
 # URL: https://<worker-name>.<subdomain>.workers.dev/webhook
-# Secret: Your TELEGRAM_BOT_TOKEN
+# Secret: Your TELEGRAM_WEBHOOK_SECRET (not the bot token)
 ```
 
 ### Regular Deploy
@@ -399,11 +471,12 @@ wrangler deployments rollback
 ### Environment Variables
 
 - `TELEGRAM_BOT_TOKEN`: Bot token from @BotFather (secret)
+- `TELEGRAM_WEBHOOK_SECRET`: Webhook secret for validating incoming requests (secret)
 - `BOT_USERNAME`: Bot username (default: `event_paynow_bot`)
 
 ### Bindings
 
-- `DB`: D1 database binding
+- `paynow_db`: D1 database binding (database name: `paynow-db`)
 - `CHAT_SESSION`: Durable Object binding (class `ChatSessionDO`)
 
 ## Testing Strategy
@@ -519,21 +592,30 @@ wrangler tail --format pretty
 2. **QR not scannable**: Payload too long or CRC invalid
 3. **Conversation lost**: DO alarm fired or state corrupted
 4. **Payment not found**: Reference doesn't exist or belongs to different user
+5. **DO `setAlarm` fails**: `ConversationDO` must implement the public `alarm()` lifecycle method (workerd requirement) — missing it causes `TypeError: Your Durable Object class must have an alarm() handler`
 
-## Future Enhancements
+## Project Status
 
-### Planned
+### Completed
 
-- `/start` command for creating payments
-- `/payments` command for listing payments
-- `/payback` command for payback flow
+- `/init` command for PayNow reference configuration (mobile/UEN)
+- `/start` command for payment creation with SGQR QR codes
+- `/payments` listing with pagination and inline buttons
+- `/payback` command for payback flow with bounded paybacks
 - Payment status tracking (pending → received)
-- Automated payment notification webhook
+- Payback history and "Mark as sent" tracking
+- Inline-button UX (confirm/cancel, action buttons, pagination)
+- QR codes with PayNow logo overlay
+- D1 database provisioning and migrations
+- Live deployment on Cloudflare Workers
+- GitHub Actions CI with branch protection
+- 282 passing tests (Node + Workers pools)
 
-### Possible
+### Future Enhancements
 
 - Multi-currency support
 - Payment expiry and reminders
 - Export payment history
 - Admin dashboard
 - Analytics and reporting
+- `/end_event` and event management (see `add-event-management` change)
