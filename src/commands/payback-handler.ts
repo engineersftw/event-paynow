@@ -1,11 +1,11 @@
 import type { Context } from 'grammy';
 import { InputFile } from 'grammy';
-import { ConversationDO, type ConversationState } from '../worker/conversation-do.js';
 import { detectProxyType, generateRef } from '../db/proxy-validation.js';
-import { parseAmount, formatCents } from '../sgqr/amount.js';
+import type { PayeeType, Repository } from '../db/repository.js';
+import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
-import type { Repository, PayeeType } from '../db/repository.js';
+import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 
 /**
  * /payback command handler - initiates payback flow for a payment
@@ -48,16 +48,20 @@ export class PaybackCommandHandler {
     const userId = ctx.from!.id;
 
     if (!paymentRef) {
-      await ctx.reply('❌ Please provide a payment reference.\n\nUsage: /payback <ref>\n\nUse /payments to see your payment references.');
+      await ctx.reply(
+        '❌ Please provide a payment reference.\n\nUsage: /payback <ref>\n\nUse /payments to see your payment references.'
+      );
       return;
     }
 
     try {
       // Verify payment exists and belongs to user
       const payment = await this.repository.getPaymentByRef(paymentRef);
-      
+
       if (!payment) {
-        await ctx.reply(`❌ Payment with reference \`${paymentRef}\` not found.`, { parse_mode: 'Markdown' });
+        await ctx.reply(`❌ Payment with reference \`${paymentRef}\` not found.`, {
+          parse_mode: 'Markdown',
+        });
         return;
       }
 
@@ -75,24 +79,23 @@ export class PaybackCommandHandler {
       await this.setState({
         flow: 'payback',
         step: 1, // waiting for payer reference
-        context: { 
+        context: {
           paymentRef,
           paymentId: payment.id,
           paymentAmount: payment.amountCents,
-          paymentDescription: payment.description
+          paymentDescription: payment.description,
         },
-        lastActivity: new Date().toISOString()
+        lastActivity: new Date().toISOString(),
       });
 
       await ctx.reply(
         `💸 *Payback for Payment*\n\n` +
-        `Reference: \`${paymentRef}\`\n` +
-        `Amount: $${formatCents(payment.amountCents)}\n` +
-        `Description: ${payment.description}\n\n` +
-        `Please enter the payer's PayNow reference (mobile number or UEN):`,
+          `Reference: \`${paymentRef}\`\n` +
+          `Amount: $${formatCents(payment.amountCents)}\n` +
+          `Description: ${payment.description}\n\n` +
+          `Please enter the payer's PayNow reference (mobile number or UEN):`,
         { parse_mode: 'Markdown' }
       );
-
     } catch (error) {
       console.error('Failed to start payback:', error);
       await ctx.reply('❌ Failed to start payback flow. Please try again.');
@@ -104,8 +107,8 @@ export class PaybackCommandHandler {
    */
   async handleInput(ctx: Context): Promise<boolean> {
     const state = await this.getState();
-    
-    if (!state || state.flow !== 'payback') {
+
+    if (state?.flow !== 'payback') {
       return false; // Not in payback flow
     }
 
@@ -135,11 +138,17 @@ export class PaybackCommandHandler {
   /**
    * Step 1: Validate payer reference and echo for confirmation
    */
-  private async handlePayerReferenceInput(ctx: Context, input: string, state: ConversationState): Promise<void> {
+  private async handlePayerReferenceInput(
+    ctx: Context,
+    input: string,
+    state: ConversationState
+  ): Promise<void> {
     const normalized = detectProxyType(input);
 
     if (!normalized) {
-      await ctx.reply('❌ Invalid PayNow reference. Please enter:\n• Mobile number (8 digits, starting with 6/8/9)\n• UEN (9-13 characters)\n\nTry again:');
+      await ctx.reply(
+        '❌ Invalid PayNow reference. Please enter:\n• Mobile number (8 digits, starting with 6/8/9)\n• UEN (9-13 characters)\n\nTry again:'
+      );
       return;
     }
 
@@ -149,19 +158,25 @@ export class PaybackCommandHandler {
       step: 2,
       context: {
         ...state.context,
-        pendingPayer: normalized
+        pendingPayer: normalized,
       },
-      lastActivity: new Date().toISOString()
+      lastActivity: new Date().toISOString(),
     });
 
     const typeLabel = normalized.type === 'mobile' ? 'Mobile number' : 'UEN';
-    await ctx.reply(`📱 Payer ${typeLabel}: ${normalized.normalized}\n\nType "confirm" to continue, or "cancel" to abort:`);
+    await ctx.reply(
+      `📱 Payer ${typeLabel}: ${normalized.normalized}\n\nType "confirm" to continue, or "cancel" to abort:`
+    );
   }
 
   /**
    * Step 2: Handle payer confirmation
    */
-  private async handlePayerConfirmation(ctx: Context, input: string, state: ConversationState): Promise<void> {
+  private async handlePayerConfirmation(
+    ctx: Context,
+    input: string,
+    state: ConversationState
+  ): Promise<void> {
     if (input.toLowerCase() === 'confirm') {
       const paymentId = state.context.paymentId as number;
       const paymentAmount = state.context.paymentAmount as number;
@@ -174,7 +189,9 @@ export class PaybackCommandHandler {
 
       if (remaining <= 0) {
         await this.resetState();
-        await ctx.reply('⚠️ This payment has already been fully paid back. There is nothing left to pay.');
+        await ctx.reply(
+          '⚠️ This payment has already been fully paid back. There is nothing left to pay.'
+        );
         return;
       }
 
@@ -182,15 +199,15 @@ export class PaybackCommandHandler {
         flow: 'payback',
         step: 3,
         context: { ...state.context, remainingCents: remaining },
-        lastActivity: new Date().toISOString()
+        lastActivity: new Date().toISOString(),
       });
 
       await ctx.reply(
         `💵 Enter payback amount (in dollars):\n\n` +
-        `Original payment: $${formatCents(paymentAmount)}\n` +
-        `Already paid back: $${formatCents(paidBack)}\n` +
-        `Maximum payback: $${formatCents(remaining)}\n\n` +
-        `You can enter a partial amount or the full remaining amount.`,
+          `Original payment: $${formatCents(paymentAmount)}\n` +
+          `Already paid back: $${formatCents(paidBack)}\n` +
+          `Maximum payback: $${formatCents(remaining)}\n\n` +
+          `You can enter a partial amount or the full remaining amount.`,
         { parse_mode: 'Markdown' }
       );
     } else if (input.toLowerCase() === 'cancel') {
@@ -204,13 +221,19 @@ export class PaybackCommandHandler {
   /**
    * Step 3: Validate amount and echo for confirmation
    */
-  private async handleAmountInput(ctx: Context, input: string, state: ConversationState): Promise<void> {
+  private async handleAmountInput(
+    ctx: Context,
+    input: string,
+    state: ConversationState
+  ): Promise<void> {
     const paymentId = state.context.paymentId as number;
     const paymentAmount = state.context.paymentAmount as number;
     const amountCents = parseAmount(input);
 
     if (amountCents === null) {
-      await ctx.reply('❌ Invalid amount. Enter a positive number with up to 2 decimals (e.g. 5 or 12.50).\n\nTry again:');
+      await ctx.reply(
+        '❌ Invalid amount. Enter a positive number with up to 2 decimals (e.g. 5 or 12.50).\n\nTry again:'
+      );
       return;
     }
 
@@ -228,7 +251,7 @@ export class PaybackCommandHandler {
     if (amountCents > remaining) {
       await ctx.reply(
         `❌ Payback amount ($${formatCents(amountCents)}) exceeds the remaining payable amount ($${formatCents(remaining)}).\n\n` +
-        `Please enter a smaller amount:`
+          `Please enter a smaller amount:`
       );
       return;
     }
@@ -240,21 +263,25 @@ export class PaybackCommandHandler {
       context: {
         ...state.context,
         remainingCents: remaining,
-        paybackAmount: amountCents
+        paybackAmount: amountCents,
       },
-      lastActivity: new Date().toISOString()
+      lastActivity: new Date().toISOString(),
     });
 
     await ctx.reply(
       `💰 Payback amount: $${formatCents(amountCents)}\n\n` +
-      `Type "confirm" to record the payback, or "cancel" to abort:`
+        `Type "confirm" to record the payback, or "cancel" to abort:`
     );
   }
 
   /**
    * Step 4: Handle amount confirmation and create the bounded payback record
    */
-  private async handleAmountConfirmation(ctx: Context, input: string, state: ConversationState): Promise<void> {
+  private async handleAmountConfirmation(
+    ctx: Context,
+    input: string,
+    state: ConversationState
+  ): Promise<void> {
     if (input.toLowerCase() === 'confirm') {
       await this.createPaybackRecord(ctx, state);
     } else if (input.toLowerCase() === 'cancel') {
@@ -303,10 +330,9 @@ export class PaybackCommandHandler {
       if (!result.ok) {
         if (result.reason === 'payment_not_found') {
           await this.resetState();
-          await ctx.reply(
-            `❌ Payment \`${paymentRef}\` no longer exists. Payback aborted.`,
-            { parse_mode: 'Markdown' }
-          );
+          await ctx.reply(`❌ Payment \`${paymentRef}\` no longer exists. Payback aborted.`, {
+            parse_mode: 'Markdown',
+          });
           return;
         }
 
@@ -324,11 +350,11 @@ export class PaybackCommandHandler {
             flow: 'payback',
             step: 3,
             context: carry,
-            lastActivity: new Date().toISOString()
+            lastActivity: new Date().toISOString(),
           });
           await ctx.reply(
             `❌ Payback of $${formatCents(staleAmount)} exceeds the remaining payable amount ($${formatCents(result.remainingCents)}). ` +
-            `Another payback may have landed just now.\n\nPlease enter a new amount:`
+              `Another payback may have landed just now.\n\nPlease enter a new amount:`
           );
         }
         return;
@@ -336,26 +362,22 @@ export class PaybackCommandHandler {
 
       // Success: row recorded inside the transaction — deliver the QR image
       const qrBytes = await renderQrPng(result.payback.qrPayload);
-      await ctx.replyWithPhoto(
-        new InputFile(qrBytes, 'payback-qr.bmp'),
-        {
-          caption:
-            `Payback for ${paymentRef} / SGD ${formatCents(result.payback.amountCents)} / ` +
-            `${result.payback.ref} / Scan to send the money back`,
-        }
-      );
+      await ctx.replyWithPhoto(new InputFile(qrBytes, 'payback-qr.bmp'), {
+        caption:
+          `Payback for ${paymentRef} / SGD ${formatCents(result.payback.amountCents)} / ` +
+          `${result.payback.ref} / Scan to send the money back`,
+      });
 
       await this.resetState();
       await ctx.reply(
         `✅ *Payback Recorded!*\n\n` +
-        `Payback reference: \`${result.payback.ref}\`\n` +
-        `Amount: $${formatCents(result.payback.amountCents)}\n` +
-        `Payer (now payee): ${payerProxy.normalized}\n` +
-        `Remaining payable: $${formatCents(result.remainingCents)}\n\n` +
-        'Use /payments to track it.',
+          `Payback reference: \`${result.payback.ref}\`\n` +
+          `Amount: $${formatCents(result.payback.amountCents)}\n` +
+          `Payer (now payee): ${payerProxy.normalized}\n` +
+          `Remaining payable: $${formatCents(result.remainingCents)}\n\n` +
+          'Use /payments to track it.',
         { parse_mode: 'Markdown' }
       );
-
     } catch (error) {
       console.error('Failed to create payback record:', error);
       await ctx.reply('❌ Failed to record the payback. Please try again.');
@@ -366,19 +388,23 @@ export class PaybackCommandHandler {
    * Get conversation state from DO
    */
   private async getState(): Promise<ConversationState | null> {
-    const response = await this.conversationDO.fetch(new Request('http://localhost/state', { method: 'GET' }));
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/state', { method: 'GET' })
+    );
     if (response.status !== 200) return null;
-    return await response.json() as ConversationState;
+    return (await response.json()) as ConversationState;
   }
 
   /**
    * Set conversation state in DO
    */
   private async setState(state: ConversationState): Promise<void> {
-    const response = await this.conversationDO.fetch(new Request('http://localhost/state', {
-      method: 'POST',
-      body: JSON.stringify(state)
-    }));
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/state', {
+        method: 'POST',
+        body: JSON.stringify(state),
+      })
+    );
     // Drain the response so cross-isolate streams don't pin DO storage
     await response?.body?.cancel();
   }
@@ -391,7 +417,7 @@ export class PaybackCommandHandler {
       flow: 'idle',
       step: 0,
       context: {},
-      lastActivity: new Date().toISOString()
+      lastActivity: new Date().toISOString(),
     });
   }
 }

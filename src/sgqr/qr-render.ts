@@ -1,4 +1,4 @@
-import qrcode from "qrcode-generator";
+import qrcode from 'qrcode-generator';
 
 /**
  * Render a payload string as a QR code BMP image (Uint8Array).
@@ -15,7 +15,7 @@ import qrcode from "qrcode-generator";
 export async function renderQrPng(payload: string): Promise<Uint8Array> {
   // Generate QR matrix using qrcode-generator
   // Type 0 = auto-detect version, "M" = error correction level
-  const qr = qrcode(0, "M");
+  const qr = qrcode(0, 'M');
   qr.addData(payload);
   qr.make();
 
@@ -75,13 +75,13 @@ export async function renderQrPng(payload: string): Promise<Uint8Array> {
 
       // BMP is BGR
       if (isBlack) {
-        view.setUint8(offset++, 0);     // B
-        view.setUint8(offset++, 0);     // G
-        view.setUint8(offset++, 0);     // R
+        view.setUint8(offset++, 0); // B
+        view.setUint8(offset++, 0); // G
+        view.setUint8(offset++, 0); // R
       } else {
-        view.setUint8(offset++, 255);   // B
-        view.setUint8(offset++, 255);   // G
-        view.setUint8(offset++, 255);   // R
+        view.setUint8(offset++, 255); // B
+        view.setUint8(offset++, 255); // G
+        view.setUint8(offset++, 255); // R
       }
     }
     // Row padding

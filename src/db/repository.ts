@@ -77,13 +77,22 @@ export interface Repository {
   getUser(telegramId: number): Promise<User | null>;
 
   // Payments
-  createPayment(payment: Omit<Payment, 'id' | 'createdAt' | 'receivedAt'> & { timestamp: string }): Promise<Payment>;
+  createPayment(
+    payment: Omit<Payment, 'id' | 'createdAt' | 'receivedAt'> & { timestamp: string }
+  ): Promise<Payment>;
   getPaymentByRef(ref: string): Promise<Payment | null>;
   listPaymentsByUser(userId: number): Promise<Payment[]>;
-  updatePaymentStatus(ref: string, status: PaymentStatus, source: ReceiptSource, timestamp: string): Promise<Payment | null>;
+  updatePaymentStatus(
+    ref: string,
+    status: PaymentStatus,
+    source: ReceiptSource,
+    timestamp: string
+  ): Promise<Payment | null>;
 
   // Paybacks
-  createPayback(payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }): Promise<Payback>;
+  createPayback(
+    payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
+  ): Promise<Payback>;
   /**
    * Create a payback only if `SUM(paybacks) + amountCents <= payment.amountCents`
    * still holds when the write commits — counting both pending and sent rows.
@@ -91,14 +100,20 @@ export interface Repository {
    * compare-and-set guard, so concurrent requests can never push the total over
    * the original amount (design §5, task 7.2).
    */
-  createPaybackBounded(payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }): Promise<CreatePaybackBoundedResult>;
+  createPaybackBounded(
+    payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
+  ): Promise<CreatePaybackBoundedResult>;
   getPaybackByRef(ref: string): Promise<Payback | null>;
   /**
    * Transition a payback's status. Marking `sent` is a guarded transition: the update
    * applies only while the row is still `pending`, so duplicate taps concurrently
    * resolve to exactly one winner — the loser gets null back (task 7.4).
    */
-  updatePaybackStatus(ref: string, status: PaybackStatus, timestamp: string): Promise<Payback | null>;
+  updatePaybackStatus(
+    ref: string,
+    status: PaybackStatus,
+    timestamp: string
+  ): Promise<Payback | null>;
   listPaybacksByPayment(paymentId: number): Promise<Payback[]>;
   /**
    * Total amount paid back against a payment across ALL statuses (pending + sent).

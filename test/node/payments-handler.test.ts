@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { PaymentsCommandHandler } from '../../src/commands/payments-handler.js';
 import type { Context } from 'grammy';
-import type { Repository, User, Payment } from '../../src/db/repository.js';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PaymentsCommandHandler } from '../../src/commands/payments-handler.js';
+import type { Payment, Repository, User } from '../../src/db/repository.js';
 
 describe('PaymentsCommandHandler', () => {
   let handler: PaymentsCommandHandler;
@@ -37,11 +37,9 @@ describe('PaymentsCommandHandler', () => {
       expect(mockRepository.getUser).toHaveBeenCalledWith(123456789);
       expect(mockRepository.listPaymentsByUser).not.toHaveBeenCalled();
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('haven\'t set up your PayNow reference')
+        expect.stringContaining("haven't set up your PayNow reference")
       );
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('/init')
-      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('/init'));
     });
 
     it('should show empty message when user has no payments', async () => {
@@ -64,11 +62,9 @@ describe('PaymentsCommandHandler', () => {
       expect(mockRepository.getUser).toHaveBeenCalledWith(123456789);
       expect(mockRepository.listPaymentsByUser).toHaveBeenCalledWith(123456789);
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('don\'t have any payments yet')
+        expect.stringContaining("don't have any payments yet")
       );
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('/start')
-      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('/start'));
     });
 
     it('should display formatted payments list', async () => {
@@ -120,29 +116,29 @@ describe('PaymentsCommandHandler', () => {
       // Assert
       expect(mockRepository.getUser).toHaveBeenCalledWith(123456789);
       expect(mockRepository.listPaymentsByUser).toHaveBeenCalledWith(123456789);
-      
+
       const replyCall = vi.mocked(mockCtx.reply).mock.calls[0];
       expect(replyCall).toBeDefined();
       const message = replyCall[0] as string;
-      
+
       // Check header
       expect(message).toContain('💰 *Your Payments*');
-      
+
       // Check payments are displayed (sorted by date, newest first)
       expect(message).toContain('$15.00');
       expect(message).toContain('Lunch');
       expect(message).toContain('PAY001');
       expect(message).toContain('Pending');
-      
+
       expect(message).toContain('$5.50');
       expect(message).toContain('Coffee');
       expect(message).toContain('PAY002');
       expect(message).toContain('Received');
-      
+
       // Check status icons
       expect(message).toContain('⏳'); // Pending
       expect(message).toContain('✅'); // Received
-      
+
       // Check footer
       expect(message).toContain('Use the buttons above to manage your payments.');
     });
@@ -286,7 +282,7 @@ describe('PaymentsCommandHandler', () => {
       // Assert
       const replyCall = vi.mocked(mockCtx.reply).mock.calls[0];
       const message = replyCall[0] as string;
-      
+
       // "Newer" should appear before "Older" in the message
       const newerIndex = message.indexOf('Newer');
       const olderIndex = message.indexOf('Older');

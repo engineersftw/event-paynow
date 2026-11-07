@@ -6,7 +6,7 @@
  * @returns integer cents, or null if invalid.
  */
 export function parseAmount(input: string): number | null {
-  if (!input || typeof input !== "string") return null;
+  if (!input || typeof input !== 'string') return null;
 
   const trimmed = input.trim();
   if (!trimmed) return null;
@@ -15,7 +15,7 @@ export function parseAmount(input: string): number | null {
   if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return null;
 
   const num = parseFloat(trimmed);
-  if (!isFinite(num) || num <= 0) return null;
+  if (!Number.isFinite(num) || num <= 0) return null;
 
   // Convert to cents with rounding to avoid floating-point issues
   return Math.round(num * 100);

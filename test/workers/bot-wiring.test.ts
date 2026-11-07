@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
-import type { Env as WorkerEnv } from '../../src/env';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createBot } from '../../src/bot';
 import { D1Repository } from '../../src/db/drizzle-repository';
+import type { Env as WorkerEnv } from '../../src/env';
 import {
   applyTestSchema,
   callbackUpdate,
-  TelegramStub,
   TEST_BOT_INFO,
+  TelegramStub,
   textUpdate,
 } from './harness';
 
@@ -114,15 +114,15 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(listReply.text).toContain('WIRE-002');
     expect(listReply.text).toContain('$12.50');
 
-    const keyboard = listReply.replyMarkup as {
-      inline_keyboard?: Array<Array<{ text: string; callback_data?: string }>>;
-    } | undefined;
+    const keyboard = listReply.replyMarkup as
+      | {
+          inline_keyboard?: Array<Array<{ text: string; callback_data?: string }>>;
+        }
+      | undefined;
     expect(keyboard?.inline_keyboard).toBeDefined();
     const flattened = (keyboard!.inline_keyboard ?? []).flat();
     expect(flattened.some((b) => b.callback_data === 'view:WIRE-002')).toBe(true);
-    expect(
-      flattened.some((b) => b.callback_data === 'mark_received:WIRE-002')
-    ).toBe(true);
+    expect(flattened.some((b) => b.callback_data === 'mark_received:WIRE-002')).toBe(true);
     expect(flattened.some((b) => b.callback_data === 'payback:WIRE-002')).toBe(true);
   });
 

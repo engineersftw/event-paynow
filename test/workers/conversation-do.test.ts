@@ -1,12 +1,16 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { ConversationDO, ConversationSerializer, type ConversationState } from '../../src/worker/conversation-do';
+import { beforeEach, describe, expect, it } from 'vitest';
+import {
+  ConversationDO,
+  ConversationSerializer,
+  type ConversationState,
+} from '../../src/worker/conversation-do';
 
 /**
  * Test Durable Object state implementation.
  */
 class MockDurableObjectState {
   storage: MockStorage;
-  
+
   constructor() {
     this.storage = new MockStorage();
   }
@@ -63,9 +67,9 @@ describe('ConversationDO', () => {
     it('should create initial state when none exists', async () => {
       const request = new Request('http://localhost/state', { method: 'GET' });
       const response = await conversationDO.fetch(request);
-      
+
       expect(response.status).toBe(200);
-      
+
       const state = await response.json();
       expect(state).toMatchObject({
         flow: 'idle',
@@ -95,7 +99,7 @@ describe('ConversationDO', () => {
   describe('state serialization', () => {
     it('should serialize and deserialize state correctly', async () => {
       const serializer = new ConversationSerializer();
-      
+
       const state: ConversationState = {
         flow: 'start',
         step: 2,
@@ -112,7 +116,7 @@ describe('ConversationDO', () => {
 
     it('should handle state with all fields', async () => {
       const serializer = new ConversationSerializer();
-      
+
       const state: ConversationState = {
         flow: 'payback',
         step: 5,
@@ -131,7 +135,7 @@ describe('ConversationDO', () => {
   describe('schema validation', () => {
     it('should reject corrupted state data', async () => {
       const serializer = new ConversationSerializer();
-      
+
       // Manually corrupt the stored state
       const corruptedData = JSON.stringify({
         flow: 'invalid-flow', // Not in enum
@@ -145,7 +149,7 @@ describe('ConversationDO', () => {
 
     it('should reject invalid JSON', async () => {
       const serializer = new ConversationSerializer();
-      
+
       const deserialized = serializer.deserialize('not-valid-json');
       expect(deserialized).toBeNull();
     });
@@ -162,9 +166,9 @@ describe('ConversationDO', () => {
       // Try to get state - should detect corruption and reset
       const request = new Request('http://localhost/state', { method: 'GET' });
       const response = await conversationDO.fetch(request);
-      
+
       expect(response.status).toBe(200);
-      
+
       const state = await response.json();
       expect(state.flow).toBe('idle');
       expect(state.step).toBe(0);
@@ -198,7 +202,7 @@ describe('ConversationDO', () => {
 
       const alarm = await conversationDO.state.storage.getAlarm();
       expect(alarm).not.toBeNull();
-      
+
       // Alarm should be ~10 minutes in the future
       const now = Date.now();
       const tenMinutes = 10 * 60 * 1000;
@@ -248,7 +252,7 @@ describe('ConversationDO', () => {
       await conversationDO.state.storage.triggerAlarm();
       const alarmRequest = new Request('http://localhost/alarm', { method: 'GET' });
       const response = await conversationDO.fetch(alarmRequest);
-      
+
       expect(await response.text()).toBe('State still active');
 
       // State should still exist
@@ -329,9 +333,9 @@ describe('ConversationDO', () => {
       // Reset state
       const request2 = new Request('http://localhost/reset', { method: 'POST' });
       const response = await conversationDO.fetch(request2);
-      
+
       expect(response.status).toBe(200);
-      
+
       const state = await response.json();
       expect(state.flow).toBe('idle');
       expect(state.step).toBe(0);
@@ -352,7 +356,7 @@ describe('ConversationDO', () => {
         { step: 3, context: { update: 'third' } },
       ];
 
-      const promises = updates.map(update => {
+      const promises = updates.map((update) => {
         const request = new Request('http://localhost/state', {
           method: 'POST',
           body: JSON.stringify(update),
@@ -361,9 +365,9 @@ describe('ConversationDO', () => {
       });
 
       const responses = await Promise.all(promises);
-      
+
       // All should succeed
-      responses.forEach(response => {
+      responses.forEach((response) => {
         expect(response.status).toBe(200);
       });
 
@@ -388,7 +392,7 @@ describe('ConversationSerializer', () => {
   describe('initialState', () => {
     it('should create valid initial state', () => {
       const state = serializer.initialState();
-      
+
       expect(state.flow).toBe('idle');
       expect(state.step).toBe(0);
       expect(state.context).toEqual({});
@@ -406,7 +410,7 @@ describe('ConversationSerializer', () => {
       };
 
       const serialized = serializer.serialize(state);
-      
+
       expect(typeof serialized).toBe('string');
       expect(() => JSON.parse(serialized)).not.toThrow();
     });

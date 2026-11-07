@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeEach, beforeAll } from 'vitest';
 import { env } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { D1Repository } from '../../src/db/drizzle-repository';
 
 /**
@@ -52,7 +52,7 @@ beforeAll(async () => {
     `CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)`,
     `CREATE INDEX IF NOT EXISTS idx_paybacks_payment_id ON paybacks(payment_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_paybacks_ref ON paybacks(ref)`
+    `CREATE INDEX IF NOT EXISTS idx_paybacks_ref ON paybacks(ref)`,
   ];
 
   for (const stmt of statements) {
@@ -66,7 +66,7 @@ describe('D1Repository', () => {
 
   // Per-test-unique fixtures (storage is shared across tests in this file)
   let idSeq = 0;
-  const nextUserId = () => 500000000 + (++idSeq);
+  const nextUserId = () => 500000000 + ++idSeq;
   const nextRef = (prefix: string) => `${prefix}-${idSeq}-${++idSeq}`;
 
   let testUser: {
@@ -86,7 +86,8 @@ describe('D1Repository', () => {
       payeeValue: '+6591234567',
       status: 'pending' as const,
       source: 'manual' as const,
-      qrPayload: '00020101021126380009SG.PAYNOW010100211+6591234567030115204000053037025802SG5908Test User6009Singapore63041234',
+      qrPayload:
+        '00020101021126380009SG.PAYNOW010100211+6591234567030115204000053037025802SG5908Test User6009Singapore63041234',
       ...overrides,
     };
   }
@@ -149,8 +150,18 @@ describe('D1Repository', () => {
     });
 
     it('enforces cross-user isolation', async () => {
-      const user1 = { telegramId: nextUserId(), payeeType: 'mobile' as const, payeeValue: '+6591111111', displayName: 'User 1' };
-      const user2 = { telegramId: nextUserId(), payeeType: 'uen' as const, payeeValue: '201111111A', displayName: 'User 2' };
+      const user1 = {
+        telegramId: nextUserId(),
+        payeeType: 'mobile' as const,
+        payeeValue: '+6591111111',
+        displayName: 'User 1',
+      };
+      const user2 = {
+        telegramId: nextUserId(),
+        payeeType: 'uen' as const,
+        payeeValue: '201111111A',
+        displayName: 'User 2',
+      };
 
       await repo.upsertUser({ ...user1, timestamp: testTimestamp });
       await repo.upsertUser({ ...user2, timestamp: testTimestamp });
@@ -203,8 +214,8 @@ describe('D1Repository', () => {
       const payments = await repo.listPaymentsByUser(testUser.telegramId);
 
       expect(payments).toHaveLength(2);
-      expect(payments.map(p => p.ref)).toContain(p1.ref);
-      expect(payments.map(p => p.ref)).toContain(p2.ref);
+      expect(payments.map((p) => p.ref)).toContain(p1.ref);
+      expect(payments.map((p) => p.ref)).toContain(p2.ref);
     });
 
     it('returns empty array for user with no payments', async () => {
@@ -270,8 +281,20 @@ describe('D1Repository', () => {
       const user1 = nextUserId();
       const user2 = nextUserId();
 
-      await repo.upsertUser({ telegramId: user1, payeeType: 'mobile', payeeValue: '+6591111111', displayName: 'User 1', timestamp: testTimestamp });
-      await repo.upsertUser({ telegramId: user2, payeeType: 'uen', payeeValue: '201111111A', displayName: 'User 2', timestamp: testTimestamp });
+      await repo.upsertUser({
+        telegramId: user1,
+        payeeType: 'mobile',
+        payeeValue: '+6591111111',
+        displayName: 'User 1',
+        timestamp: testTimestamp,
+      });
+      await repo.upsertUser({
+        telegramId: user2,
+        payeeType: 'uen',
+        payeeValue: '201111111A',
+        displayName: 'User 2',
+        timestamp: testTimestamp,
+      });
 
       const p1 = makePayment({ userId: user1, ref: nextRef('user1-payment') });
       const p2 = makePayment({ userId: user2, ref: nextRef('user2-payment') });
@@ -313,7 +336,8 @@ describe('D1Repository', () => {
         payerValue: '+6598765432',
         amountCents: 500,
         status: 'pending',
-        qrPayload: '00020101021126380009SG.PAYNOW010100211+6598765432030115204000053037025802SG5904Payer6009Singapore63045678',
+        qrPayload:
+          '00020101021126380009SG.PAYNOW010100211+6598765432030115204000053037025802SG5904Payer6009Singapore63045678',
         timestamp: testTimestamp,
       });
 
@@ -351,8 +375,8 @@ describe('D1Repository', () => {
       const paybacks = await repo.listPaybacksByPayment(paymentId);
 
       expect(paybacks).toHaveLength(2);
-      expect(paybacks.map(p => p.ref)).toContain(r1);
-      expect(paybacks.map(p => p.ref)).toContain(r2);
+      expect(paybacks.map((p) => p.ref)).toContain(r1);
+      expect(paybacks.map((p) => p.ref)).toContain(r2);
     });
 
     it('returns empty array for payment with no paybacks', async () => {
@@ -502,7 +526,11 @@ describe('D1Repository', () => {
     });
 
     it('returns null when updating an unknown payback ref', async () => {
-      const updated = await repo.updatePaybackStatus('pb-nonexistent', 'sent', '2024-01-02T10:00:00Z');
+      const updated = await repo.updatePaybackStatus(
+        'pb-nonexistent',
+        'sent',
+        '2024-01-02T10:00:00Z'
+      );
       expect(updated).toBeNull();
     });
 

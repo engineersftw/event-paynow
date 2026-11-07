@@ -1,11 +1,11 @@
 import type { Context } from 'grammy';
 import { InputFile } from 'grammy';
-import { ConversationDO, type ConversationState } from '../worker/conversation-do.js';
 import { generateRef } from '../db/proxy-validation.js';
-import { parseAmount, formatCents } from '../sgqr/amount.js';
+import type { Payment, Repository, User } from '../db/repository.js';
+import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
-import type { Repository, User, Payment } from '../db/repository.js';
+import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 
 /**
  * /start command handler - creates a payment request with a PayNow QR code
@@ -58,7 +58,7 @@ export class StartCommandHandler {
       if (!user) {
         await ctx.reply(
           '❓ You haven\u2019t set up your PayNow reference yet.\n\n' +
-          'Please run /init first to configure your mobile number or UEN, then come back to /start.'
+            'Please run /init first to configure your mobile number or UEN, then come back to /start.'
         );
         return;
       }
@@ -72,13 +72,13 @@ export class StartCommandHandler {
           payeeValue: user.payeeValue,
           displayName: user.displayName,
         },
-        lastActivity: new Date().toISOString()
+        lastActivity: new Date().toISOString(),
       });
 
       await ctx.reply(
         '🧾 New payment request.\n\n' +
-        `Payee: ${user.displayName} (${user.payeeValue})\n\n` +
-        'Enter a short description for this payment:'
+          `Payee: ${user.displayName} (${user.payeeValue})\n\n` +
+          'Enter a short description for this payment:'
       );
     } catch (error) {
       console.error('Failed to start payment flow:', error);
@@ -93,7 +93,7 @@ export class StartCommandHandler {
   async handleInput(ctx: Context): Promise<boolean> {
     const state = await this.getState();
 
-    if (!state || state.flow !== 'start') {
+    if (state?.flow !== 'start') {
       return false; // Not in start flow (also covers alarm expiry clearing state)
     }
 
@@ -137,7 +137,11 @@ export class StartCommandHandler {
   /**
    * Step 1: Collect the payment description.
    */
-  private async handleDescriptionInput(ctx: Context, text: string, state: ConversationState): Promise<void> {
+  private async handleDescriptionInput(
+    ctx: Context,
+    text: string,
+    state: ConversationState
+  ): Promise<void> {
     if (!text.trim()) {
       await ctx.reply('❌ Description cannot be empty. Please enter a short description:');
       return;
@@ -147,19 +151,23 @@ export class StartCommandHandler {
       flow: 'start',
       step: 2, // waiting for amount
       context: { ...state.context, description: text },
-      lastActivity: new Date().toISOString()
+      lastActivity: new Date().toISOString(),
     });
 
     await ctx.reply(
       '💵 Enter the amount in dollars (e.g. 12.50).\n\n' +
-      'Up to 2 decimals; the QR will be locked to this amount.'
+        'Up to 2 decimals; the QR will be locked to this amount.'
     );
   }
 
   /**
    * Step 2: Validate amount, then create the payment record and send the QR (5.3).
    */
-  private async handleAmountInput(ctx: Context, text: string, state: ConversationState): Promise<void> {
+  private async handleAmountInput(
+    ctx: Context,
+    text: string,
+    state: ConversationState
+  ): Promise<void> {
     const amountCents = parseAmount(text);
     if (amountCents === null) {
       await ctx.reply(
@@ -174,7 +182,11 @@ export class StartCommandHandler {
   /**
    * Task 5.3: create payment row → build payload → render QR → sendPhoto.
    */
-  private async createPaymentAndSendQr(ctx: Context, state: ConversationState, amountCents: number): Promise<void> {
+  private async createPaymentAndSendQr(
+    ctx: Context,
+    state: ConversationState,
+    amountCents: number
+  ): Promise<void> {
     const payeeType = state.context.payeeType as User['payeeType'];
     const payeeValue = state.context.payeeValue as string;
     const displayName = state.context.displayName as string;
@@ -211,17 +223,14 @@ export class StartCommandHandler {
       const bmpBytes = await renderQrPng(qrPayload);
       const caption = this.buildCaption(payment);
 
-      await ctx.replyWithPhoto(
-        new InputFile(bmpBytes, 'paynow-qr.bmp'),
-        { caption }
-      );
+      await ctx.replyWithPhoto(new InputFile(bmpBytes, 'paynow-qr.bmp'), { caption });
 
       await this.resetState();
 
       await ctx.reply(
         `🧾 Payment \`${ref}\` is pending.\n\n` +
-        'Scan the QR to pay, or forward the message to the payer.\n' +
-        'Use /payments to track it.',
+          'Scan the QR to pay, or forward the message to the payer.\n' +
+          'Use /payments to track it.',
         { parse_mode: 'Markdown' }
       );
     } catch (error) {
@@ -235,9 +244,10 @@ export class StartCommandHandler {
    * Caption per task 5.3: description / SGD amount / ref / share hint.
    */
   private buildCaption(payment: Payment): string {
-    const description = payment.description.length > 100
-      ? `${payment.description.slice(0, 99)}…`
-      : payment.description;
+    const description =
+      payment.description.length > 100
+        ? `${payment.description.slice(0, 99)}…`
+        : payment.description;
     return `${description} / SGD ${formatCents(payment.amountCents)} / ${payment.ref} / ${SHARE_HINT}`;
   }
 
@@ -245,19 +255,23 @@ export class StartCommandHandler {
    * Get conversation state from DO
    */
   private async getState(): Promise<ConversationState | null> {
-    const response = await this.conversationDO.fetch(new Request('http://localhost/state', { method: 'GET' }));
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/state', { method: 'GET' })
+    );
     if (response.status !== 200) return null;
-    return await response.json() as ConversationState;
+    return (await response.json()) as ConversationState;
   }
 
   /**
    * Set conversation state in DO
    */
   private async setState(state: ConversationState): Promise<void> {
-    const response = await this.conversationDO.fetch(new Request('http://localhost/state', {
-      method: 'POST',
-      body: JSON.stringify(state)
-    }));
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/state', {
+        method: 'POST',
+        body: JSON.stringify(state),
+      })
+    );
     // Drain the response so cross-isolate streams don't pin DO storage
     // (required for vitest-pool-workers storage isolation and good hygiene
     // for real DO stub calls).
@@ -272,7 +286,7 @@ export class StartCommandHandler {
       flow: 'idle',
       step: 0,
       context: {},
-      lastActivity: new Date().toISOString()
+      lastActivity: new Date().toISOString(),
     });
   }
 }

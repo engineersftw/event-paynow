@@ -1,10 +1,10 @@
-import { describe, it, expect } from "vitest";
-import { renderQrPng } from "../../src/sgqr/qr-render";
+import { describe, expect, it } from 'vitest';
+import { renderQrPng } from '../../src/sgqr/qr-render';
 
-describe("renderQrPng — Workers runtime", () => {
-  it("renders a QR BMP inside the isolate (CPU time well within limits)", async () => {
+describe('renderQrPng — Workers runtime', () => {
+  it('renders a QR BMP inside the isolate (CPU time well within limits)', async () => {
     const payload =
-      "00020101021226490009SG.PAYNOW010100211+6591234567030100507INV-001520400005303702540512.505802SG5912ACME PTE LTD6009Singapore62160112Dinner split63041AAF";
+      '00020101021226490009SG.PAYNOW010100211+6591234567030100507INV-001520400005303702540512.505802SG5912ACME PTE LTD6009Singapore62160112Dinner split63041AAF';
 
     const start = Date.now();
     const bmpBytes = await renderQrPng(payload);

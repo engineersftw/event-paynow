@@ -1,18 +1,12 @@
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { Bot } from 'grammy';
 import jsQR from 'jsqr';
-import { D1Repository } from '../../src/db/drizzle-repository';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { StartCommandHandler } from '../../src/commands/start-handler';
-import type { ConversationDO } from '../../src/worker/conversation-do';
+import { D1Repository } from '../../src/db/drizzle-repository';
 import type { User } from '../../src/db/repository';
-import {
-  applyTestSchema,
-  bmpToRgba,
-  TelegramStub,
-  TEST_BOT_INFO,
-  textUpdate,
-} from './harness';
+import type { ConversationDO } from '../../src/worker/conversation-do';
+import { applyTestSchema, bmpToRgba, TEST_BOT_INFO, TelegramStub, textUpdate } from './harness';
 
 /**
  * Task 5.3 stage (a): end-to-end /start flow inside the Workers runtime with
@@ -128,17 +122,17 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     const payload = decoded!.data;
 
     // Fixed-amount QR with the payee proxy, ref, and amount embedded
-    expect(payload).toContain('000201010212');       // PFI + dynamic initiation
+    expect(payload).toContain('000201010212'); // PFI + dynamic initiation
     expect(payload).toContain('SG.PAYNOW');
-    expect(payload).toContain('+6591234567');        // payee proxy
-    expect(payload).toContain('03010');              // 26.03=0 amount not editable
-    expect(payload).toContain('540512.50');          // tag 54 amount
-    expect(payload).toContain(ref);                  // 26.05 embedded reference
+    expect(payload).toContain('+6591234567'); // payee proxy
+    expect(payload).toContain('03010'); // 26.03=0 amount not editable
+    expect(payload).toContain('540512.50'); // tag 54 amount
+    expect(payload).toContain(ref); // 26.05 embedded reference
 
     // --- the persisted payment row matches the delivered QR ---------------
     const payment = await repo.getPaymentByRef(ref);
     expect(payment).not.toBeNull();
-    expect(payment!.qrPayload).toBe(payload);       // uploaded QR == stored payload
+    expect(payment!.qrPayload).toBe(payload); // uploaded QR == stored payload
     expect(payment!.status).toBe('pending');
     expect(payment!.source).toBe('manual');
     expect(payment!.amountCents).toBe(1250);

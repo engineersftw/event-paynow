@@ -1,5 +1,5 @@
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { D1Repository } from '../../src/db/drizzle-repository';
 
 /**
@@ -59,7 +59,7 @@ beforeAll(async () => {
     `CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`,
     `CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)`,
     `CREATE INDEX IF NOT EXISTS idx_paybacks_payment_id ON paybacks(payment_id)`,
-    `CREATE INDEX IF NOT EXISTS idx_paybacks_ref ON paybacks(ref)`
+    `CREATE INDEX IF NOT EXISTS idx_paybacks_ref ON paybacks(ref)`,
   ];
 
   for (const stmt of statements) {
@@ -149,7 +149,7 @@ describe('createPaybackBounded (task 7.2)', () => {
     expect(await repo.sumPaybacks(paymentId)).toBe(800);
     const paybacks = await repo.listPaybacksByPayment(paymentId);
     expect(paybacks).toHaveLength(2);
-    expect(paybacks.map(p => p.amountCents).sort()).toEqual([300, 500]);
+    expect(paybacks.map((p) => p.amountCents).sort()).toEqual([300, 500]);
   });
 
   // ----------------------------------------------------------------------------
@@ -245,7 +245,11 @@ describe('createPaybackBounded (task 7.2)', () => {
     if (!first.ok) return;
 
     // …then mark it sent (delivery completed)
-    const updated = await repo.updatePaybackStatus(first.payback.ref, 'sent', '2024-01-02T00:00:00Z');
+    const updated = await repo.updatePaybackStatus(
+      first.payback.ref,
+      'sent',
+      '2024-01-02T00:00:00Z'
+    );
     expect(updated).not.toBeNull();
     expect(updated!.status).toBe('sent');
 
@@ -291,8 +295,8 @@ describe('createPaybackBounded (task 7.2)', () => {
       repoB.createPaybackBounded(paybackInput(paymentId, 800)),
     ]);
 
-    const accepted = [a, b].filter(r => r.ok);
-    const rejected = [a, b].filter(r => !r.ok);
+    const accepted = [a, b].filter((r) => r.ok);
+    const rejected = [a, b].filter((r) => !r.ok);
 
     expect(accepted).toHaveLength(1);
     expect(rejected).toHaveLength(1);

@@ -1,5 +1,6 @@
-import { ConversationDO } from "./worker/conversation-do";
+import { ConversationDO } from './worker/conversation-do';
 
+export { default } from './worker';
 /**
  * Worker entry + Durable Object exports.
  *
@@ -9,5 +10,3 @@ import { ConversationDO } from "./worker/conversation-do";
  * registered name so the deployed binding serves real conversation state.
  */
 export { ConversationDO as ChatSessionDO };
-
-export { default } from "./worker";

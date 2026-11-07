@@ -7,6 +7,7 @@ This file describes the project structure, conventions, and development workflow
 **event-paynow** — A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for collecting payments, tracks receipts, and supports paybacks.
 
 **Stack:**
+
 - TypeScript on Cloudflare Workers (webhook transport)
 - grammY (Telegram Bot framework)
 - D1 (serverless SQLite) for persistence
@@ -31,6 +32,10 @@ See `docs/architecture.md` for full details. Key components:
 
 ```bash
 npm run build          # TypeScript type-check (tsc --noEmit)
+npm run lint           # Biome lint (no writes)
+npm run format         # Biome format --write
+npm run check          # Biome lint + format + import-organize verification
+npm run check:fix      # Biome check --write (safe autofixes; add --unsafe manually if needed)
 npm test               # Run all vitest tests (both pools)
 npx vitest run --project node      # Node-pool tests only
 npx vitest run --project workers   # Workers-pool tests only
@@ -53,11 +58,13 @@ See `docs/testing.md` for update-fixture replay and live dev bot setup.
 This project uses OpenSpec for change management. The current active change is `add-paynow-qr-telegram-bot`.
 
 **Workflow commands:**
+
 - `/opsx-propose` — Create a new change with all planning artifacts
 - `/opsx-apply` — Implement tasks from a change
 - `/opsx-archive` — Archive a completed change
 
 **Artifacts location:** `openspec/changes/add-paynow-qr-telegram-bot/`
+
 - `proposal.md` — What and why
 - `specs/<capability>/spec.md` — Behavioral specifications
 - `design.md` — Technical design decisions
@@ -73,6 +80,10 @@ This project uses OpenSpec for change management. The current active change is `
 
 ## Conventions
 
+- **Biome for lint + format** — single quotes, 2-space indent, 100-col line width,
+  semicolons, es5 trailing commas; `style/noNonNullAssertion` off (the `ctx.chat!` /
+  `calls[0]!` pattern is deliberate under strict + `noUncheckedIndexedAccess`);
+  `noExplicitAny` off in `test/**` (mock casts). Run `npm run check` before committing.
 - **Strict TypeScript** — `strict: true`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
 - **ESM modules** — `"type": "module"` in package.json
 - **Integer cents for amounts** — Never floats. `parseAmount` / `formatCents` in `src/sgqr/amount.ts`.
@@ -83,6 +94,7 @@ This project uses OpenSpec for change management. The current active change is `
 ## Blocked Tasks
 
 Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
+
 - `wrangler login` or `CLOUDFLARE_API_TOKEN` env var
 - BotFather command registration via Telegram
 
@@ -139,6 +151,7 @@ real D1 + real CHAT_SESSION DO. Non-obvious requirements discovered (keep in min
 ## Payback Bounds (tasks 7.2 + 7.4)
 
 `D1Repository.createPaybackBounded()` runs a single `d1.batch([...])` transaction:
+
 1. Guarded insert — `INSERT INTO paybacks ... SELECT ... WHERE (SUM paybacks) + amount <= payment.amount`
    (materializes only if the in-transaction re-check holds; fail-closed for missing payments)
 2. Totals read — payment amount + paid-back sum inside the same transaction
@@ -158,16 +171,19 @@ sent-still-counts regression).
 The repository layer provides infra-neutral interfaces for database operations:
 
 **Key files:**
+
 - `src/db/types.ts` — Plain TypeScript types (User, Payment, Payback, etc.)
 - `src/db/repository.ts` — Repository interface definition
 - `src/db/drizzle-repository.ts` — D1Repository implementation using Drizzle ORM
 
 **Operations:**
+
 - Users: upsertUser, getUser
 - Payments: createPayment, getPaymentByRef, listPaymentsByUser, updatePaymentStatus
 - Paybacks: createPayback, createPaybackBounded (transactional bound enforcement), getPaybackByRef, updatePaybackStatus (guarded pending→sent CAS, task 7.4), listPaybacksByPayment, sumPaybacks (all statuses — the bounded quantity)
 
 **Testing:**
+
 - 27 tests in `test/workers/repository.test.ts` cover all operations (incl. payback transitions + duplicate-tap race)
 - 11 tests in `test/workers/payback-bounds.test.ts` cover bounded payback creation incl. concurrency
 - Tests verify cross-user isolation, read-back-after-write consistency, and status transitions
@@ -176,11 +192,14 @@ The repository layer provides infra-neutral interfaces for database operations:
 ## Command Handlers
 
 ### /init Command
+
 **Key files:**
+
 - `src/commands/init-handler.ts` — /init command implementation
 - `test/node/init-handler.test.ts` — 13 tests covering all flows
 
 **Flow:**
+
 1. User sends /init
 2. Bot prompts for mobile number or UEN
 3. Validates input (mobile → +65XXXXXXXX, UEN format check)
@@ -190,6 +209,7 @@ The repository layer provides infra-neutral interfaces for database operations:
 7. On conversation expiry (alarm), state resets but existing user data remains intact
 
 **Testing:**
+
 - Mobile number validation and normalization
 - UEN validation
 - Invalid input rejection with re-prompt

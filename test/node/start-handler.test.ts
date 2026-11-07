@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { InputFile } from 'grammy';
-import { StartCommandHandler } from '../../src/commands/start-handler.js';
 import type { Context } from 'grammy';
-import type { ConversationDO } from '../../src/worker/conversation-do.js';
-import type { Repository, User, Payment } from '../../src/db/repository.js';
+import { InputFile } from 'grammy';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { StartCommandHandler } from '../../src/commands/start-handler.js';
+import type { Repository, User } from '../../src/db/repository.js';
 import { buildPayNowPayload } from '../../src/sgqr/paynow.js';
+import type { ConversationDO } from '../../src/worker/conversation-do.js';
 
 describe('StartCommandHandler', () => {
   let handler: StartCommandHandler;
@@ -61,7 +61,12 @@ describe('StartCommandHandler', () => {
   beforeEach(() => {
     mockConversationDO = {
       fetch: vi.fn().mockResolvedValue(
-        stateResponse({ flow: 'idle', step: 0, context: {}, lastActivity: new Date().toISOString() })
+        stateResponse({
+          flow: 'idle',
+          step: 0,
+          context: {},
+          lastActivity: new Date().toISOString(),
+        })
       ),
     } as unknown as ConversationDO;
 
@@ -160,8 +165,9 @@ describe('StartCommandHandler', () => {
     it('re-prompts on non-numeric input and creates nothing', async () => {
       const ctx = { ...mockCtx, message: { text: 'abc' } } as unknown as Context;
 
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(startState(2, { description: 'Dinner split' })));
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+        stateResponse(startState(2, { description: 'Dinner split' }))
+      );
 
       const consumed = await handler.handleInput(ctx);
 
@@ -175,8 +181,9 @@ describe('StartCommandHandler', () => {
     it('re-prompts on amounts with more than 2 decimals (12.505)', async () => {
       const ctx = { ...mockCtx, message: { text: '12.505' } } as unknown as Context;
 
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(startState(2, { description: 'Dinner split' })));
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+        stateResponse(startState(2, { description: 'Dinner split' }))
+      );
 
       await handler.handleInput(ctx);
 
@@ -190,8 +197,9 @@ describe('StartCommandHandler', () => {
         vi.mocked(mockRepository.createPayment).mockClear();
         const ctx = { ...mockCtx, message: { text: bad } } as unknown as Context;
 
-        vi.mocked(mockConversationDO.fetch)
-          .mockResolvedValueOnce(stateResponse(startState(2, { description: 'Dinner split' })));
+        vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+          stateResponse(startState(2, { description: 'Dinner split' }))
+        );
 
         await handler.handleInput(ctx);
 
@@ -243,7 +251,9 @@ describe('StartCommandHandler', () => {
       const [photo, photoOpts] = vi.mocked(mockCtx.replyWithPhoto).mock.calls[0]!;
       expect(photo).toBeInstanceOf(InputFile);
       const caption = String((photoOpts as { caption?: string }).caption);
-      expect(caption).toBe(`Dinner split / SGD 12.50 / ${input.ref} / Forward this message to share`);
+      expect(caption).toBe(
+        `Dinner split / SGD 12.50 / ${input.ref} / Forward this message to share`
+      );
 
       // Conversation reset to idle afterwards
       const states = await postedStates();
@@ -257,8 +267,9 @@ describe('StartCommandHandler', () => {
       const ctx = { ...mockCtx, message: { text: '12.50' } } as unknown as Context;
       vi.mocked(mockRepository.createPayment).mockRejectedValue(new Error('DB write failed'));
 
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(startState(2, { description: 'Dinner split' })));
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+        stateResponse(startState(2, { description: 'Dinner split' }))
+      );
 
       const consumed = await handler.handleInput(ctx);
 
@@ -325,7 +336,12 @@ describe('StartCommandHandler', () => {
 
       // After the 10-min DO alarm, state is back to idle
       vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
-        stateResponse({ flow: 'idle', step: 0, context: {}, lastActivity: new Date().toISOString() })
+        stateResponse({
+          flow: 'idle',
+          step: 0,
+          context: {},
+          lastActivity: new Date().toISOString(),
+        })
       );
 
       const consumed = await handler.handleInput(ctx);
@@ -339,7 +355,12 @@ describe('StartCommandHandler', () => {
       const ctx = { ...mockCtx, message: { text: 'hello' } } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
-        stateResponse({ flow: 'payback', step: 1, context: {}, lastActivity: new Date().toISOString() })
+        stateResponse({
+          flow: 'payback',
+          step: 1,
+          context: {},
+          lastActivity: new Date().toISOString(),
+        })
       );
 
       const consumed = await handler.handleInput(ctx);

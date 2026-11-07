@@ -1,4 +1,4 @@
-import QRCode from "qrcode";
+import QRCode from 'qrcode';
 
 /**
  * Render a payload string as a QR code PNG (Buffer) using Node-mode qrcode.
@@ -6,8 +6,8 @@ import QRCode from "qrcode";
  */
 export async function renderQrPngBuffer(payload: string): Promise<Buffer> {
   return await QRCode.toBuffer(payload, {
-    type: "png",
-    errorCorrectionLevel: "M",
+    type: 'png',
+    errorCorrectionLevel: 'M',
     scale: 10,
     margin: 2,
   });

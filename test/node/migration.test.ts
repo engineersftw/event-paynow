@@ -1,20 +1,20 @@
-import { describe, it, expect } from "vitest";
-import Database from "better-sqlite3";
-import { readFileSync } from "fs";
-import { join } from "path";
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
+import Database from 'better-sqlite3';
+import { describe, expect, it } from 'vitest';
 
-describe("Migration 0000_initial_schema.sql", () => {
-  it("creates all tables with correct schema", () => {
-    const db = new Database(":memory:");
-    
+describe('Migration 0000_initial_schema.sql', () => {
+  it('creates all tables with correct schema', () => {
+    const db = new Database(':memory:');
+
     // Read and execute the migration
     const migration = readFileSync(
-      join(__dirname, "../../drizzle/0000_initial_schema.sql"),
-      "utf-8"
+      join(__dirname, '../../drizzle/0000_initial_schema.sql'),
+      'utf-8'
     );
-    
+
     // Split by statement-breakpoint and execute each statement
-    const statements = migration.split("--> statement-breakpoint");
+    const statements = migration.split('--> statement-breakpoint');
     for (const stmt of statements) {
       const trimmed = stmt.trim();
       if (trimmed) {
@@ -23,38 +23,38 @@ describe("Migration 0000_initial_schema.sql", () => {
     }
 
     // Verify users table
-    const usersInfo = db.prepare("PRAGMA table_info(users)").all();
+    const usersInfo = db.prepare('PRAGMA table_info(users)').all();
     expect(usersInfo).toHaveLength(6);
-    expect(usersInfo.map((c: any) => c.name)).toContain("telegram_id");
-    expect(usersInfo.map((c: any) => c.name)).toContain("payee_type");
-    expect(usersInfo.map((c: any) => c.name)).toContain("payee_value");
+    expect(usersInfo.map((c: any) => c.name)).toContain('telegram_id');
+    expect(usersInfo.map((c: any) => c.name)).toContain('payee_type');
+    expect(usersInfo.map((c: any) => c.name)).toContain('payee_value');
 
     // Verify payments table
-    const paymentsInfo = db.prepare("PRAGMA table_info(payments)").all();
+    const paymentsInfo = db.prepare('PRAGMA table_info(payments)').all();
     expect(paymentsInfo).toHaveLength(12);
-    expect(paymentsInfo.map((c: any) => c.name)).toContain("ref");
-    expect(paymentsInfo.map((c: any) => c.name)).toContain("amount_cents");
-    expect(paymentsInfo.map((c: any) => c.name)).toContain("status");
-    expect(paymentsInfo.map((c: any) => c.name)).toContain("source");
+    expect(paymentsInfo.map((c: any) => c.name)).toContain('ref');
+    expect(paymentsInfo.map((c: any) => c.name)).toContain('amount_cents');
+    expect(paymentsInfo.map((c: any) => c.name)).toContain('status');
+    expect(paymentsInfo.map((c: any) => c.name)).toContain('source');
 
     // Verify paybacks table
-    const paybacksInfo = db.prepare("PRAGMA table_info(paybacks)").all();
+    const paybacksInfo = db.prepare('PRAGMA table_info(paybacks)').all();
     expect(paybacksInfo).toHaveLength(10);
-    expect(paybacksInfo.map((c: any) => c.name)).toContain("ref");
-    expect(paybacksInfo.map((c: any) => c.name)).toContain("payment_id");
-    expect(paybacksInfo.map((c: any) => c.name)).toContain("payer_type");
+    expect(paybacksInfo.map((c: any) => c.name)).toContain('ref');
+    expect(paybacksInfo.map((c: any) => c.name)).toContain('payment_id');
+    expect(paybacksInfo.map((c: any) => c.name)).toContain('payer_type');
 
     db.close();
   });
 
-  it("enforces CHECK constraints on payments.status", () => {
-    const db = new Database(":memory:");
+  it('enforces CHECK constraints on payments.status', () => {
+    const db = new Database(':memory:');
     const migration = readFileSync(
-      join(__dirname, "../../drizzle/0000_initial_schema.sql"),
-      "utf-8"
+      join(__dirname, '../../drizzle/0000_initial_schema.sql'),
+      'utf-8'
     );
-    
-    const statements = migration.split("--> statement-breakpoint");
+
+    const statements = migration.split('--> statement-breakpoint');
     for (const stmt of statements) {
       const trimmed = stmt.trim();
       if (trimmed) {
@@ -79,14 +79,14 @@ describe("Migration 0000_initial_schema.sql", () => {
     db.close();
   });
 
-  it("enforces CHECK constraints on paybacks.status", () => {
-    const db = new Database(":memory:");
+  it('enforces CHECK constraints on paybacks.status', () => {
+    const db = new Database(':memory:');
     const migration = readFileSync(
-      join(__dirname, "../../drizzle/0000_initial_schema.sql"),
-      "utf-8"
+      join(__dirname, '../../drizzle/0000_initial_schema.sql'),
+      'utf-8'
     );
-    
-    const statements = migration.split("--> statement-breakpoint");
+
+    const statements = migration.split('--> statement-breakpoint');
     for (const stmt of statements) {
       const trimmed = stmt.trim();
       if (trimmed) {
@@ -117,15 +117,15 @@ describe("Migration 0000_initial_schema.sql", () => {
     db.close();
   });
 
-  it("is idempotent (can be applied twice)", () => {
-    const db = new Database(":memory:");
+  it('is idempotent (can be applied twice)', () => {
+    const db = new Database(':memory:');
     const migration = readFileSync(
-      join(__dirname, "../../drizzle/0000_initial_schema.sql"),
-      "utf-8"
+      join(__dirname, '../../drizzle/0000_initial_schema.sql'),
+      'utf-8'
     );
-    
-    const statements = migration.split("--> statement-breakpoint");
-    
+
+    const statements = migration.split('--> statement-breakpoint');
+
     // Apply once
     for (const stmt of statements) {
       const trimmed = stmt.trim();

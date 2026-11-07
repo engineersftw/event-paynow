@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { CallbackQuery, Context } from 'grammy';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { PaymentCallbackHandler } from '../../src/commands/payment-callback-handler.js';
-import type { Context, CallbackQuery } from 'grammy';
+import type { Payment, Repository } from '../../src/db/repository.js';
 import type { ConversationDO } from '../../src/worker/conversation-do.js';
-import type { Repository, Payment } from '../../src/db/repository.js';
 
 describe('PaymentCallbackHandler', () => {
   let handler: PaymentCallbackHandler;
@@ -218,14 +218,13 @@ describe('PaymentCallbackHandler', () => {
       const body = await fetchCall.text();
       expect(body).toContain('payback');
       expect(body).toContain('PAY123');
-      
+
       expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
         text: '🔄 Starting payback flow...',
       });
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('PAY123'),
-        { parse_mode: 'Markdown' }
-      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('PAY123'), {
+        parse_mode: 'Markdown',
+      });
     });
 
     it('should reject payback if user does not own the payment', async () => {
@@ -298,7 +297,7 @@ describe('PaymentCallbackHandler', () => {
         reply_markup: { inline_keyboard: unknown[][] };
       };
       expect(opts.reply_markup.inline_keyboard.flat()).toHaveLength(0);
-      
+
       const message = vi.mocked(mockCtx.editMessageText).mock.calls[0][0] as string;
       expect(message).toContain('PAY123');
       expect(message).toContain('$10.00');
@@ -447,7 +446,11 @@ describe('PaymentCallbackHandler', () => {
 
     it('transitions the payback to sent with a timestamp and re-renders details', async () => {
       setupPaybackView();
-      const sentRow = { ...pendingPayback, status: 'sent' as const, sentAt: '2024-01-16T09:00:00Z' };
+      const sentRow = {
+        ...pendingPayback,
+        status: 'sent' as const,
+        sentAt: '2024-01-16T09:00:00Z',
+      };
       vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue(sentRow);
       vi.mocked(mockRepository.listPaybacksByPayment).mockResolvedValue([sentRow]);
 
@@ -523,7 +526,11 @@ describe('PaymentCallbackHandler', () => {
       vi.mocked(mockRepository.getPaybackByRef)
         .mockResolvedValueOnce(pendingPayback)
         // …but the CAS update loses; re-read shows another tap won
-        .mockResolvedValueOnce({ ...pendingPayback, status: 'sent', sentAt: '2024-01-16T09:00:00Z' });
+        .mockResolvedValueOnce({
+          ...pendingPayback,
+          status: 'sent',
+          sentAt: '2024-01-16T09:00:00Z',
+        });
       vi.mocked(mockRepository.updatePaybackStatus).mockResolvedValue(null);
 
       await handler.handleCallback(mockCtx);

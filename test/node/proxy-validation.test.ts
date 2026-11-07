@@ -1,9 +1,9 @@
-import { describe, it, expect } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
-  normalizeMobile,
-  isValidUEN,
   detectProxyType,
   generateRef,
+  isValidUEN,
+  normalizeMobile,
 } from '../../src/db/proxy-validation';
 
 describe('Proxy Validation', () => {

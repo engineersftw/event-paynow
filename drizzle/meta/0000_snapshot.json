@@ -81,9 +81,7 @@
       "indexes": {
         "paybacks_ref_unique": {
           "name": "paybacks_ref_unique",
-          "columns": [
-            "ref"
-          ],
+          "columns": ["ref"],
           "isUnique": true
         }
       },
@@ -183,9 +181,7 @@
       "indexes": {
         "payments_ref_unique": {
           "name": "payments_ref_unique",
-          "columns": [
-            "ref"
-          ],
+          "columns": ["ref"],
           "isUnique": true
         }
       },

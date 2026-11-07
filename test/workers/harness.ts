@@ -1,5 +1,5 @@
-import type { Update } from 'grammy/types';
 import type { D1Database } from '@cloudflare/workers-types';
+import type { Update } from 'grammy/types';
 
 /**
  * Shared Workers-pool e2e harness for bot-level tests.
@@ -227,7 +227,8 @@ export class TelegramStub {
         replyMarkup: body.reply_markup,
         parseMode: body.parse_mode,
       });
-      return this.ok(this.message((this.messageId += 1), String(body.chat_id)));
+      this.messageId += 1;
+      return this.ok(this.message(this.messageId, String(body.chat_id)));
     }
 
     if (method === 'sendPhoto') {
@@ -261,7 +262,8 @@ export class TelegramStub {
         filename: photoName,
         bytes: photoBytes,
       });
-      return this.ok(this.message((this.messageId += 1), chatId));
+      this.messageId += 1;
+      return this.ok(this.message(this.messageId, chatId));
     }
 
     if (method === 'editMessageText') {
@@ -275,7 +277,8 @@ export class TelegramStub {
         text: body.text,
         replyMarkup: body.reply_markup,
       });
-      return this.ok(this.message((this.messageId += 1), String(body.chat_id)));
+      this.messageId += 1;
+      return this.ok(this.message(this.messageId, String(body.chat_id)));
     }
 
     if (method === 'answerCallbackQuery') {
@@ -351,9 +354,11 @@ export function callbackUpdate(
 // BMP → RGBA so jsQR can decode the isolate-rendered QR
 // ---------------------------------------------------------------------------
 
-export function bmpToRgba(
-  bytes: Uint8Array
-): { data: Uint8ClampedArray; width: number; height: number } {
+export function bmpToRgba(bytes: Uint8Array): {
+  data: Uint8ClampedArray;
+  width: number;
+  height: number;
+} {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   if (view.getUint8(0) !== 0x42 || view.getUint8(1) !== 0x4d) {
     throw new Error('not a BMP');
@@ -373,10 +378,10 @@ export function bmpToRgba(
     for (let x = 0; x < width; x++) {
       const i = srcRow + x * 3;
       const j = (y * width + x) * 4;
-      data[j] = bytes[i + 2] ?? 0;     // R
+      data[j] = bytes[i + 2] ?? 0; // R
       data[j + 1] = bytes[i + 1] ?? 0; // G
-      data[j + 2] = bytes[i] ?? 0;     // B
-      data[j + 3] = 255;               // A
+      data[j + 2] = bytes[i] ?? 0; // B
+      data[j + 3] = 255; // A
     }
   }
   return { data, width, height };

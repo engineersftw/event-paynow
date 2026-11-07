@@ -1,17 +1,11 @@
-import { describe, it, expect, beforeAll, beforeEach } from 'vitest';
 import { env } from 'cloudflare:test';
 import { Bot } from 'grammy';
 import jsQR from 'jsqr';
-import { D1Repository } from '../../src/db/drizzle-repository';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { PaybackCommandHandler } from '../../src/commands/payback-handler';
+import { D1Repository } from '../../src/db/drizzle-repository';
 import type { ConversationDO } from '../../src/worker/conversation-do';
-import {
-  applyTestSchema,
-  bmpToRgba,
-  TelegramStub,
-  TEST_BOT_INFO,
-  textUpdate,
-} from './harness';
+import { applyTestSchema, bmpToRgba, TEST_BOT_INFO, TelegramStub, textUpdate } from './harness';
 
 /**
  * Task 7.3: payback QR generation end-to-end in the Workers runtime.
@@ -133,11 +127,11 @@ describe('payback QR end-to-end (task 7.3)', () => {
 
     // Payer proxy is the payee of this QR; fixed amount; payback ref embedded
     expect(payload).toContain('SG.PAYNOW');
-    expect(payload).toContain('+6598765432');   // payer becomes payee proxy
+    expect(payload).toContain('+6598765432'); // payer becomes payee proxy
     expect(payload).not.toContain('+6591234567'); // original payee NOT in the QR
-    expect(payload).toContain('03010');           // 26.03=0 amount locked
-    expect(payload).toContain('54045.00');        // tag 54 amount
-    expect(payload).toContain(paybackRef);        // 26.05 payback reference
+    expect(payload).toContain('03010'); // 26.03=0 amount locked
+    expect(payload).toContain('54045.00'); // tag 54 amount
+    expect(payload).toContain(paybackRef); // 26.05 payback reference
     expect(payload).toContain('Refund PAY73001'); // 62.01 description
 
     // --- stored payback row matches the delivered QR ------------------------
@@ -145,7 +139,7 @@ describe('payback QR end-to-end (task 7.3)', () => {
     expect(paybacks).toHaveLength(1);
     const row = paybacks[0]!;
     expect(row.ref).toBe(paybackRef);
-    expect(row.qrPayload).toBe(payload);          // uploaded QR == stored payload
+    expect(row.qrPayload).toBe(payload); // uploaded QR == stored payload
     expect(row.status).toBe('pending');
     expect(row.amountCents).toBe(500);
     expect(row.payerType).toBe('mobile');

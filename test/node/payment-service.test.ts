@@ -1,13 +1,13 @@
-import { describe, it, expect, beforeEach } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { createPaymentService, type PaymentService } from '../../src/db/payment-service';
 import type {
-  Repository,
+  CreatePaybackBoundedResult,
+  Payback,
   Payment,
   PaymentStatus,
   ReceiptSource,
+  Repository,
   User,
-  Payback,
-  CreatePaybackBoundedResult,
 } from '../../src/db/repository';
 
 /**
@@ -76,11 +76,7 @@ class MockRepository implements Repository {
   }
 }
 
-function seedPayment(
-  repo: MockRepository,
-  ref: string,
-  amountCents: number
-): Promise<Payment> {
+function seedPayment(repo: MockRepository, ref: string, amountCents: number): Promise<Payment> {
   return repo.createPayment({
     ref,
     userId: 123456789,

@@ -12,6 +12,7 @@ Greenfield project: no existing code, services, or specs. See `proposal.md` — 
 ## Goals / Non-Goals
 
 **Goals:**
+
 - A single deployable Worker handling all Telegram interaction, QR generation, and persistence.
 - Correct, bank-scan-testable SGQR PayNow payloads for collections and paybacks.
 - Per-user data isolation with a stable payment reference embedded in the QR for future automated reconciliation.
@@ -19,6 +20,7 @@ Greenfield project: no existing code, services, or specs. See `proposal.md` — 
 - Conversation state that survives cold starts and deploys.
 
 **Non-Goals:**
+
 - No bank/PSP integration, no automatic receipt detection in v1 (transport exists; logic deferred).
 - No web dashboard, no multi-device sync beyond Telegram itself, no currency other than SGD.
 - No cryptographic signing of payloads (SGQR does not define any) and no fraud checks on proxies (format validation only — the bot cannot verify that a mobile/UEN is registered).
@@ -26,6 +28,7 @@ Greenfield project: no existing code, services, or specs. See `proposal.md` — 
 ## Decisions
 
 ### 1. Stack: TypeScript Worker with grammY, `qrcode`, D1, Durable Objects, wrangler
+
 - **grammY** via its Cloudflare Workers integration, served as a webhook `fetch` handler (`@grammy/adapter-cloudflare-workers`-style). Telegram pushes updates to the Worker URL; the handler validates the `X-Telegram-Bot-Api-Secret-Token` header set via `setWebhook`. Alternative considered: long polling in Cloudflare Containers — rejected; it keeps an always-on process for no benefit once D1/DO are required anyway.
 - **`qrcode`** (pure-JS PNG path, `renderer: 'png'` → `Uint8Array`) rendered in the Worker itself — no native deps, so it runs in the isolate. Sent with `bot.api.sendMessage`/`sendPhoto` using a `FormData` + `Blob` upload (supported on Workers; verified by task 5.3's integration test). Alternatives: canvas-based renderers (unavailable in isolates); external QR microservice (unnecessary infra).
 - **D1** for durable records — Cloudflare's serverless SQLite, schema-compatible with the design in §5, reached via an async binding. Alternative: Hyperdrive→Postgres (overkill); KV/DO storage for records (wrong tool for relational queries and reporting).
@@ -33,34 +36,39 @@ Greenfield project: no existing code, services, or specs. See `proposal.md` — 
 - **Wrangler** for config, migrations, secrets (`wrangler secret put TELEGRAM_BOT_TOKEN`), deploys, and Versions for rollback.
 
 ### 2. Durable Object per chat owns conversation state
+
 One DO instance keyed by chat ID holds the active conversation FSM (`/init`, `/start`, `/payback` steps) with state persisted through DO storage, so restarts, cold starts, and deploys no longer lose an in-flight conversation. The 10-minute idle expiry uses DO **alarms** (`state.storage.setAlarm`), reliable across isolate churn. `/cancel` and alarm firing end the conversation without writing records, matching the specs' abandonment behavior.
+
 - Alternative: grammY conversation plugin with a custom session adapter over `c.env` KV — rejected: KV is eventually consistent across edges and races with rapid button taps; DOs give read-modify-write serialization per chat.
 - Trade-off accepted: DO state must be JSON-serializable; large payloads (QR PNGs) stay out of state — regenerate from the stored payload string if needed.
 - **No ORM for DO state — thin typed serializer instead**: a zod-schema'd FSM state object with `state.storage.put/get` behind one serializer class. Libraries atop DOs (e.g. the `agent` framework) bring chat/session machinery heavier than our FSM. If state ever moves to D1/KV, only that class changes.
 
 ### 3. SGQR payload builder is hand-rolled, runtime-agnostic
+
 A small `sgqr` module (no Node APIs — runs identically in vitest and in the isolate) builds TLV fields and the CRC16 (computed over the payload string including the trailing `6304`, appended uppercase 4-hex). Both payment and payback QRs use the same builder with different payee proxies. Field mapping:
 
-| Tag | Value |
-|---|---|
-| 00 | `01` payload format indicator |
-| 01 | `12` point of initiation: dynamic (one transaction) |
-| 26 | nested PayNow template: `00=SG.PAYNOW`, `01` proxy type (`0` mobile, `2` UEN), `02` proxy value, `03=0` (amount not editable), `05` = payment/payback reference |
-| 52 | `0000` (placeholder MCC — no registered merchant category) |
-| 53 | `702` (SGD) |
-| 54 | amount, decimal string (e.g. `12.50`) |
-| 58 | `SG` |
-| 59 | display name (sanitized ANS, max 25 bytes; defaults to `PAYNOW USER` — see Open Questions) |
-| 60 | `Singapore` |
-| 62 | `01` = description truncated to 25 ANS chars (bill-number slot) |
-| 63 | CRC16 |
+| Tag | Value                                                                                                                                                           |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 00  | `01` payload format indicator                                                                                                                                   |
+| 01  | `12` point of initiation: dynamic (one transaction)                                                                                                             |
+| 26  | nested PayNow template: `00=SG.PAYNOW`, `01` proxy type (`0` mobile, `2` UEN), `02` proxy value, `03=0` (amount not editable), `05` = payment/payback reference |
+| 52  | `0000` (placeholder MCC — no registered merchant category)                                                                                                      |
+| 53  | `702` (SGD)                                                                                                                                                     |
+| 54  | amount, decimal string (e.g. `12.50`)                                                                                                                           |
+| 58  | `SG`                                                                                                                                                            |
+| 59  | display name (sanitized ANS, max 25 bytes; defaults to `PAYNOW USER` — see Open Questions)                                                                      |
+| 60  | `Singapore`                                                                                                                                                     |
+| 62  | `01` = description truncated to 25 ANS chars (bill-number slot)                                                                                                 |
+| 63  | CRC16                                                                                                                                                           |
 
 The full untruncated description lives in the message caption and D1, satisfying the spec's "truncated or reference-based encoding" behavior. Amounts are stored and computed as integer cents. Alternative: existing PayNow-QR libraries — rejected: thin, unevenly maintained, several depend on Node APIs the isolate lacks.
 
 ### 4. Proxy validation is format-only
+
 Mobile: normalize to `+65XXXXXXXX` (accept 8-digit local starting 6/8/9). UEN: 9–13 alphanumeric with the classic `S########X` / new 10-char and 13-char GST/UEN shapes accepted by length-and-charset rule. No check-digit enforcement (check digits differ across UEN series; false rejections are worse than lenient acceptance, since the bank app itself will reject a dead proxy at scan time).
 
 ### 5. Data model (D1)
+
 ```sql
 users(telegram_id INTEGER PRIMARY KEY, payee_type TEXT CHECK(mobile|uen), payee_value TEXT, display_name TEXT, created_at TEXT, updated_at TEXT)
 payments(id INTEGER PRIMARY KEY, ref TEXT UNIQUE, user_id INTEGER, description TEXT, amount_cents INTEGER,
@@ -72,12 +80,15 @@ paybacks(id INTEGER PRIMARY KEY, ref TEXT UNIQUE, payment_id INTEGER, payer_type
 Schema defined as Drizzle tables (§1); `drizzle-kit generate` produces numbered SQL migrations applied via `wrangler d1 migrations apply` (dev and prod paths identical). `ref` is a short unique token (10-char base32 from `crypto.getRandomValues`) generated at QR creation and embedded in tag `26.05`; immutable, the correlation key a future bank notification would carry. Payback bounding — `SUM(active paybacks) <= payment.amount_cents` — runs inside a D1 **batch** (transaction) issued through the owning chat's DO, which serializes concurrent writes per chat; cross-chat races on the same payment are closed by a compare-and-set re-check of the sum inside the transaction.
 
 ### 6. Receipt seam
+
 All status transitions go through one internal service function: `markPaymentReceived(ref, source)`. v1 only ever passes `source = "manual"`. The future bank-notification webhook is a new route on the **same Worker** (it already terminates public HTTPS) calling the same function with `source = "notification"` — no new component.
 
 ### 7. Share = native Telegram forwarding, with guidance
+
 The QR photo message is the share object: the user long-presses → Forward → picks any chat. The caption ends with a "Forward this message to share" hint. Chosen over `switch_inline_query` chat-picking because inline results need a publicly fetchable image URL (embedding the bot token in file URLs — unacceptable, and Worker-served public QR images would leak payment references) — added risk for no gain over native forward.
 
 ### 8. Local testing strategy
+
 Testing is layered so that only the top layer needs infrastructure:
 
 1. **Pure unit tests (Node vitest)** — the runtime-agnostic core (sgqr TLV/CRC16, proxy validation, cents parsing, `ref` generation) runs in plain vitest. Golden-file checks: assert exact payload strings against known SGQR-spec examples; render PNG with `qrcode` and decode it back with `jsqr`, asserting round-trip equality.

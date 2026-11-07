@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "build": "tsc --noEmit",
+    "lint": "biome lint .",
+    "format": "biome format --write .",
+    "check": "biome check .",
+    "check:fix": "biome check --write .",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "test": "vitest run",
@@ -21,18 +25,16 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.6",
     "@cloudflare/vitest-plugin": "^1.6.0",
     "@cloudflare/workers-types": "^5.20261107.1",
-    "@eslint/js": "^10.0.1",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^22.10.2",
     "@types/qrcode": "^1.5.5",
     "better-sqlite3": "^13.0.3",
     "drizzle-kit": "^0.31.11",
-    "eslint": "^10.14.0",
     "jsqr": "^1.4.0",
     "typescript": "^5.7.2",
-    "typescript-eslint": "^8.72.1",
     "vitest": "^5.1.0",
     "wrangler": "^4.158.0"
   },

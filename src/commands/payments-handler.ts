@@ -1,10 +1,10 @@
-import { InlineKeyboard } from 'grammy';
 import type { Context } from 'grammy';
-import type { Repository, Payment } from '../db/repository.js';
+import { InlineKeyboard } from 'grammy';
+import type { Payment, Repository } from '../db/repository.js';
 
 /**
  * /payments command handler - lists user's payments
- * 
+ *
  * Flow:
  * 1. User sends /payments
  * 2. Bot checks if user exists (has run /init)
@@ -29,7 +29,9 @@ export class PaymentsCommandHandler {
       // Check if user exists
       const user = await this.repository.getUser(userId);
       if (!user) {
-        await ctx.reply('❓ You haven\'t set up your PayNow reference yet.\n\nPlease run /init first to configure your account.');
+        await ctx.reply(
+          "❓ You haven't set up your PayNow reference yet.\n\nPlease run /init first to configure your account."
+        );
         return;
       }
 
@@ -37,17 +39,18 @@ export class PaymentsCommandHandler {
       const payments = await this.repository.listPaymentsByUser(userId);
 
       if (payments.length === 0) {
-        await ctx.reply('📭 You don\'t have any payments yet.\n\nUse /start to create your first payment request!');
+        await ctx.reply(
+          "📭 You don't have any payments yet.\n\nUse /start to create your first payment request!"
+        );
         return;
       }
 
       // Format and display payments with inline buttons
       const { message, buttons } = this.formatPaymentsList(payments);
-      await ctx.reply(message, { 
+      await ctx.reply(message, {
         parse_mode: 'Markdown',
-        reply_markup: buttons
+        reply_markup: buttons,
       });
-
     } catch (error) {
       console.error('Failed to list payments:', error);
       await ctx.reply('❌ Failed to fetch your payments. Please try again later.');
@@ -58,16 +61,13 @@ export class PaymentsCommandHandler {
    * Format payments list for display with inline buttons
    */
   private formatPaymentsList(payments: Payment[]): { message: string; buttons: InlineKeyboard } {
-    const lines: string[] = [
-      '💰 *Your Payments*',
-      '',
-    ];
+    const lines: string[] = ['💰 *Your Payments*', ''];
 
     const keyboard = new InlineKeyboard();
 
     // Sort by creation date (newest first)
-    const sorted = [...payments].sort((a, b) => 
-      new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+    const sorted = [...payments].sort(
+      (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
     for (const payment of sorted) {

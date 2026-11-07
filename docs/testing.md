@@ -49,6 +49,7 @@ curl -X POST http://localhost:8787 \
 ```
 
 Verify:
+
 - Unsigned requests (without the secret header) are rejected with HTTP 403.
 - Signed requests with a valid update produce the expected Telegram API calls.
 

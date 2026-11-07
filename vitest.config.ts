@@ -1,7 +1,7 @@
-import { defineConfig } from "vitest/config";
+import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    projects: ["./vitest.node.config.ts", "./vitest.workers.config.ts"],
+    projects: ['./vitest.node.config.ts', './vitest.workers.config.ts'],
   },
 });

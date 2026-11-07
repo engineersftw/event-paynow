@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { InitCommandHandler } from '../../src/commands/init-handler';
-import type { ConversationDO } from '../../src/worker/conversation-do';
 import type { Repository, User } from '../../src/db/repository';
+import type { ConversationDO } from '../../src/worker/conversation-do';
 
 describe('/init command handler', () => {
   let mockConversationDO: ConversationDO;
@@ -34,7 +34,12 @@ describe('/init command handler', () => {
       // Mock successful state initialization
       (mockConversationDO.fetch as any).mockResolvedValue({
         status: 200,
-        json: async () => ({ flow: 'init', step: 1, context: {}, lastActivity: new Date().toISOString() })
+        json: async () => ({
+          flow: 'init',
+          step: 1,
+          context: {},
+          lastActivity: new Date().toISOString(),
+        }),
       });
 
       await handler.start(mockCtx);
@@ -43,9 +48,9 @@ describe('/init command handler', () => {
       expect(mockConversationDO.fetch).toHaveBeenCalled();
       const fetchCall = (mockConversationDO.fetch as any).mock.calls[0][0];
       expect(fetchCall.method).toBe('POST');
-      
+
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Let\'s set up your PayNow reference')
+        expect.stringContaining("Let's set up your PayNow reference")
       );
     });
   });
@@ -65,8 +70,8 @@ describe('/init command handler', () => {
             flow: 'init',
             step: 1,
             context: { userId: 789, chatId: 123456, userName: 'John' },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 }); // setState
 
@@ -77,9 +82,7 @@ describe('/init command handler', () => {
       expect(mockCtx.reply).toHaveBeenCalledWith(
         expect.stringContaining('Mobile number: +6591234567')
       );
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Type "confirm" to save')
-      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('Type "confirm" to save'));
     });
 
     it('should accept valid UEN and prompt for confirmation', async () => {
@@ -95,17 +98,15 @@ describe('/init command handler', () => {
             flow: 'init',
             step: 1,
             context: { userId: 789, chatId: 123456, userName: 'John' },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 });
 
       const result = await handler.handleInput(mockCtx);
 
       expect(result).toBe(true);
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('UEN: 201234567A')
-      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('UEN: 201234567A'));
     });
 
     it('should reject invalid input and re-prompt', async () => {
@@ -120,16 +121,14 @@ describe('/init command handler', () => {
           flow: 'init',
           step: 1,
           context: { userId: 789, chatId: 123456, userName: 'John' },
-          lastActivity: new Date().toISOString()
-        })
+          lastActivity: new Date().toISOString(),
+        }),
       });
 
       const result = await handler.handleInput(mockCtx);
 
       expect(result).toBe(true);
-      expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Invalid reference')
-      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('Invalid reference'));
     });
   });
 
@@ -152,10 +151,10 @@ describe('/init command handler', () => {
               userId: 789,
               chatId: 123456,
               userName: 'John',
-              pendingProxy
+              pendingProxy,
             },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 }); // setState
 
@@ -170,7 +169,7 @@ describe('/init command handler', () => {
         payeeType: 'mobile',
         payeeValue: '+6591234567',
         displayName: 'John',
-        timestamp: expect.any(String)
+        timestamp: expect.any(String),
       });
       expect(mockCtx.reply).toHaveBeenCalledWith('✅ Your PayNow reference has been saved!');
     });
@@ -188,7 +187,7 @@ describe('/init command handler', () => {
         payeeValue: '+6591234567',
         displayName: 'John',
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       };
 
       (mockConversationDO.fetch as any)
@@ -201,10 +200,10 @@ describe('/init command handler', () => {
               userId: 789,
               chatId: 123456,
               userName: 'John',
-              pendingProxy
+              pendingProxy,
             },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 });
 
@@ -231,8 +230,8 @@ describe('/init command handler', () => {
             flow: 'init',
             step: 2,
             context: { userId: 789, chatId: 123456, userName: 'John', pendingProxy: {} },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 });
 
@@ -255,8 +254,8 @@ describe('/init command handler', () => {
           flow: 'init',
           step: 2,
           context: { userId: 789, chatId: 123456, userName: 'John', pendingProxy: {} },
-          lastActivity: new Date().toISOString()
-        })
+          lastActivity: new Date().toISOString(),
+        }),
       });
 
       const result = await handler.handleInput(mockCtx);
@@ -281,8 +280,8 @@ describe('/init command handler', () => {
           flow: 'idle',
           step: 0,
           context: {},
-          lastActivity: new Date().toISOString()
-        })
+          lastActivity: new Date().toISOString(),
+        }),
       });
 
       const result = await handler.handleInput(mockCtx);
@@ -311,10 +310,10 @@ describe('/init command handler', () => {
               userId: 789,
               chatId: 123456,
               userName: 'John',
-              pendingProxy
+              pendingProxy,
             },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 });
 
@@ -344,7 +343,7 @@ describe('/init command handler', () => {
         payeeValue: '+6591234567',
         displayName: 'John',
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       };
 
       // Mock getUser to return existing user
@@ -359,8 +358,8 @@ describe('/init command handler', () => {
             flow: 'init',
             step: 1,
             context: { userId: 789, chatId: 123456, userName: 'John' },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 }); // setState
 
@@ -383,10 +382,10 @@ describe('/init command handler', () => {
               userId: 789,
               chatId: 123456,
               userName: 'John',
-              pendingProxy: { type: 'mobile', normalized: '+6581234567' }
+              pendingProxy: { type: 'mobile', normalized: '+6581234567' },
             },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 }); // setState
 
@@ -398,7 +397,7 @@ describe('/init command handler', () => {
         payeeType: 'mobile',
         payeeValue: '+6581234567', // NEW reference, not the old one
         displayName: 'John',
-        timestamp: expect.any(String)
+        timestamp: expect.any(String),
       });
 
       // Verify "updated" message (not "saved")
@@ -418,7 +417,7 @@ describe('/init command handler', () => {
         payeeValue: '+6591234567',
         displayName: 'John',
         createdAt: new Date().toISOString(),
-        updatedAt: new Date().toISOString()
+        updatedAt: new Date().toISOString(),
       };
 
       // Mock getUser to return existing user
@@ -432,8 +431,8 @@ describe('/init command handler', () => {
             flow: 'init',
             step: 1,
             context: { userId: 789, chatId: 123456, userName: 'John' },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 }); // setState
 
@@ -451,10 +450,10 @@ describe('/init command handler', () => {
               userId: 789,
               chatId: 123456,
               userName: 'John',
-              pendingProxy: { type: 'mobile', normalized: '+6581234567' }
+              pendingProxy: { type: 'mobile', normalized: '+6581234567' },
             },
-            lastActivity: new Date().toISOString()
-          })
+            lastActivity: new Date().toISOString(),
+          }),
         })
         .mockResolvedValueOnce({ status: 200 }); // setState
 
@@ -472,7 +471,7 @@ describe('/init command handler', () => {
       // only clears conversation state, not user data.
       // The ConversationDO alarm handler deletes the 'conversation' key,
       // but never touches the users table.
-      
+
       // When user re-runs /init after expiry, they should see the initial prompt
       const mockCtx = {
         chat: { id: 123456 },
@@ -483,14 +482,14 @@ describe('/init command handler', () => {
       // Mock getState to return null (conversation expired)
       (mockConversationDO.fetch as any).mockResolvedValue({
         status: 200,
-        json: async () => null
+        json: async () => null,
       });
 
       await handler.start(mockCtx);
 
       // Verify initial prompt is shown (not trying to update anything)
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Let\'s set up your PayNow reference')
+        expect.stringContaining("Let's set up your PayNow reference")
       );
 
       // Verify no database operations were triggered

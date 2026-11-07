@@ -1,16 +1,16 @@
-import { eq, and, sql } from 'drizzle-orm';
+import { and, eq, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import * as schema from './schema';
 import type {
+  CreatePaybackBoundedResult,
+  Payback,
+  PaybackStatus,
+  Payment,
+  PaymentStatus,
+  ReceiptSource,
   Repository,
   User,
-  Payment,
-  Payback,
-  PaymentStatus,
-  PaybackStatus,
-  ReceiptSource,
-  CreatePaybackBoundedResult,
 } from './repository';
+import * as schema from './schema';
 
 /**
  * D1Repository implements the Repository interface using Drizzle ORM over D1.
@@ -173,16 +173,8 @@ export class D1Repository implements Repository {
   async createPayback(
     input: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
   ): Promise<Payback> {
-    const {
-      ref,
-      paymentId,
-      payerType,
-      payerValue,
-      amountCents,
-      status,
-      qrPayload,
-      timestamp,
-    } = input;
+    const { ref, paymentId, payerType, payerValue, amountCents, status, qrPayload, timestamp } =
+      input;
 
     const created = await this.db
       .insert(schema.paybacks)
@@ -216,7 +208,8 @@ export class D1Repository implements Repository {
   async createPaybackBounded(
     input: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
   ): Promise<CreatePaybackBoundedResult> {
-    const { ref, paymentId, payerType, payerValue, amountCents, status, qrPayload, timestamp } = input;
+    const { ref, paymentId, payerType, payerValue, amountCents, status, qrPayload, timestamp } =
+      input;
 
     const guardedInsert = this.d1
       .prepare(
@@ -227,7 +220,19 @@ export class D1Repository implements Repository {
            WHERE payment_id = ?
          ) + ? <= (SELECT amount_cents FROM payments WHERE id = ?)`
       )
-      .bind(ref, paymentId, payerType, payerValue, amountCents, status, qrPayload, timestamp, paymentId, amountCents, paymentId);
+      .bind(
+        ref,
+        paymentId,
+        payerType,
+        payerValue,
+        amountCents,
+        status,
+        qrPayload,
+        timestamp,
+        paymentId,
+        amountCents,
+        paymentId
+      );
 
     // Totals read inside the same transaction: on success this already includes
     // the new row; on failure it is the competing state that rejected the insert.
@@ -264,10 +269,12 @@ export class D1Repository implements Repository {
 
     if (inserted) {
       const row = readbackResult.results?.[0] as unknown as
-        | (typeof schema.paybacks.$inferSelect)
+        | typeof schema.paybacks.$inferSelect
         | undefined;
       if (!row) {
-        throw new Error(`createPaybackBounded: insert reported changes but read-back for ${ref} was empty`);
+        throw new Error(
+          `createPaybackBounded: insert reported changes but read-back for ${ref} was empty`
+        );
       }
       const totalsRow = totalsResult.results?.[0] as
         | { paymentAmountCents: number; paidBackCents: number }
@@ -316,9 +323,10 @@ export class D1Repository implements Repository {
   ): Promise<Payback | null> {
     const sentAt = status === 'sent' ? timestamp : null;
 
-    const where = status === 'sent'
-      ? and(eq(schema.paybacks.ref, ref), eq(schema.paybacks.status, 'pending'))
-      : eq(schema.paybacks.ref, ref);
+    const where =
+      status === 'sent'
+        ? and(eq(schema.paybacks.ref, ref), eq(schema.paybacks.status, 'pending'))
+        : eq(schema.paybacks.ref, ref);
 
     const updated = await this.db
       .update(schema.paybacks)

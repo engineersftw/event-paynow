@@ -14,8 +14,8 @@ export function tlv(tag: string, value: string): string {
   if (len > 99) {
     throw new Error(`TLV value too long: ${len} > 99 (tag=${tag})`);
   }
-  const tagStr = tag.padStart(2, "0");
-  const lenStr = len.toString().padStart(2, "0");
+  const tagStr = tag.padStart(2, '0');
+  const lenStr = len.toString().padStart(2, '0');
   return `${tagStr}${lenStr}${value}`;
 }
 
@@ -23,7 +23,7 @@ export function tlv(tag: string, value: string): string {
  * Build a nested TLV field — value is itself a sequence of TLV sub-fields.
  */
 export function nestedTlv(tag: string, fields: Array<[string, string]>): string {
-  const inner = fields.map(([t, v]) => tlv(t, v)).join("");
+  const inner = fields.map(([t, v]) => tlv(t, v)).join('');
   return tlv(tag, inner);
 }
 
@@ -47,7 +47,7 @@ export function crc16(input: string): string {
       }
     }
   }
-  return (crc & 0xffff).toString(16).toUpperCase().padStart(4, "0");
+  return (crc & 0xffff).toString(16).toUpperCase().padStart(4, '0');
 }
 
 /**
@@ -58,7 +58,7 @@ export function crc16(input: string): string {
  *                 output as a value for nested templates.
  */
 export function buildPayload(fields: Array<[string, string]>): string {
-  const content = fields.map(([tag, value]) => tlv(tag, value)).join("");
+  const content = fields.map(([tag, value]) => tlv(tag, value)).join('');
   // CRC is computed over content + "6304"
   const crcInput = `${content}6304`;
   const checksum = crc16(crcInput);

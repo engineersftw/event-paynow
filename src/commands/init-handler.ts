@@ -1,11 +1,11 @@
 import type { Context } from 'grammy';
-import { ConversationDO, type ConversationState } from '../worker/conversation-do.js';
 import { detectProxyType } from '../db/proxy-validation.js';
-import type { Repository, User } from '../db/repository.js';
+import type { Repository } from '../db/repository.js';
+import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 
 /**
  * /init command handler - sets up user's PayNow reference
- * 
+ *
  * Flow:
  * 1. User sends /init
  * 2. Bot prompts for reference
@@ -37,10 +37,12 @@ export class InitCommandHandler {
       flow: 'init',
       step: 1, // waiting for reference input
       context: { userId, chatId, userName },
-      lastActivity: new Date().toISOString()
+      lastActivity: new Date().toISOString(),
     });
 
-    await ctx.reply('👋 Welcome! Let\'s set up your PayNow reference.\n\nPlease enter your mobile number (e.g., 91234567) or UEN (e.g., 201234567A):');
+    await ctx.reply(
+      "👋 Welcome! Let's set up your PayNow reference.\n\nPlease enter your mobile number (e.g., 91234567) or UEN (e.g., 201234567A):"
+    );
   }
 
   /**
@@ -48,8 +50,8 @@ export class InitCommandHandler {
    */
   async handleInput(ctx: Context): Promise<boolean> {
     const state = await this.getState();
-    
-    if (!state || state.flow !== 'init') {
+
+    if (state?.flow !== 'init') {
       return false; // Not in init flow
     }
 
@@ -73,11 +75,17 @@ export class InitCommandHandler {
   /**
    * Step 1: Validate and echo reference for confirmation
    */
-  private async handleReferenceInput(ctx: Context, input: string, state: ConversationState): Promise<void> {
+  private async handleReferenceInput(
+    ctx: Context,
+    input: string,
+    state: ConversationState
+  ): Promise<void> {
     const normalized = detectProxyType(input);
 
     if (!normalized) {
-      await ctx.reply('❌ Invalid reference. Please enter:\n• Mobile number (8 digits, starting with 6/8/9)\n• UEN (9-13 characters)\n\nTry again:');
+      await ctx.reply(
+        '❌ Invalid reference. Please enter:\n• Mobile number (8 digits, starting with 6/8/9)\n• UEN (9-13 characters)\n\nTry again:'
+      );
       return;
     }
 
@@ -87,19 +95,25 @@ export class InitCommandHandler {
       step: 2,
       context: {
         ...state.context,
-        pendingProxy: normalized
+        pendingProxy: normalized,
       },
-      lastActivity: new Date().toISOString()
+      lastActivity: new Date().toISOString(),
     });
 
     const typeLabel = normalized.type === 'mobile' ? 'Mobile number' : 'UEN';
-    await ctx.reply(`📱 ${typeLabel}: ${normalized.normalized}\n\nType "confirm" to save, or "cancel" to start over:`);
+    await ctx.reply(
+      `📱 ${typeLabel}: ${normalized.normalized}\n\nType "confirm" to save, or "cancel" to start over:`
+    );
   }
 
   /**
    * Step 2: Handle confirmation
    */
-  private async handleConfirmation(ctx: Context, input: string, state: ConversationState): Promise<void> {
+  private async handleConfirmation(
+    ctx: Context,
+    input: string,
+    state: ConversationState
+  ): Promise<void> {
     const pendingProxy = state.context.pendingProxy as { type: string; normalized: string };
 
     if (input.toLowerCase() === 'confirm') {
@@ -109,7 +123,7 @@ export class InitCommandHandler {
         flow: 'idle',
         step: 0,
         context: {},
-        lastActivity: new Date().toISOString()
+        lastActivity: new Date().toISOString(),
       });
       await ctx.reply('❌ Cancelled. Run /init again to start over.');
     } else {
@@ -120,7 +134,11 @@ export class InitCommandHandler {
   /**
    * Save user to database
    */
-  private async saveUser(ctx: Context, proxy: { type: string; normalized: string }, state: ConversationState): Promise<void> {
+  private async saveUser(
+    ctx: Context,
+    proxy: { type: string; normalized: string },
+    state: ConversationState
+  ): Promise<void> {
     const userId = state.context.userId as number;
     const userName = state.context.userName as string;
 
@@ -135,7 +153,7 @@ export class InitCommandHandler {
           payeeType: proxy.type as 'mobile' | 'uen',
           payeeValue: proxy.normalized,
           displayName: userName,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
         await ctx.reply('✅ Your PayNow reference has been updated!');
       } else {
@@ -145,7 +163,7 @@ export class InitCommandHandler {
           payeeType: proxy.type as 'mobile' | 'uen',
           payeeValue: proxy.normalized,
           displayName: userName,
-          timestamp: new Date().toISOString()
+          timestamp: new Date().toISOString(),
         });
         await ctx.reply('✅ Your PayNow reference has been saved!');
       }
@@ -155,9 +173,8 @@ export class InitCommandHandler {
         flow: 'idle',
         step: 0,
         context: {},
-        lastActivity: new Date().toISOString()
+        lastActivity: new Date().toISOString(),
       });
-
     } catch (error) {
       console.error('Failed to save user:', error);
       await ctx.reply('❌ Failed to save your reference. Please try again with /init.');
@@ -168,19 +185,23 @@ export class InitCommandHandler {
    * Get conversation state from DO
    */
   private async getState(): Promise<ConversationState | null> {
-    const response = await this.conversationDO.fetch(new Request('http://localhost/state', { method: 'GET' }));
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/state', { method: 'GET' })
+    );
     if (response.status !== 200) return null;
-    return await response.json() as ConversationState;
+    return (await response.json()) as ConversationState;
   }
 
   /**
    * Set conversation state in DO
    */
   private async setState(state: ConversationState): Promise<void> {
-    const response = await this.conversationDO.fetch(new Request('http://localhost/state', {
-      method: 'POST',
-      body: JSON.stringify(state)
-    }));
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/state', {
+        method: 'POST',
+        body: JSON.stringify(state),
+      })
+    );
     // Drain the response so cross-isolate streams don't pin DO storage
     await response?.body?.cancel();
   }

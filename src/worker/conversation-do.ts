@@ -17,16 +17,16 @@ import type { Env } from '../env';
 const ConversationStateSchema = z.object({
   // Current conversation flow
   flow: z.enum(['idle', 'init', 'start', 'payback']).default('idle'),
-  
+
   // Step within the current flow
   step: z.number().int().nonnegative().default(0),
-  
+
   // Context data for the current conversation
   context: z.record(z.string(), z.any()).default({}),
-  
+
   // Timestamp of last activity
   lastActivity: z.string().datetime().optional(),
-  
+
   // Payment reference being processed (if any)
   activePaymentRef: z.string().optional(),
 });
@@ -58,12 +58,12 @@ export class ConversationSerializer {
     try {
       const data = JSON.parse(json);
       const result = ConversationStateSchema.safeParse(data);
-      
+
       if (!result.success) {
         console.error('State validation failed:', result.error);
         return null;
       }
-      
+
       return result.data;
     } catch (error) {
       console.error('State deserialization failed:', error);
@@ -94,13 +94,13 @@ export class ConversationSerializer {
  */
 export class ConversationDO {
   public state: DurableObjectState;
-  private env: Env;
   private serializer: ConversationSerializer;
   private alarmTimeoutMs = 10 * 60 * 1000; // 10 minutes
 
-  constructor(state: DurableObjectState, env: Env) {
+  // workerd constructs DOs with (state, env); this DO only needs storage,
+  // so env is accepted but intentionally unused.
+  constructor(state: DurableObjectState, _env: Env) {
     this.state = state;
-    this.env = env;
     this.serializer = new ConversationSerializer();
   }
 
@@ -140,9 +140,9 @@ export class ConversationDO {
    */
   private async getState(): Promise<Response> {
     const storedValue = await this.state.storage.get<string>('conversation');
-    
+
     let state: ConversationState;
-    
+
     if (!storedValue) {
       // No state exists - create initial state
       state = this.serializer.initialState();
@@ -150,7 +150,7 @@ export class ConversationDO {
     } else {
       // storedValue is already the actual object, not a JSON string
       const deserialized = this.serializer.deserialize(storedValue);
-      
+
       if (!deserialized) {
         // Corrupted state - reset to initial
         console.warn('Corrupted state detected, resetting to initial');
@@ -160,14 +160,14 @@ export class ConversationDO {
         state = deserialized;
       }
     }
-    
+
     // Update last activity
     state.lastActivity = new Date().toISOString();
     await this.saveState(state);
-    
+
     // Schedule alarm for idle expiry
     await this.scheduleAlarm();
-    
+
     return new Response(JSON.stringify(state), {
       headers: { 'Content-Type': 'application/json' },
     });
@@ -180,9 +180,9 @@ export class ConversationDO {
     try {
       const updates = (await request.json()) as Partial<ConversationState>;
       const currentJson = await this.state.storage.get<string>('conversation');
-      
+
       let current: ConversationState;
-      
+
       if (!currentJson) {
         current = this.serializer.initialState();
       } else {
@@ -193,23 +193,23 @@ export class ConversationDO {
           current = deserialized;
         }
       }
-      
+
       // Merge updates
       const updated = { ...current, ...updates };
-      
+
       // Validate updated state
       const validated = ConversationStateSchema.parse(updated);
-      
+
       // Save validated state
       await this.saveState(validated);
-      
+
       // Update last activity
       validated.lastActivity = new Date().toISOString();
       await this.saveState(validated);
-      
+
       // Schedule alarm for idle expiry
       await this.scheduleAlarm();
-      
+
       return new Response(JSON.stringify(validated), {
         headers: { 'Content-Type': 'application/json' },
       });
@@ -226,7 +226,7 @@ export class ConversationDO {
     const state = this.serializer.initialState();
     await this.saveState(state);
     await this.scheduleAlarm();
-    
+
     return new Response(JSON.stringify(state), {
       headers: { 'Content-Type': 'application/json' },
     });
@@ -238,31 +238,31 @@ export class ConversationDO {
    */
   private async handleAlarm(): Promise<Response> {
     const stateJson = await this.state.storage.get<string>('conversation');
-    
+
     if (!stateJson) {
       return new Response('No state to clear', { status: 200 });
     }
-    
+
     const state = this.serializer.deserialize(stateJson);
-    
+
     if (!state) {
       // Corrupted state - clear it
       await this.state.storage.delete('conversation');
       return new Response('Corrupted state cleared', { status: 200 });
     }
-    
+
     // Check if state is still idle
     if (state.lastActivity) {
       const lastActivity = new Date(state.lastActivity).getTime();
       const now = Date.now();
-      
+
       if (now - lastActivity >= this.alarmTimeoutMs) {
         // Clear state after 10 minutes of inactivity
         await this.state.storage.delete('conversation');
         return new Response('State cleared due to inactivity', { status: 200 });
       }
     }
-    
+
     return new Response('State still active', { status: 200 });
   }
 
@@ -290,10 +290,7 @@ export class ConversationDO {
 /**
  * Get or create a conversation DO for a chat.
  */
-export async function getConversationDO(
-  env: Env,
-  chatId: number
-): Promise<DurableObjectStub> {
+export async function getConversationDO(env: Env, chatId: number): Promise<DurableObjectStub> {
   const id = env.CHAT_SESSION.idFromName(`chat-${chatId}`);
   return env.CHAT_SESSION.get(id);
 }

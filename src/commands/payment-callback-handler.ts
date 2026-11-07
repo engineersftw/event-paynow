@@ -1,8 +1,8 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
-import { ConversationDO } from '../worker/conversation-do.js';
+import type { Payback, Payment, Repository } from '../db/repository.js';
 import { formatCents } from '../sgqr/amount.js';
-import type { Repository, Payment, Payback } from '../db/repository.js';
+import type { ConversationDO } from '../worker/conversation-do.js';
 
 /**
  * Callback query handler for payment actions
@@ -79,7 +79,6 @@ export class PaymentCallbackHandler {
         default:
           await ctx.answerCallbackQuery({ text: '❌ Unknown action' });
       }
-
     } catch (error) {
       console.error('Callback handler error:', error);
       await ctx.answerCallbackQuery({ text: '❌ An error occurred' });
@@ -169,7 +168,10 @@ export class PaymentCallbackHandler {
       keyboard = new InlineKeyboard();
       for (const payback of pendingPaybacks) {
         keyboard
-          .text(`✅ Mark sent: $${formatCents(payback.amountCents)}`, `pb_sent:${payment.ref}:${payback.ref}`)
+          .text(
+            `✅ Mark sent: $${formatCents(payback.amountCents)}`,
+            `pb_sent:${payment.ref}:${payback.ref}`
+          )
           .row();
       }
     }
@@ -271,15 +273,17 @@ export class PaymentCallbackHandler {
    */
   private async handlePayback(ctx: Context, payment: Payment): Promise<void> {
     // Start payback conversation flow
-    const response = await this.conversationDO.fetch(new Request('http://localhost/state', {
-      method: 'POST',
-      body: JSON.stringify({
-        flow: 'payback',
-        step: 1,
-        context: { paymentRef: payment.ref },
-        lastActivity: new Date().toISOString()
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/state', {
+        method: 'POST',
+        body: JSON.stringify({
+          flow: 'payback',
+          step: 1,
+          context: { paymentRef: payment.ref },
+          lastActivity: new Date().toISOString(),
+        }),
       })
-    }));
+    );
     // Drain the response so cross-isolate streams don't pin DO storage
     await response?.body?.cancel();
 

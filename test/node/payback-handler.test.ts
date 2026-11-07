@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { InputFile } from 'grammy';
-import { PaybackCommandHandler } from '../../src/commands/payback-handler.js';
 import type { Context } from 'grammy';
-import type { ConversationDO } from '../../src/worker/conversation-do.js';
-import type { Repository, Payment, CreatePaybackBoundedResult } from '../../src/db/repository.js';
+import { InputFile } from 'grammy';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PaybackCommandHandler } from '../../src/commands/payback-handler.js';
+import type { CreatePaybackBoundedResult, Payment, Repository } from '../../src/db/repository.js';
 import { buildPayNowPayload } from '../../src/sgqr/paynow.js';
+import type { ConversationDO } from '../../src/worker/conversation-do.js';
 
 describe('PaybackCommandHandler', () => {
   let handler: PaybackCommandHandler;
@@ -13,11 +13,7 @@ describe('PaybackCommandHandler', () => {
   let mockCtx: Context;
 
   /** Payback-flow conversation state fixture (step 2+ contexts carry pendingPayer). */
-  function paybackState(
-    step: number,
-    context: Record<string, unknown> = {},
-    flow = 'payback'
-  ) {
+  function paybackState(step: number, context: Record<string, unknown> = {}, flow = 'payback') {
     return {
       flow,
       step,
@@ -74,7 +70,12 @@ describe('PaybackCommandHandler', () => {
   beforeEach(() => {
     mockConversationDO = {
       fetch: vi.fn().mockResolvedValue(
-        stateResponse({ flow: 'idle', step: 0, context: {}, lastActivity: new Date().toISOString() })
+        stateResponse({
+          flow: 'idle',
+          step: 0,
+          context: {},
+          lastActivity: new Date().toISOString(),
+        })
       ),
     } as unknown as ConversationDO;
 
@@ -203,9 +204,13 @@ describe('PaybackCommandHandler', () => {
       const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(2, {
-          pendingPayer: { type: 'mobile', normalized: '+6591234567' },
-        })))
+        .mockResolvedValueOnce(
+          stateResponse(
+            paybackState(2, {
+              pendingPayer: { type: 'mobile', normalized: '+6591234567' },
+            })
+          )
+        )
         .mockResolvedValueOnce(okResponse); // setState step 3
       vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(0);
 
@@ -227,10 +232,14 @@ describe('PaybackCommandHandler', () => {
       const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(2, {
-          paymentAmount: 1250,
-          pendingPayer: { type: 'mobile', normalized: '+6591234567' },
-        })))
+        .mockResolvedValueOnce(
+          stateResponse(
+            paybackState(2, {
+              paymentAmount: 1250,
+              pendingPayer: { type: 'mobile', normalized: '+6591234567' },
+            })
+          )
+        )
         .mockResolvedValueOnce(okResponse);
       vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(800);
 
@@ -244,9 +253,13 @@ describe('PaybackCommandHandler', () => {
       const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(2, {
-          pendingPayer: { type: 'mobile', normalized: '+6591234567' },
-        })))
+        .mockResolvedValueOnce(
+          stateResponse(
+            paybackState(2, {
+              pendingPayer: { type: 'mobile', normalized: '+6591234567' },
+            })
+          )
+        )
         .mockResolvedValueOnce(okResponse); // reset to idle
       vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(1000);
 
@@ -263,9 +276,13 @@ describe('PaybackCommandHandler', () => {
       const ctx = { ...mockCtx, message: { text: 'cancel' } } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(2, {
-          pendingPayer: { type: 'mobile', normalized: '+6591234567' },
-        })))
+        .mockResolvedValueOnce(
+          stateResponse(
+            paybackState(2, {
+              pendingPayer: { type: 'mobile', normalized: '+6591234567' },
+            })
+          )
+        )
         .mockResolvedValueOnce(okResponse);
 
       const result = await handler.handleInput(ctx);
@@ -277,10 +294,13 @@ describe('PaybackCommandHandler', () => {
     it('should re-prompt on invalid confirmation input', async () => {
       const ctx = { ...mockCtx, message: { text: 'maybe' } } as unknown as Context;
 
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(2, {
-          pendingPayer: { type: 'mobile', normalized: '+6591234567' },
-        })));
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+        stateResponse(
+          paybackState(2, {
+            pendingPayer: { type: 'mobile', normalized: '+6591234567' },
+          })
+        )
+      );
 
       await handler.handleInput(ctx);
 
@@ -313,8 +333,9 @@ describe('PaybackCommandHandler', () => {
     it('should reject amount exceeding remaining bound and re-prompt', async () => {
       const ctx = { ...mockCtx, message: { text: '15.00' } } as unknown as Context;
 
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(3, step3Context)));
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+        stateResponse(paybackState(3, step3Context))
+      );
       vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(0);
 
       await handler.handleInput(ctx);
@@ -327,12 +348,15 @@ describe('PaybackCommandHandler', () => {
     it('should reject amount that exceeds what is left after prior paybacks (5.00 > 4.50 remaining)', async () => {
       const ctx = { ...mockCtx, message: { text: '5.00' } } as unknown as Context;
 
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(3, {
-          ...step3Context,
-          paymentAmount: 1250,
-          remainingCents: 450,
-        })));
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+        stateResponse(
+          paybackState(3, {
+            ...step3Context,
+            paymentAmount: 1250,
+            remainingCents: 450,
+          })
+        )
+      );
       vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(800);
 
       await handler.handleInput(ctx);
@@ -344,11 +368,15 @@ describe('PaybackCommandHandler', () => {
       const ctx = { ...mockCtx, message: { text: '4.50' } } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(3, {
-          ...step3Context,
-          paymentAmount: 1250,
-          remainingCents: 450,
-        })))
+        .mockResolvedValueOnce(
+          stateResponse(
+            paybackState(3, {
+              ...step3Context,
+              paymentAmount: 1250,
+              remainingCents: 450,
+            })
+          )
+        )
         .mockResolvedValueOnce(okResponse);
       vi.mocked(mockRepository.sumPaybacks).mockResolvedValue(800);
 
@@ -360,8 +388,9 @@ describe('PaybackCommandHandler', () => {
     it('should reject invalid amount format without touching the database', async () => {
       const ctx = { ...mockCtx, message: { text: 'abc' } } as unknown as Context;
 
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(3, step3Context)));
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+        stateResponse(paybackState(3, step3Context))
+      );
 
       await handler.handleInput(ctx);
 
@@ -372,8 +401,9 @@ describe('PaybackCommandHandler', () => {
     it('should reject amounts with more than 2 decimals (12.505)', async () => {
       const ctx = { ...mockCtx, message: { text: '12.505' } } as unknown as Context;
 
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(3, step3Context)));
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+        stateResponse(paybackState(3, step3Context))
+      );
 
       await handler.handleInput(ctx);
 
@@ -511,7 +541,11 @@ describe('PaybackCommandHandler', () => {
       expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
 
       const states = await postedStates();
-      const state = states[states.length - 1] as { flow: string; step: number; context: Record<string, unknown> };
+      const state = states[states.length - 1] as {
+        flow: string;
+        step: number;
+        context: Record<string, unknown>;
+      };
       expect(state.flow).toBe('payback');
       expect(state.step).toBe(3);
       // The refused amount is cleared from the conversation context
@@ -560,8 +594,9 @@ describe('PaybackCommandHandler', () => {
     it('should handle repository errors gracefully', async () => {
       const ctx = { ...mockCtx, message: { text: 'confirm' } } as unknown as Context;
 
-      vi.mocked(mockConversationDO.fetch)
-        .mockResolvedValueOnce(stateResponse(paybackState(4, step4Context)));
+      vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
+        stateResponse(paybackState(4, step4Context))
+      );
       vi.mocked(mockRepository.createPaybackBounded).mockRejectedValue(new Error('DB error'));
 
       await handler.handleInput(ctx);
@@ -589,7 +624,12 @@ describe('PaybackCommandHandler', () => {
       const ctx = { ...mockCtx, message: { text: '91234567' } } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
-        stateResponse({ flow: 'idle', step: 0, context: {}, lastActivity: new Date().toISOString() })
+        stateResponse({
+          flow: 'idle',
+          step: 0,
+          context: {},
+          lastActivity: new Date().toISOString(),
+        })
       );
 
       const result = await handler.handleInput(ctx);
@@ -602,7 +642,12 @@ describe('PaybackCommandHandler', () => {
       const ctx = { ...mockCtx, message: { text: '91234567' } } as unknown as Context;
 
       vi.mocked(mockConversationDO.fetch).mockResolvedValueOnce(
-        stateResponse({ flow: 'init', step: 1, context: {}, lastActivity: new Date().toISOString() })
+        stateResponse({
+          flow: 'init',
+          step: 1,
+          context: {},
+          lastActivity: new Date().toISOString(),
+        })
       );
 
       const result = await handler.handleInput(ctx);
