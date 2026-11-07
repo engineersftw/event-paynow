@@ -96,10 +96,28 @@ Task 1.3 (D1 provisioning + BotFather setup) requires Cloudflare authentication:
 - Repository layer with infra-neutral interfaces (D1Repository implementation, 21 passing tests)
 - Proxy validation and normalization (mobile → +65XXXXXXXX, UEN validation)
 - 10-char base32 reference generator using crypto.getRandomValues
-- Payment service with markPaymentReceived transition logic
+- Payment service with markPaymentReceived transition logic (routes through `updatePaymentStatus`)
 - Conversation Durable Object with FSM state, 10-min alarm expiry, eviction survival
 - /init command handler with mobile/UEN validation, confirmation flow, and user persistence
 - Reference update on re-run: /init replaces stored value, cancel/alarm expiry preserves existing data
+- /payments listing with inline buttons (View / Mark as Received / Payback) and payment detail view
+- /payback 4-step conversation (payer proxy → confirm → amount → confirm) recording paybacks
+- Payback bounds: `createPaybackBounded()` enforces `SUM(active paybacks) <= payment.amount_cents`
+  inside one D1 batch via a compare-and-set guarded `INSERT ... SELECT` (task 7.2)
+
+## Payback Bounds (task 7.2)
+
+`D1Repository.createPaybackBounded()` runs a single `d1.batch([...])` transaction:
+1. Guarded insert — `INSERT INTO paybacks ... SELECT ... WHERE (SUM active) + amount <= payment.amount`
+   (materializes only if the in-transaction re-check holds; fail-closed for missing payments)
+2. Totals read — payment amount + active sum inside the same transaction
+3. Row read-back by ref
+
+Returns `{ ok, payback, remainingCents }` or `{ ok: false, reason: 'over_bound' | 'payment_not_found', ... }`.
+"Active" = status `pending`, matching `sumActivePaybacks()` semantics. The handler pre-checks the bound
+for UX; the transaction re-check is authoritative. Per-chat DO serialization covers same-chat writes;
+this CAS guard closes cross-chat races (design §5). Tests: `test/workers/payback-bounds.test.ts`
+(11 tests, spec scenarios 5+3 of 12.50 → remaining 4.50, blocked-over, concurrent races via `Promise.all`).
 
 ## Repository Layer
 
@@ -113,10 +131,11 @@ The repository layer provides infra-neutral interfaces for database operations:
 **Operations:**
 - Users: upsertUser, getUser
 - Payments: createPayment, getPaymentByRef, listPaymentsByUser, updatePaymentStatus
-- Paybacks: createPayback, listPaybacksByPayment, sumActivePaybacks
+- Paybacks: createPayback, createPaybackBounded (transactional bound enforcement), listPaybacksByPayment, sumActivePaybacks
 
 **Testing:**
 - 21 tests in `test/workers/repository.test.ts` cover all operations
+- 11 tests in `test/workers/payback-bounds.test.ts` cover bounded payback creation incl. concurrency
 - Tests verify cross-user isolation, read-back-after-write consistency, and status transitions
 - Tests run in Workers pool with real D1 bindings
 
@@ -150,7 +169,8 @@ The repository layer provides infra-neutral interfaces for database operations:
 
 ## What's Next
 
-- Task 4.2: Reference update on re-run (/init again replaces stored value)
+- Tasks 5.1-5.4: /start payment issuance flow (conversation, QR render, sendPhoto)
+- Task 7.3: payback QR generation + sendPhoto (replaces the `PAYBACK-PENDING:<ref>` placeholder payload)
+- Task 7.4: "Mark payback as sent" button and payback history in payment detail
 - Task 1.3: Cloudflare auth setup (blocked)
-- Tasks 5-7: Payment issuance, tracking, and payback commands
 - Tasks 8.1-8.3: Integration testing, scan validation, deploy pipeline

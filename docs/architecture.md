@@ -364,7 +364,7 @@ wrangler deployments rollback
 
 ### Bindings
 - `DB`: D1 database binding
-- `CONVERSATION_DO`: Durable Object binding
+- `CHAT_SESSION`: Durable Object binding (class `ChatSessionDO`)
 
 ## Testing Strategy
 

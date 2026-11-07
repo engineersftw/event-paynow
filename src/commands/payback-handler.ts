@@ -1,13 +1,12 @@
 import type { Context } from 'grammy';
-import { InlineKeyboard } from 'grammy';
 import { ConversationDO, type ConversationState } from '../worker/conversation-do.js';
-import { detectProxyType } from '../db/proxy-validation.js';
-import { formatCents } from '../sgqr/amount.js';
-import type { Repository, Payment } from '../db/repository.js';
+import { detectProxyType, generateRef } from '../db/proxy-validation.js';
+import { parseAmount, formatCents } from '../sgqr/amount.js';
+import type { Repository, PayeeType } from '../db/repository.js';
 
 /**
  * /payback command handler - initiates payback flow for a payment
- * 
+ *
  * Flow:
  * 1. User sends /payback <ref>
  * 2. Bot verifies payment exists and belongs to user
@@ -15,10 +14,17 @@ import type { Repository, Payment } from '../db/repository.js';
  * 4. User provides payer reference
  * 5. Bot validates and echoes for confirmation
  * 6. User confirms
- * 7. Bot prompts for payback amount (default to original amount)
+ * 7. Bot prompts for payback amount (bounded by remaining payable)
  * 8. User provides amount
- * 9. Bot validates amount and generates payback QR
- * 10. Bot sends QR and stores payback record
+ * 9. Bot validates amount and confirms
+ * 10. User confirms -> payback row created via the bounded D1 transaction (task 7.2)
+ *     and echoed; QR image delivery is wired in task 7.3
+ *
+ * Payback bounds (task 7.2): the amount step pre-checks against
+ * `payment.amount_cents - SUM(active paybacks)`, but the authoritative enforcement is
+ * `repository.createPaybackBounded()`, which re-checks the sum inside the same D1 batch
+ * as the insert. A concurrent payback that lands between steps is caught there and the
+ * row is refused, so the active total never exceeds the original amount.
  */
 
 export class PaybackCommandHandler {
@@ -66,6 +72,7 @@ export class PaybackCommandHandler {
         step: 1, // waiting for payer reference
         context: { 
           paymentRef,
+          paymentId: payment.id,
           paymentAmount: payment.amountCents,
           paymentDescription: payment.description
         },
@@ -151,29 +158,37 @@ export class PaybackCommandHandler {
    */
   private async handlePayerConfirmation(ctx: Context, input: string, state: ConversationState): Promise<void> {
     if (input.toLowerCase() === 'confirm') {
+      const paymentId = state.context.paymentId as number;
       const paymentAmount = state.context.paymentAmount as number;
-      
+
+      // Pre-check: show the current remaining bound. The authoritative re-check runs
+      // inside the D1 transaction at final confirmation (createPaybackBounded).
+      const activeSum = await this.repository.sumActivePaybacks(paymentId);
+      const remaining = paymentAmount - activeSum;
+
+      if (remaining <= 0) {
+        await this.resetState();
+        await ctx.reply('⚠️ This payment has already been fully paid back. There is nothing left to pay.');
+        return;
+      }
+
       await this.setState({
         flow: 'payback',
         step: 3,
-        context: state.context,
+        context: { ...state.context, remainingCents: remaining },
         lastActivity: new Date().toISOString()
       });
 
       await ctx.reply(
         `💵 Enter payback amount (in dollars):\n\n` +
         `Original payment: $${formatCents(paymentAmount)}\n` +
-        `Maximum payback: $${formatCents(paymentAmount)}\n\n` +
-        `You can enter a partial amount or the full amount.`,
+        `Already paid back (active): $${formatCents(activeSum)}\n` +
+        `Maximum payback: $${formatCents(remaining)}\n\n` +
+        `You can enter a partial amount or the full remaining amount.`,
         { parse_mode: 'Markdown' }
       );
     } else if (input.toLowerCase() === 'cancel') {
-      await this.setState({
-        flow: 'idle',
-        step: 0,
-        context: {},
-        lastActivity: new Date().toISOString()
-      });
+      await this.resetState();
       await ctx.reply('❌ Payback cancelled.');
     } else {
       await ctx.reply('Please type "confirm" to continue or "cancel" to abort:');
@@ -184,19 +199,29 @@ export class PaybackCommandHandler {
    * Step 3: Validate amount and echo for confirmation
    */
   private async handleAmountInput(ctx: Context, input: string, state: ConversationState): Promise<void> {
+    const paymentId = state.context.paymentId as number;
     const paymentAmount = state.context.paymentAmount as number;
-    const amountDollars = parseFloat(input);
+    const amountCents = parseAmount(input);
 
-    if (isNaN(amountDollars) || amountDollars <= 0) {
-      await ctx.reply('❌ Invalid amount. Please enter a positive number.\n\nTry again:');
+    if (amountCents === null) {
+      await ctx.reply('❌ Invalid amount. Enter a positive number with up to 2 decimals (e.g. 5 or 12.50).\n\nTry again:');
       return;
     }
 
-    const amountCents = Math.round(amountDollars * 100);
-    
-    if (amountCents > paymentAmount) {
+    // Pre-check against the freshest remaining bound; createPaybackBounded re-checks
+    // it in-transaction on confirmation.
+    const activeSum = await this.repository.sumActivePaybacks(paymentId);
+    const remaining = paymentAmount - activeSum;
+
+    if (remaining <= 0) {
+      await this.resetState();
+      await ctx.reply('⚠️ This payment has been fully paid back. Payback blocked.');
+      return;
+    }
+
+    if (amountCents > remaining) {
       await ctx.reply(
-        `❌ Payback amount ($${formatCents(amountCents)}) exceeds original payment amount ($${formatCents(paymentAmount)}).\n\n` +
+        `❌ Payback amount ($${formatCents(amountCents)}) exceeds the remaining payable amount ($${formatCents(remaining)}).\n\n` +
         `Please enter a smaller amount:`
       );
       return;
@@ -208,6 +233,7 @@ export class PaybackCommandHandler {
       step: 4,
       context: {
         ...state.context,
+        remainingCents: remaining,
         paybackAmount: amountCents
       },
       lastActivity: new Date().toISOString()
@@ -215,67 +241,99 @@ export class PaybackCommandHandler {
 
     await ctx.reply(
       `💰 Payback amount: $${formatCents(amountCents)}\n\n` +
-      `Type "confirm" to generate payback QR, or "cancel" to abort:`
+      `Type "confirm" to record the payback, or "cancel" to abort:`
     );
   }
 
   /**
-   * Step 4: Handle amount confirmation and generate payback QR
+   * Step 4: Handle amount confirmation and create the bounded payback record
    */
   private async handleAmountConfirmation(ctx: Context, input: string, state: ConversationState): Promise<void> {
     if (input.toLowerCase() === 'confirm') {
-      await this.generatePaybackQR(ctx, state);
+      await this.createPaybackRecord(ctx, state);
     } else if (input.toLowerCase() === 'cancel') {
-      await this.setState({
-        flow: 'idle',
-        step: 0,
-        context: {},
-        lastActivity: new Date().toISOString()
-      });
+      await this.resetState();
       await ctx.reply('❌ Payback cancelled.');
     } else {
-      await ctx.reply('Please type "confirm" to generate payback QR or "cancel" to abort:');
+      await ctx.reply('Please type "confirm" to record the payback or "cancel" to abort:');
     }
   }
 
   /**
-   * Generate payback QR code and send to user
+   * Create the payback row inside the bounded D1 transaction (task 7.2).
+   * QR payload/image generation is wired in task 7.3.
    */
-  private async generatePaybackQR(ctx: Context, state: ConversationState): Promise<void> {
+  private async createPaybackRecord(ctx: Context, state: ConversationState): Promise<void> {
     try {
       const paymentRef = state.context.paymentRef as string;
-      const payerProxy = state.context.pendingPayer as { type: string; normalized: string };
+      const paymentId = state.context.paymentId as number;
+      const payerProxy = state.context.pendingPayer as { type: PayeeType; normalized: string };
       const paybackAmount = state.context.paybackAmount as number;
-      const paymentAmount = state.context.paymentAmount as number;
-      const paymentDescription = state.context.paymentDescription as string;
 
-      // Generate payback QR payload
-      // Note: In payback, the payer becomes the payee
-      // This will be implemented in task 7.3
-      const paybackRef = `PB-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-      
-      // For now, just acknowledge - actual QR generation in task 7.3
+      const paybackRef = generateRef();
+      const result = await this.repository.createPaybackBounded({
+        ref: paybackRef,
+        paymentId,
+        payerType: payerProxy.type,
+        payerValue: payerProxy.normalized,
+        amountCents: paybackAmount,
+        status: 'pending',
+        // Task 7.3 replaces this with the real SGQR payload built from the payer proxy
+        // and payback ref, delivered as a QR image via sendPhoto.
+        qrPayload: `PAYBACK-PENDING:${paybackRef}`,
+        timestamp: new Date().toISOString(),
+      });
+
+      if (!result.ok) {
+        if (result.reason === 'payment_not_found') {
+          await this.resetState();
+          await ctx.reply(
+            `❌ Payment \`${paymentRef}\` no longer exists. Payback aborted.`,
+            { parse_mode: 'Markdown' }
+          );
+          return;
+        }
+
+        // The bound moved under the conversation (e.g. a concurrent payback committed
+        // first). Nothing was written.
+        if (result.remainingCents <= 0) {
+          await this.resetState();
+          await ctx.reply(
+            `⚠️ This payment has been fully paid back ($${formatCents(result.activeSumCents)} active paybacks). Payback blocked.`
+          );
+        } else {
+          // Send the user back to the amount step with the fresh bound.
+          const { paybackAmount: staleAmount, remainingCents: _stale, ...carry } = state.context;
+          await this.setState({
+            flow: 'payback',
+            step: 3,
+            context: carry,
+            lastActivity: new Date().toISOString()
+          });
+          await ctx.reply(
+            `❌ Payback of $${formatCents(staleAmount)} exceeds the remaining payable amount ($${formatCents(result.remainingCents)}). ` +
+            `Another payback may have landed just now.\n\nPlease enter a new amount:`
+          );
+        }
+        return;
+      }
+
+      // Success: row recorded inside the transaction.
+      await this.resetState();
       await ctx.reply(
-        `✅ *Payback QR Generated!*\n\n` +
-        `Reference: \`${paybackRef}\`\n` +
-        `Amount: $${formatCents(paybackAmount)}\n` +
+        `✅ *Payback Recorded!*\n\n` +
+        `Payback reference: \`${result.payback.ref}\`\n` +
+        `Amount: $${formatCents(result.payback.amountCents)}\n` +
         `Payer: ${payerProxy.normalized}\n` +
-        `Original Payment: ${paymentRef}\n\n` +
+        `Original payment: ${paymentRef}\n` +
+        `Remaining payable: $${formatCents(result.remainingCents)}\n\n` +
         `_QR image will be generated in task 7.3_`,
         { parse_mode: 'Markdown' }
       );
 
-      // Reset conversation state
-      await this.setState({
-        flow: 'idle',
-        step: 0,
-        context: {},
-        lastActivity: new Date().toISOString()
-      });
-
     } catch (error) {
-      console.error('Failed to generate payback QR:', error);
-      await ctx.reply('❌ Failed to generate payback QR. Please try again.');
+      console.error('Failed to create payback record:', error);
+      await ctx.reply('❌ Failed to record the payback. Please try again.');
     }
   }
 
@@ -296,5 +354,17 @@ export class PaybackCommandHandler {
       method: 'POST',
       body: JSON.stringify(state)
     }));
+  }
+
+  /**
+   * Reset the conversation back to idle (context discarded, existing data untouched).
+   */
+  private async resetState(): Promise<void> {
+    await this.setState({
+      flow: 'idle',
+      step: 0,
+      context: {},
+      lastActivity: new Date().toISOString()
+    });
   }
 }

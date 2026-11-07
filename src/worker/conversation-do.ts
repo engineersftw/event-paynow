@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { Env } from '../env';
 
 /**
  * Durable Object for managing per-chat conversation state.
@@ -177,7 +178,7 @@ export class ConversationDO {
    */
   private async updateState(request: Request): Promise<Response> {
     try {
-      const updates = await request.json();
+      const updates = (await request.json()) as Partial<ConversationState>;
       const currentJson = await this.state.storage.get<string>('conversation');
       
       let current: ConversationState;
@@ -293,6 +294,6 @@ export async function getConversationDO(
   env: Env,
   chatId: number
 ): Promise<DurableObjectStub> {
-  const id = env.CONVERSATION_DO.idFromName(`chat-${chatId}`);
-  return env.CONVERSATION_DO.get(id);
+  const id = env.CHAT_SESSION.idFromName(`chat-${chatId}`);
+  return env.CHAT_SESSION.get(id);
 }

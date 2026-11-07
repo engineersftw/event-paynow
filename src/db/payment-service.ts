@@ -1,4 +1,4 @@
-import type { Repository, PaymentStatus, ReceiptSource } from './repository';
+import type { Repository, Payment, PaymentStatus, ReceiptSource } from './repository';
 
 /**
  * Payment service - single entry point for payment status transitions.
@@ -12,19 +12,9 @@ export interface PaymentService {
    * 
    * @param ref - Payment reference
    * @param source - Source of the status change ('manual' or 'notification')
-   * @returns The updated payment, or null if payment not found
+   * @returns The updated payment, or null if payment not found or already received
    */
   markPaymentReceived(ref: string, source: ReceiptSource): Promise<Payment | null>;
-}
-
-export interface Payment {
-  ref: string;
-  userId: string;
-  amount: number;
-  status: PaymentStatus;
-  source: ReceiptSource | null;
-  receivedAt: string | null;
-  createdAt: string;
 }
 
 export function createPaymentService(repo: Repository): PaymentService {
@@ -42,18 +32,12 @@ export function createPaymentService(repo: Repository): PaymentService {
         return null;
       }
       
-      // Update payment status
+      // Update payment status through the repository (single transition entry point)
       const now = new Date().toISOString();
-      await repo.updatePayment(ref, {
-        status: 'received',
-        source,
-        receivedAt: now,
-      });
-      
-      // Fetch and return updated payment
-      const updated = await repo.getPaymentByRef(ref);
+      const status: PaymentStatus = 'received';
+      const updated = await repo.updatePaymentStatus(ref, status, source, now);
       if (!updated) {
-        throw new Error(`Payment ${ref} disappeared after update`);
+        throw new Error(`Payment ${ref} disappeared during update`);
       }
       
       return updated;

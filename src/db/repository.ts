@@ -49,6 +49,22 @@ export interface Payback {
   sentAt: string | null;
 }
 
+/**
+ * Outcome of a bounded payback creation (task 7.2).
+ * `ok: true` carries the stored row and the payable amount remaining after it.
+ * `over_bound` carries the in-transaction totals so callers can explain the refusal.
+ */
+export type CreatePaybackBoundedResult =
+  | { ok: true; payback: Payback; remainingCents: number }
+  | {
+      ok: false;
+      reason: 'over_bound';
+      paymentAmountCents: number;
+      activeSumCents: number;
+      remainingCents: number;
+    }
+  | { ok: false; reason: 'payment_not_found' };
+
 // ============================================================================
 // Repository Interface
 // ============================================================================
@@ -66,6 +82,13 @@ export interface Repository {
 
   // Paybacks
   createPayback(payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }): Promise<Payback>;
+  /**
+   * Create a payback only if `SUM(active paybacks) + amountCents <= payment.amountCents`
+   * still holds when the write commits. The re-check runs inside the same D1 batch
+   * (transaction) as the insert as a compare-and-set guard, so concurrent requests can
+   * never push the active total over the original amount (design §5, task 7.2).
+   */
+  createPaybackBounded(payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }): Promise<CreatePaybackBoundedResult>;
   listPaybacksByPayment(paymentId: number): Promise<Payback[]>;
   sumActivePaybacks(paymentId: number): Promise<number>;
 }

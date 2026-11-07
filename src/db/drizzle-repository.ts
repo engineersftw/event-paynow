@@ -1,16 +1,26 @@
 import { eq, and, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as schema from './schema';
-import type { Repository, User, Payment, Payback, PaymentStatus, ReceiptSource } from './repository';
+import type {
+  Repository,
+  User,
+  Payment,
+  Payback,
+  PaymentStatus,
+  ReceiptSource,
+  CreatePaybackBoundedResult,
+} from './repository';
 
 /**
  * D1Repository implements the Repository interface using Drizzle ORM over D1.
  */
 export class D1Repository implements Repository {
   private db: ReturnType<typeof drizzle>;
+  private d1: D1Database;
 
   constructor(d1: D1Database) {
     this.db = drizzle(d1, { schema });
+    this.d1 = d1;
   }
 
   // ============================================================================
@@ -189,6 +199,98 @@ export class D1Repository implements Repository {
       .get();
 
     return toPayback(created!);
+  }
+
+  /**
+   * Task 7.2: payback bounding enforced inside one D1 batch (implicit transaction).
+   *
+   * The INSERT is a compare-and-set: `INSERT ... SELECT ... WHERE <guard>` only
+   * materializes the row when `SUM(active paybacks) + amount_cents <= payment.amount_cents`
+   * is evaluated inside the transaction, at commit time. A missing payment row makes the
+   * guard NULL, so nothing is inserted (fail-closed). This closes cross-chat races on the
+   * same payment even when the per-chat DO serialization does not apply (design §5).
+   *
+   * "Active" means status = 'pending', matching sumActivePaybacks().
+   */
+  async createPaybackBounded(
+    input: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
+  ): Promise<CreatePaybackBoundedResult> {
+    const { ref, paymentId, payerType, payerValue, amountCents, status, qrPayload, timestamp } = input;
+
+    const guardedInsert = this.d1
+      .prepare(
+        `INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?
+         WHERE (
+           SELECT COALESCE(SUM(amount_cents), 0) FROM paybacks
+           WHERE payment_id = ? AND status = 'pending'
+         ) + ? <= (SELECT amount_cents FROM payments WHERE id = ?)`
+      )
+      .bind(ref, paymentId, payerType, payerValue, amountCents, status, qrPayload, timestamp, paymentId, amountCents, paymentId);
+
+    // Totals read inside the same transaction: on success activeCents already includes
+    // the new row; on failure it is the competing state that rejected the insert.
+    const totals = this.d1
+      .prepare(
+        `SELECT amount_cents AS paymentAmountCents,
+                (SELECT COALESCE(SUM(amount_cents), 0) FROM paybacks p
+                 WHERE p.payment_id = payments.id AND p.status = 'pending') AS activeSumCents
+         FROM payments
+         WHERE id = ?`
+      )
+      .bind(paymentId);
+
+    const readback = this.d1
+      .prepare(
+        `SELECT id, ref, payment_id AS paymentId, payer_type AS payerType, payer_value AS payerValue,
+                amount_cents AS amountCents, status, qr_payload AS qrPayload, created_at AS createdAt, sent_at AS sentAt
+         FROM paybacks
+         WHERE ref = ?`
+      )
+      .bind(ref);
+
+    const [insertResult, totalsResult, readbackResult] = await this.d1.batch([
+      guardedInsert,
+      totals,
+      readback,
+    ]);
+
+    if (!insertResult || !totalsResult || !readbackResult) {
+      throw new Error('createPaybackBounded: D1 batch returned fewer results than statements');
+    }
+
+    const inserted = (insertResult.meta?.changes ?? 0) > 0;
+
+    if (inserted) {
+      const row = readbackResult.results?.[0] as unknown as
+        | (typeof schema.paybacks.$inferSelect)
+        | undefined;
+      if (!row) {
+        throw new Error(`createPaybackBounded: insert reported changes but read-back for ${ref} was empty`);
+      }
+      const totalsRow = totalsResult.results?.[0] as
+        | { paymentAmountCents: number; activeSumCents: number }
+        | undefined;
+      const remainingCents = totalsRow
+        ? Math.max(0, totalsRow.paymentAmountCents - totalsRow.activeSumCents)
+        : 0;
+      return { ok: true, payback: toPayback(row), remainingCents };
+    }
+
+    const totalsRow = totalsResult.results?.[0] as
+      | { paymentAmountCents: number; activeSumCents: number }
+      | undefined;
+    if (!totalsRow) {
+      return { ok: false, reason: 'payment_not_found' };
+    }
+
+    return {
+      ok: false,
+      reason: 'over_bound',
+      paymentAmountCents: totalsRow.paymentAmountCents,
+      activeSumCents: totalsRow.activeSumCents,
+      remainingCents: Math.max(0, totalsRow.paymentAmountCents - totalsRow.activeSumCents),
+    };
   }
 
   async listPaybacksByPayment(paymentId: number): Promise<Payback[]> {
