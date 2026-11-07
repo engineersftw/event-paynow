@@ -200,6 +200,7 @@ export class TelegramStub {
   sentPhotos: CapturedPhoto[] = [];
   editedMessages: CapturedEdit[] = [];
   editedCaptions: CapturedCaptionEdit[] = [];
+  deletedMessages: Array<{ chatId: string; messageId: number }> = [];
   callbackAnswers: string[] = [];
   otherCalls: { method: string; body: string }[] = [];
 
@@ -210,6 +211,7 @@ export class TelegramStub {
     this.sentPhotos = [];
     this.editedMessages = [];
     this.editedCaptions = [];
+    this.deletedMessages = [];
     this.callbackAnswers = [];
     this.otherCalls = [];
   }
@@ -318,6 +320,18 @@ export class TelegramStub {
     if (method === 'answerCallbackQuery') {
       const body = JSON.parse(String(init?.body)) as { text?: string };
       this.callbackAnswers.push(body.text ?? '');
+      return this.ok(true);
+    }
+
+    if (method === 'deleteMessage') {
+      const body = JSON.parse(String(init?.body)) as {
+        chat_id: number | string;
+        message_id: number;
+      };
+      this.deletedMessages.push({
+        chatId: String(body.chat_id),
+        messageId: body.message_id,
+      });
       return this.ok(true);
     }
 

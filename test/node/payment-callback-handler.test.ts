@@ -29,12 +29,14 @@ describe('PaymentCallbackHandler', () => {
       from: { id: 123456789 },
       callbackQuery: {
         data: '',
-        message: { chat: { id: 123456789 } },
+        message: { chat: { id: 123456789 }, message_id: 42 },
       } as CallbackQuery,
       answerCallbackQuery: vi.fn(),
       editMessageText: vi.fn(),
-      editMessageCaption: vi.fn(),
       reply: vi.fn(),
+      api: {
+        deleteMessage: vi.fn(),
+      },
     } as unknown as Context;
   });
 
@@ -78,16 +80,15 @@ describe('PaymentCallbackHandler', () => {
       expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
         text: '✅ Payment marked as received!',
       });
-      expect(mockCtx.editMessageCaption).toHaveBeenCalled();
-      const captionCall = vi.mocked(mockCtx.editMessageCaption).mock.calls[0]![0] as {
-        caption: string;
-        reply_markup: { inline_keyboard: unknown[][] };
-      };
-      expect(captionCall.caption).toContain('✅ Received');
-      expect(captionCall.caption).toContain('PAY123');
-      expect(captionCall.caption).toContain('SGD 10.00');
-      // Keyboard cleared
-      expect(captionCall.reply_markup.inline_keyboard.flat()).toHaveLength(0);
+      // QR photo replaced with text message
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('✅ Received')
+      );
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('PAY123')
+      );
+      // Original QR photo message deleted
+      expect(mockCtx.api.deleteMessage).toHaveBeenCalledWith(123456789, 42);
     });
 
     it('should reject if payment not found', async () => {

@@ -218,14 +218,18 @@ export class PaymentCallbackHandler {
 
     await ctx.answerCallbackQuery({ text: '✅ Payment marked as received!' });
 
-    // Update the photo caption to reflect the new status, remove action buttons
-    if (ctx.callbackQuery?.message) {
+    // Replace the QR photo with a text message showing the payment summary
+    if (ctx.callbackQuery?.message && 'message_id' in ctx.callbackQuery.message) {
       const receivedAt = this.formatDate(timestamp);
-      const newCaption = `${payment.description} / SGD ${formatCents(payment.amountCents)} / ${payment.ref} / ✅ Received ${receivedAt}`;
-      await ctx.editMessageCaption({
-        caption: newCaption,
-        reply_markup: { inline_keyboard: [] },
-      });
+      const summary = `${payment.description} / SGD ${formatCents(payment.amountCents)} / ${payment.ref} / ✅ Received ${receivedAt}`;
+      const chatId = ctx.callbackQuery.message.chat.id;
+      const msgId = ctx.callbackQuery.message.message_id;
+
+      // Send new text message
+      await ctx.reply(summary);
+
+      // Delete the original QR photo message
+      await ctx.api.deleteMessage(chatId, msgId);
     }
   }
 
