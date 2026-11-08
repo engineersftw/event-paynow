@@ -29,6 +29,10 @@ const ConversationStateSchema = z.object({
 
   // Payment reference being processed (if any)
   activePaymentRef: z.string().optional(),
+
+  // Who started the conversation and in which topic (0 = no topic). Only their text continues it.
+  // Absent on idle state and on conversations that began before this field existed.
+  owner: z.object({ userId: z.number(), topicId: z.number() }).optional(),
 });
 
 export type ConversationState = z.infer<typeof ConversationStateSchema>;
@@ -117,6 +121,16 @@ export class ConversationDO {
       return this.getState();
     }
 
+    // Read-only view: no write, no activity bump, no alarm (used to decide whether a message is relevant)
+    if (method === 'GET' && url.pathname === '/peek') {
+      return this.peekState();
+    }
+
+    // Record the owner of the active conversation
+    if (method === 'POST' && url.pathname === '/owner') {
+      return this.setOwner(request);
+    }
+
     // Update state
     if (method === 'POST' && url.pathname === '/state') {
       return this.updateState(request);
@@ -174,6 +188,38 @@ export class ConversationDO {
   }
 
   /**
+   * Current state without touching storage: nothing is created or refreshed, so chatter in a
+   * chat with no conversation costs a read only and never extends a conversation's expiry.
+   */
+  private async peekState(): Promise<Response> {
+    const stored = await this.state.storage.get<string>('conversation');
+    const state =
+      (stored ? this.serializer.deserialize(stored) : null) ?? this.serializer.initialState();
+    return new Response(JSON.stringify(state), {
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }
+
+  /**
+   * Stamp the owner on the active conversation. A no-op when idle (e.g. the command rejected
+   * its input and ended the flow), so an owner never outlives a conversation.
+   */
+  private async setOwner(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => null)) as {
+      userId?: unknown;
+      topicId?: unknown;
+    } | null;
+    if (typeof body?.userId !== 'number' || typeof body.topicId !== 'number') {
+      return new Response('Invalid owner', { status: 400 });
+    }
+    const stored = await this.state.storage.get<string>('conversation');
+    const current = stored ? this.serializer.deserialize(stored) : null;
+    if (!current || current.flow === 'idle') return new Response(null, { status: 204 });
+    await this.saveState({ ...current, owner: { userId: body.userId, topicId: body.topicId } });
+    return new Response(null, { status: 204 });
+  }
+
+  /**
    * Update conversation state.
    */
   private async updateState(request: Request): Promise<Response> {
@@ -194,8 +240,9 @@ export class ConversationDO {
         }
       }
 
-      // Merge updates
+      // Merge updates; an owner never outlives its conversation
       const updated = { ...current, ...updates };
+      if (updated.flow === 'idle') delete updated.owner;
 
       // Validate updated state
       const validated = ConversationStateSchema.parse(updated);

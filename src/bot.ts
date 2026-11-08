@@ -11,7 +11,7 @@ import { StartCommandHandler } from './commands/start-handler';
 import { WebAdminCommandHandler } from './commands/web-admin-handler';
 import { D1EventRepository, D1Repository } from './db/drizzle-repository';
 import type { Env } from './env';
-import type { ConversationDO } from './worker/conversation-do';
+import type { ConversationDO, ConversationState } from './worker/conversation-do';
 
 const HELP_TEXT =
   '🤖 *event-paynow bot*\n\n' +
@@ -51,17 +51,46 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     return stub as unknown as ConversationDO;
   };
 
+  /** Topic of the message (0 = the chat's general area), matching how flows store it. */
+  const topicOf = (ctx: Context) =>
+    ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id ?? 0;
+
+  /** After a flow-starting command: record who owns the conversation it just opened (if any). */
+  const stampOwner = async (ctx: Context) => {
+    if (!ctx.from) return;
+    const response = await conversation(ctx).fetch(
+      new Request('http://localhost/owner', {
+        method: 'POST',
+        body: JSON.stringify({ userId: ctx.from.id, topicId: topicOf(ctx) }),
+      })
+    );
+    await response?.body?.cancel();
+  };
+
+  /** The chat's active conversation, if it belongs to the sender (same user, same topic). */
+  const ownActiveConversation = async (ctx: Context): Promise<boolean> => {
+    const response = await conversation(ctx).fetch(new Request('http://localhost/peek'));
+    const state = (await response.json()) as ConversationState;
+    if (state.flow === 'idle') return false;
+    // No owner: a conversation that began before owners were recorded; relevant to everyone
+    return (
+      !state.owner || (state.owner.userId === ctx.from?.id && state.owner.topicId === topicOf(ctx))
+    );
+  };
+
   // --- commands ------------------------------------------------------------
   bot.command('ping', (ctx) => ctx.reply('pong 🏓'));
   bot.command('help', (ctx) => ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' }));
 
-  bot.command('init', (ctx) =>
-    new InitCommandHandler(conversation(ctx), repository, eventRepository).start(ctx)
-  );
+  bot.command('init', async (ctx) => {
+    await new InitCommandHandler(conversation(ctx), repository, eventRepository).start(ctx);
+    await stampOwner(ctx);
+  });
 
-  bot.command('start', (ctx) =>
-    new StartCommandHandler(conversation(ctx), repository, eventRepository).start(ctx)
-  );
+  bot.command('start', async (ctx) => {
+    await new StartCommandHandler(conversation(ctx), repository, eventRepository).start(ctx);
+    await stampOwner(ctx);
+  });
 
   bot.command('payments', (ctx) =>
     new PaymentsCommandHandler(repository, eventRepository, isAdmin).handle(ctx)
@@ -71,21 +100,25 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     new WebAdminCommandHandler(eventRepository, env.WEB_ADMIN_URL).handle(ctx)
   );
 
-  bot.command('payback', (ctx) => {
+  bot.command('payback', async (ctx) => {
     const arg = typeof ctx.match === 'string' ? ctx.match.trim() : '';
-    return new PaybackCommandHandler(conversation(ctx), repository, canAct).start(
+    await new PaybackCommandHandler(conversation(ctx), repository, canAct).start(
       ctx,
       arg || undefined
     );
+    await stampOwner(ctx);
   });
 
-  bot.command('end_event', (ctx) =>
-    new EndEventHandler(conversation(ctx), eventRepository).start(ctx)
-  );
+  bot.command('end_event', async (ctx) => {
+    await new EndEventHandler(conversation(ctx), eventRepository).start(ctx);
+    await stampOwner(ctx);
+  });
 
   bot.command('cancel', async (ctx) => {
-    // Generic abort: reset the per-chat conversation state. No flow writes
+    // Abort the sender's own conversation: reset the per-chat state. No flow writes
     // records before final confirmation, so an abort never leaves partial data.
+    // Nothing to cancel, or someone else's conversation: stay silent.
+    if (!(await ownActiveConversation(ctx))) return;
     const response = await conversation(ctx).fetch(
       new Request('http://localhost/state', {
         method: 'POST',
@@ -153,20 +186,22 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
       return;
     }
     await new PaymentCallbackHandler(conversation(ctx), repository, canAct).handleCallback(ctx);
+    // The Payback button opens a payback conversation; its owner is whoever tapped it
+    if (data.startsWith('payback:')) await stampOwner(ctx);
   });
 
   // --- free-text conversation routing --------------------------------------
   // Exactly one flow is active per chat (DO FSM `flow` field); each handler
   // returns false unless it owns the conversation.
+  // Only the owner's text (same user, same topic) in a chat with an active conversation is
+  // relevant; everything else is ordinary chatter and gets no reply.
   bot.on('message:text', async (ctx) => {
+    if (!(await ownActiveConversation(ctx))) return;
     const doStub = conversation(ctx);
     if (await new PaybackCommandHandler(doStub, repository, canAct).handleInput(ctx)) return;
     if (await new StartCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;
     if (await new InitCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;
-    if (await new EndEventHandler(doStub, eventRepository).handleInput(ctx)) return;
-    await ctx.reply(
-      '❓ No active conversation. Try /start, /payments, /init, /payback <ref> or /help.'
-    );
+    await new EndEventHandler(doStub, eventRepository).handleInput(ctx);
   });
 
   return bot;

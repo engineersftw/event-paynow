@@ -6,6 +6,7 @@ import type { Env as WorkerEnv } from '../../src/env';
 import {
   applyTestSchema,
   callbackUpdate,
+  groupTextUpdate,
   TEST_BOT_INFO,
   TelegramStub,
   textUpdate,
@@ -398,15 +399,148 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(await readDoFlow(userId)).toBe('idle');
   });
 
-  it('free text outside any flow gets the idle fallback hint', async () => {
+  it('free text outside any flow is ignored: no reply, no state change', async () => {
     const userId = 800000008;
     const { bot } = makeWiredBot();
 
     await bot.handleUpdate(textUpdate(userId, 'just chatting'));
 
-    expect(stub.lastText()).toContain('No active conversation');
+    expect(stub.sentMessages).toHaveLength(0);
+    expect(await readDoFlow(userId)).toBe('idle');
   });
 
+  it('ordinary group chat gets no reply, and does not create conversation state', async () => {
+    const chatId = -1008000001;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(groupTextUpdate(chatId, 111, 'see you tomorrow'));
+    await bot.handleUpdate(groupTextUpdate(chatId, 222, 'ok!', 7));
+
+    expect(stub.sentMessages).toHaveLength(0);
+  });
+});
+
+describe('conversation relevance in a group chat', () => {
+  const alice = 811;
+  const bob = 822;
+
+  const doStateOf = async (chatId: number) => {
+    const doStub = env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`chat-${chatId}`));
+    const res = await doStub.fetch(new Request('http://localhost/peek'));
+    return (await res.json()) as { flow: string; step: number; owner?: unknown };
+  };
+
+  it("another member's text mid-flow is ignored; the owner continues; ownership ends with the flow", async () => {
+    const chatId = -1008000002;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, '/init'));
+    expect(stub.lastText()).toContain('create a new event');
+    expect((await doStateOf(chatId)).owner).toEqual({ userId: alice, topicId: 0 });
+    const sent = stub.sentMessages.length;
+
+    // Bob's chatter is not an answer to Alice's /init
+    await bot.handleUpdate(groupTextUpdate(chatId, bob, 'lol nice'));
+    expect(stub.sentMessages).toHaveLength(sent);
+    expect((await doStateOf(chatId)).step).toBe(1);
+
+    // Alice continues
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, 'Team Dinner'));
+    expect(stub.lastText()).toContain('Event: Team Dinner');
+    expect((await doStateOf(chatId)).step).toBe(2);
+
+    // Alice cancels: the owner is cleared with the flow
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, '/cancel'));
+    expect(stub.lastText()).toContain('Conversation cancelled');
+    const after = await doStateOf(chatId);
+    expect(after.flow).toBe('idle');
+    expect(after.owner).toBeUndefined();
+  });
+
+  it('/start in a group: a bystander cannot answer for the owner, who continues unaffected', async () => {
+    const chatId = -1008000006;
+    const { bot } = makeWiredBot();
+    await new D1EventRepository(env.paynow_db).createEvent({
+      ref: 'EVT-REL0006',
+      chatId,
+      topicId: 0,
+      name: 'Group Event',
+      payeeType: 'mobile',
+      payeeValue: '+6591234567',
+      status: 'open',
+      timestamp: T0,
+    });
+
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, '/start'));
+    expect(stub.lastText()).toContain("payer's PayNow");
+    const sent = stub.sentMessages.length;
+
+    await bot.handleUpdate(groupTextUpdate(chatId, bob, '98765432')); // looks like a valid payer
+    expect(stub.sentMessages).toHaveLength(sent);
+    expect((await doStateOf(chatId)).step).toBe(2);
+
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, '91234568'));
+    expect(stub.sentMessages.length).toBeGreaterThan(sent); // next prompt, for Alice's payer
+    expect((await doStateOf(chatId)).step).toBe(3);
+  });
+
+  it('the owner in another topic is ignored', async () => {
+    const chatId = -1008000003;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, '/init', 5));
+    expect((await doStateOf(chatId)).owner).toEqual({ userId: alice, topicId: 5 });
+    const sent = stub.sentMessages.length;
+
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, 'Wrong Topic Event', 9));
+    expect(stub.sentMessages).toHaveLength(sent);
+    expect((await doStateOf(chatId)).step).toBe(1);
+
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, 'Right Topic Event', 5));
+    expect(stub.lastText()).toContain('Event: Right Topic Event');
+  });
+
+  it('/cancel is silent for someone else and when there is nothing to cancel; /help still answers', async () => {
+    const chatId = -1008000004;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(groupTextUpdate(chatId, bob, '/cancel')); // nothing active
+    expect(stub.sentMessages).toHaveLength(0);
+
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, '/init'));
+    const sent = stub.sentMessages.length;
+    await bot.handleUpdate(groupTextUpdate(chatId, bob, '/cancel')); // not Bob's conversation
+    expect(stub.sentMessages).toHaveLength(sent);
+    expect((await doStateOf(chatId)).flow).toBe('init');
+
+    await bot.handleUpdate(groupTextUpdate(chatId, bob, '/help'));
+    expect(stub.lastText()).toContain('event-paynow bot');
+    expect((await doStateOf(chatId)).flow).toBe('init');
+  });
+
+  it('a conversation without a recorded owner (started before this change) stays open to everyone', async () => {
+    const chatId = -1008000005;
+    const { bot } = makeWiredBot();
+    const doStub = env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`chat-${chatId}`));
+    await (
+      await doStub.fetch(
+        new Request('http://localhost/state', {
+          method: 'POST',
+          body: JSON.stringify({
+            flow: 'init',
+            step: 1,
+            context: { userId: alice, chatId, topicId: 0, userName: 'x' },
+          }),
+        })
+      )
+    ).body?.cancel();
+
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, 'Legacy Event'));
+    expect(stub.lastText()).toContain('Event: Legacy Event');
+  });
+});
+
+describe('bot wiring (src/bot.ts), misc', () => {
   it('/ping still answers and /help lists the commands', async () => {
     const userId = 800000009;
     const { bot } = makeWiredBot();
@@ -488,6 +622,11 @@ describe('bot wiring (src/bot.ts)', () => {
     // Button → proposal with Confirm / Change / Cancel
     await bot.handleUpdate(callbackUpdate(userId, 'payback:WIRE-020'));
     expect(stub.lastText()).toContain('Pay back to Alice (+6591234568)?');
+    // The button opens a payback conversation owned by whoever tapped it
+    const ownerRes = await env.CHAT_SESSION.get(
+      env.CHAT_SESSION.idFromName(`chat-${userId}`)
+    ).fetch(new Request('http://localhost/peek'));
+    expect(((await ownerRes.json()) as { owner?: unknown }).owner).toEqual({ userId, topicId: 0 });
 
     // Change recipient → new payer prompt → valid replacement → confirm
     await bot.handleUpdate(callbackUpdate(userId, 'payback_change_payer:WIRE-020'));
