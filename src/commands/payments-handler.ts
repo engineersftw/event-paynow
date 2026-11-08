@@ -86,7 +86,7 @@ export class PaymentsCommandHandler {
    */
   private async showEventPayments(ctx: Context, eventRef: string, userId: number): Promise<void> {
     const event = await this.eventRepository.getEventByRef(eventRef);
-    if (!event) {
+    if (!event || event.chatId !== (ctx.chat?.id ?? userId)) {
       await ctx.reply('❌ Event not found.');
       return;
     }

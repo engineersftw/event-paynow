@@ -97,7 +97,8 @@ export class EndEventHandler {
       if (!eventRef) return false;
 
       const event = await this.eventRepository.getEventByRef(eventRef);
-      if (event?.status !== 'open') {
+      // An event from another chat reads as not found (a forwarded ref must not close it)
+      if (event?.status !== 'open' || event.chatId !== ctx.chat?.id) {
         await ctx.answerCallbackQuery({ text: '❌ Event not found or already closed.' });
         return true;
       }
@@ -119,7 +120,7 @@ export class EndEventHandler {
       if (!eventRef) return false;
 
       const event = await this.eventRepository.getEventByRef(eventRef);
-      if (event?.status !== 'open') {
+      if (event?.status !== 'open' || event.chatId !== ctx.chat?.id) {
         await ctx.editMessageText('❌ Event not found or already closed.', {
           reply_markup: { inline_keyboard: [] },
         });

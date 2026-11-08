@@ -129,6 +129,18 @@ describe('PaymentsCommandHandler', () => {
       );
     });
 
+    it('treats an event from another chat as not found', async () => {
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue({
+        ...openEvent,
+        chatId: 555,
+      } as any);
+
+      await handler.handle(mockCtx, 'EVT-TEST0001');
+
+      expect(mockCtx.reply).toHaveBeenCalledWith('❌ Event not found.');
+      expect(mockRepository.listPaymentsByUser).not.toHaveBeenCalled();
+    });
+
     it('escapes Markdown specials in the event name and description', async () => {
       const payment: Payment = {
         id: 1,
