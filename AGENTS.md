@@ -233,7 +233,7 @@ Tests that tap buttons from a group chat stub `globalThis.fetch` for `getChatMem
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
-`handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell, data
+`handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell from `src/web/page.ts`: shadcn-style CSS tokens, compact payment cards, a native `<dialog>` for new requests, paybacks and pending QR/actions behind tap-to-expand buttons so no QR loads with the page; data
 written with `textContent`), `GET /api/events/:ref` (JSON), `GET /api/login` (Telegram Login Widget
 redirect target; HMAC check in `src/web/auth.ts`, then a 12 h signed HttpOnly cookie). Access =
 signed-in user is chat admin/creator via live `getChatMember` (`src/web/access.ts`), or the private-chat
