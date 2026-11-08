@@ -2,10 +2,13 @@
 export function renderPage(ref: string, botUsername: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Event payments</title>
+<title>Event</title>
+<link rel="icon" href="/logo.png">
+<script>try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
 <style>
-:root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa;--destructive:#dc2626;--ring:#a1a1aa;--radius:.5rem}
-@media (prefers-color-scheme:dark){:root{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--destructive:#f87171;--ring:#52525b}}
+:root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa;--destructive:#dc2626;--ring:#a1a1aa;--radius:.5rem;--pending-bg:#fef3c7;--pending-fg:#92400e;--received-bg:#dcfce7;--received-fg:#166534;--voided-bg:#e4e4e7;--voided-fg:#52525b}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--destructive:#f87171;--ring:#52525b;--pending-bg:#451a03;--pending-fg:#fcd34d;--received-bg:#052e16;--received-fg:#86efac;--voided-bg:#3f3f46;--voided-fg:#d4d4d8}}
+:root[data-theme="dark"]{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--destructive:#f87171;--ring:#52525b;--pending-bg:#451a03;--pending-fg:#fcd34d;--received-bg:#052e16;--received-fg:#86efac;--voided-bg:#3f3f46;--voided-fg:#d4d4d8}
 *{box-sizing:border-box}
 body{margin:0 auto;max-width:44rem;padding:16px;font:14px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
 h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
@@ -20,20 +23,23 @@ h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
 .row .end{text-align:right;flex:none}
 .name{font-weight:600;overflow-wrap:anywhere}
 .voided .amt{text-decoration:line-through;color:var(--muted-fg)}
-.badge{display:inline-block;border:1px solid var(--border);border-radius:999px;padding:0 8px;font-size:12px;font-weight:600;background:var(--muted)}
-.badge.received{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
-.badge.voided{color:var(--muted-fg);background:transparent}
+.badge{display:inline-block;border-radius:999px;padding:1px 10px;font-size:12px;font-weight:600;background:var(--muted);color:var(--fg)}
+.badge.pending{background:var(--pending-bg);color:var(--pending-fg)}
+.badge.received,.badge.sent{background:var(--received-bg);color:var(--received-fg)}
+.badge.voided,.badge.cancelled{background:var(--voided-bg);color:var(--voided-fg)}
 .toggles{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .panel{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:grid;gap:8px}
-.btn{font:inherit;font-weight:500;border:1px solid var(--border);background:var(--bg);color:var(--fg);border-radius:calc(var(--radius) - 2px);padding:6px 12px;cursor:pointer}
+.btn{font:inherit;font-weight:600;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);background:var(--bg);color:var(--fg);border-radius:calc(var(--radius) - 2px);padding:8px 16px;cursor:pointer}
 .btn:hover{background:var(--muted)}
 .btn.primary{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
 .btn.primary:hover{opacity:.9}
-.btn.destructive{color:var(--destructive)}
-.btn.sm{padding:2px 10px;font-size:12px}
+.btn.destructive{color:var(--destructive);border-color:var(--destructive)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
+.count{display:inline-block;min-width:1.6em;padding:0 6px;border-radius:999px;background:var(--primary);color:var(--primary-fg);font-size:13px;font-weight:700;line-height:1.6;text-align:center}
+.brand{display:flex;align-items:center;gap:10px;min-width:0}
+.brand img{flex:none;border-radius:8px}
 :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
-.input{font:inherit;width:100%;border:1px solid var(--border);border-radius:calc(var(--radius) - 2px);padding:6px 10px;background:var(--bg);color:var(--fg)}
+.input{font:inherit;min-height:40px;width:100%;border:1px solid var(--border);border-radius:calc(var(--radius) - 2px);padding:6px 10px;background:var(--bg);color:var(--fg)}
 label{display:grid;gap:4px;font-weight:500}
 .fields{display:grid;gap:12px}
 .inline{display:flex;flex-wrap:wrap;gap:6px}.inline .input{width:auto;flex:1 1 8rem}
@@ -46,7 +52,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .foot{display:flex;justify-content:flex-end;gap:8px}
 img{max-width:100%;height:auto}
 </style></head><body>
-<div class="head"><h1 id="title">Event payments</h1><button id="new" class="btn primary" hidden>New request</button></div>
+<div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div><div class="inline"><button id="theme" class="btn" aria-label="Switch between light and dark theme"></button><button id="new" class="btn primary" hidden>New request</button></div></div>
 <p id="msg" class="alert" hidden></p>
 <div id="login" hidden>
 <p>Sign in with Telegram to view this event.</p>
@@ -78,7 +84,8 @@ img{max-width:100%;height:auto}
 <script>
 const $ = (id) => document.getElementById(id);
 const sgd = (c) => 'SGD ' + (c / 100).toFixed(2);
-const when = (t) => (t ? new Date(t).toLocaleString() : '');
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const fmtDate = (t) => { if (!t) return ''; const d = new Date(t); return String(d.getDate()).padStart(2, '0') + '-' + MONTHS[d.getMonth()] + '-' + d.getFullYear(); };
 const ERRORS = {
   invalid_amount: 'Enter an amount such as 5.00 (at most 2 decimals).',
   invalid_recipient: 'The recipient must be a valid mobile number or UEN.',
@@ -104,8 +111,11 @@ async function act(path, body, button) {
   if (!res.ok) say(failure(await res.json().catch(() => ({}))));
   await load();
 }
-function toggle(key, label, extra) {
-  const b = el('button', label + (open.has(key) ? ' ▴' : ' ▾'), 'btn sm' + (extra ? ' ' + extra : ''));
+function toggle(key, label, count) {
+  const b = el('button', undefined, 'btn');
+  b.append(label);
+  if (count) b.append(el('span', String(count), 'count'));
+  b.append(el('span', open.has(key) ? '▴' : '▾'));
   b.setAttribute('aria-expanded', String(open.has(key)));
   b.onclick = () => { if (open.has(key)) open.delete(key); else open.add(key); load(); };
   return b;
@@ -131,7 +141,7 @@ function paybackForm(p) {
 }
 function paybackRow(b) {
   const row = el('div', undefined, 'panel');
-  row.append(el('span', sgd(b.amountCents) + (b.recipientName ? ' to ' + b.recipientName : '') + ' · ' + b.status + ' (' + b.ref + ')'));
+  const info = el('div', undefined, 'row'); info.append(el('span', sgd(b.amountCents) + (b.recipientName ? ' to ' + b.recipientName : '') + ' (' + b.ref + ')'), el('span', b.status, 'badge ' + b.status)); row.append(info);
   if (b.status === 'pending') {
     const base = '/api/events/${ref}/paybacks/' + encodeURIComponent(b.ref);
     const sent = el('button', 'Sent', 'btn primary'); sent.onclick = () => act(base + '/sent', {}, sent);
@@ -145,7 +155,7 @@ function paymentCard(p) {
   const card = el('div', undefined, 'card' + (p.status === 'voided' ? ' voided' : ''));
   const row = el('div', undefined, 'row');
   const left = el('div');
-  left.append(el('div', p.payerName || p.ref, 'name'), el('div', p.ref + ' · ' + when(p.createdAt) + (p.receivedAt ? ' · received ' + when(p.receivedAt) : ''), 'muted sm'));
+  left.append(el('div', p.payerName || p.ref, 'name'), el('div', p.ref + ' · ' + fmtDate(p.createdAt) + (p.receivedAt ? ' · received ' + fmtDate(p.receivedAt) : ''), 'muted sm'));
   const end = el('div', undefined, 'end');
   end.append(el('div', sgd(p.amountCents), 'amt name'));
   if (p.paidBackCents > 0) end.append(el('div', 'Net ' + sgd(p.netCents), 'muted sm'));
@@ -155,7 +165,7 @@ function paymentCard(p) {
   const toggles = el('div', undefined, 'toggles');
   if (p.status === 'pending') toggles.append(toggle('p:' + p.ref, 'Show QR and actions'));
   const canPayback = p.status === 'received' && p.remainingCents > 0;
-  if (p.paybacks.length > 0 || canPayback) toggles.append(toggle('b:' + p.ref, p.paybacks.length > 0 ? 'Paybacks · ' + p.paybacks.length : 'Pay back'));
+  if (p.paybacks.length > 0 || canPayback) toggles.append(toggle('b:' + p.ref, p.paybacks.length > 0 ? 'Paybacks' : 'Pay back', p.paybacks.length));
   if (toggles.children.length > 0) card.append(toggles);
   if (p.status === 'pending' && open.has('p:' + p.ref)) card.append(pendingPanel(p));
   if (open.has('b:' + p.ref)) {
@@ -171,8 +181,8 @@ async function load() {
   if (res.status === 404) { say('Event not found.'); return; }
   if (!res.ok) { say('Something went wrong.'); return; }
   const d = await res.json();
-  document.title = d.event.name;
-  $('title').textContent = d.event.name;
+  document.title = 'Event: ' + d.event.name;
+  $('title').textContent = 'Event: ' + d.event.name;
   $('new').hidden = d.event.status !== 'open';
   $('collected').textContent = sgd(d.totals.collectedCents);
   $('paidback').textContent = sgd(d.totals.paidBackCents);
@@ -197,6 +207,12 @@ async function createRequest() {
   $('dlg-qr').replaceChildren(qrImage('/api/events/${ref}/payments/' + encodeURIComponent(out.payment.ref) + '/qr', 'Payment QR'));
   await load();
 }
+const root = document.documentElement;
+const isDark = () => (root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
+const paintTheme = () => { $('theme').textContent = isDark() ? '☀' : '☾'; };
+$('theme').onclick = () => { const next = isDark() ? 'light' : 'dark'; root.dataset.theme = next; try { localStorage.setItem('theme', next); } catch (e) {} paintTheme(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTheme);
+paintTheme();
 $('new').onclick = () => { showForm(); $('dlg').showModal(); };
 $('np-cancel').onclick = () => $('dlg').close();
 $('np-done').onclick = () => $('dlg').close();
