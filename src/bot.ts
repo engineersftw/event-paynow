@@ -6,6 +6,7 @@ import { PaybackCommandHandler } from './commands/payback-handler';
 import { PaymentCallbackHandler } from './commands/payment-callback-handler';
 import { PaymentsCommandHandler } from './commands/payments-handler';
 import { StartCommandHandler } from './commands/start-handler';
+import { WebAdminCommandHandler } from './commands/web-admin-handler';
 import { D1EventRepository, D1Repository } from './db/drizzle-repository';
 import type { Env } from './env';
 import type { ConversationDO } from './worker/conversation-do';
@@ -15,6 +16,7 @@ const HELP_TEXT =
   '/start — create a PayNow QR payment request\n' +
   '/payments — list your payments (with inline buttons)\n' +
   '/payback <ref> — pay back a received payment\n' +
+  '/web_admin — open the web page for an event (admins)\n' +
   '/init — create a new event (name + PayNow payee)\n' +
   '/end_event — close an event\n' +
   '/cancel — abandon the current conversation\n\n' +
@@ -57,6 +59,10 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
 
   bot.command('payments', (ctx) =>
     new PaymentsCommandHandler(repository, eventRepository).handle(ctx)
+  );
+
+  bot.command('web_admin', (ctx) =>
+    new WebAdminCommandHandler(eventRepository, env.WEB_ADMIN_URL).handle(ctx)
   );
 
   bot.command('payback', (ctx) => {

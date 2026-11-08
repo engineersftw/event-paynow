@@ -1,0 +1,15 @@
+# Cloudflare Pages project for the read-only event admin page.
+# Deploy from this directory: `npx wrangler pages deploy public --project-name event-paynow-web`
+# (npm run web:deploy). Secrets (wrangler pages secret put ...): TELEGRAM_BOT_TOKEN, SESSION_SECRET.
+name = "event-paynow-web"
+pages_build_output_dir = "public"
+compatibility_date = "2024-12-05"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "paynow_db"
+database_name = "paynow-db"
+database_id = "c0387aac-9b54-4329-9355-d2e5572e0eab"
+
+[vars]
+BOT_USERNAME = "event_paynow_bot"

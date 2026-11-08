@@ -7,4 +7,6 @@ export interface Env {
   TELEGRAM_BOT_TOKEN: string;
   TELEGRAM_WEBHOOK_SECRET: string;
   BOT_USERNAME: string;
+  /** Base URL of the Pages event page, e.g. https://event-paynow-web.pages.dev */
+  WEB_ADMIN_URL?: string;
 }

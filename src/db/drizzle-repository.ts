@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, ne, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreatePaybackBoundedResult,
@@ -155,6 +155,17 @@ export class D1Repository implements Repository {
       .select()
       .from(schema.payments)
       .where(eq(schema.payments.userId, userId))
+      .all();
+
+    return results.map(toPayment);
+  }
+
+  async listPaymentsByEvent(eventId: number): Promise<Payment[]> {
+    const results = await this.db
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.eventId, eventId))
+      .orderBy(desc(schema.payments.createdAt), desc(schema.payments.id))
       .all();
 
     return results.map(toPayment);

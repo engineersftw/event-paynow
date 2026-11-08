@@ -19,5 +19,6 @@ new_sqlite_classes = ["ChatSessionDO"]
 
 [vars]
 BOT_USERNAME = "event_paynow_bot"
+# WEB_ADMIN_URL = "https://event-paynow-web.pages.dev"  # set after creating the Pages project
 
 # Set via `wrangler secret put TELEGRAM_BOT_TOKEN`

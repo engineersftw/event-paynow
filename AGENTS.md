@@ -65,6 +65,7 @@ This project uses OpenSpec for change management. All changes are archived:
 6. `add-start-confirmation-step` (9 tasks) — archived 2026-11-08
 7. `add-void-payment-request` (13 tasks) — archived 2026-11-08
 8. `add-qr-image-payment-details` (6 tasks) — archived 2026-11-08
+9. `add-web-admin-event-view` (7 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -79,7 +80,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (6 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (7 capabilities)
 
 ## Key Design Decisions
 
@@ -208,6 +209,18 @@ The repository layer provides infra-neutral interfaces for database operations:
 - 11 tests in `test/workers/payback-bounds.test.ts` cover bounded payback creation incl. concurrency
 - Tests verify cross-user isolation, read-back-after-write consistency, and status transitions
 - Tests run in Workers pool with real D1 bindings
+
+## Web Admin (Cloudflare Pages, read-only)
+
+`/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
+The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
+`handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell, data
+written with `textContent`), `GET /api/events/:ref` (JSON), `GET /api/login` (Telegram Login Widget
+redirect target; HMAC check in `src/web/auth.ts`, then a 12 h signed HttpOnly cookie). Access =
+signed-in user is chat admin/creator via live `getChatMember` (`src/web/access.ts`), or the private-chat
+owner; any failure denies. The API returns payer names only, never PayNow numbers, and voided
+payments are listed but excluded from totals. Type-checked by `tsc -p web` (part of `npm run build`).
+Pages secrets: `TELEGRAM_BOT_TOKEN`, `SESSION_SECRET`; the Login Widget needs BotFather `/setdomain`.
 
 ## Command Handlers
 
