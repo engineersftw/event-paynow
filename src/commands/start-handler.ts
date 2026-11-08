@@ -363,6 +363,7 @@ export class StartCommandHandler {
     const eventRef = state.context.eventRef as string;
     const _eventName = state.context.eventName as string;
     const userId = ctx.from!.id;
+    let createdRef: string | undefined;
 
     try {
       const event = await this.eventRepository.getEventByRef(eventRef);
@@ -402,6 +403,7 @@ export class StartCommandHandler {
         qrPayload,
         timestamp: new Date().toISOString(),
       });
+      createdRef = payment.ref;
 
       // Same name-only rule as the caption: the image is forwarded too
       const bmpBytes = await renderQrPng(qrPayload, [
@@ -430,6 +432,8 @@ export class StartCommandHandler {
       });
     } catch (error) {
       console.error('Failed to create payment:', error);
+      // No QR reached the user, so don't leave a pending payment padding event totals
+      if (createdRef) await this.repository.voidPayment(createdRef).catch(() => null);
       // The Confirm claim already ended the conversation, so a retry means a fresh /start
       await ctx.reply('❌ Failed to create the payment. Please run /start again.');
     }
