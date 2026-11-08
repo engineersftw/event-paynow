@@ -71,6 +71,7 @@ This project uses OpenSpec for change management. All changes are archived:
 10. `payments-net-of-paybacks` (8 tasks) — archived 2026-11-08
 11. `admin-payment-actions` (16 tasks) — archived 2026-11-08
 12. `web-payment-requests` (7 tasks) — archived 2026-11-08
+13. `redesign-web-admin-ui` (12 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
