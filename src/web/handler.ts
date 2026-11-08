@@ -83,19 +83,31 @@ async function eventData(
     return json({ error: 'forbidden' }, 403);
   }
 
-  const payments = await new D1Repository(env.paynow_db).listPaymentsByEvent(event.id);
+  const repo = new D1Repository(env.paynow_db);
+  const payments = await repo.listPaymentsByEvent(event.id);
+  // Same rule as the bot: net = amount minus SENT paybacks (pending/cancelled never count)
+  const sent = await repo.sentPaybackTotalsByEvent(event.id);
   const sum = (status: string) =>
     payments.filter((p) => p.status === status).reduce((t, p) => t + p.amountCents, 0);
+  const paidBackCents = payments
+    .filter((p) => p.status === 'received')
+    .reduce((t, p) => t + (sent.get(p.id) ?? 0), 0);
 
   // Names only: never expose payer/payee PayNow numbers to the page.
   return json({
     event: { name: event.name, status: event.status },
-    totals: { collectedCents: sum('received'), pendingCents: sum('pending') },
+    totals: {
+      collectedCents: sum('received') - paidBackCents,
+      paidBackCents,
+      pendingCents: sum('pending'),
+    },
     payments: payments.map((p) => ({
       ref: p.ref,
       description: p.description,
       payerName: p.payerName ?? null,
       amountCents: p.amountCents,
+      paidBackCents: sent.get(p.id) ?? 0,
+      netCents: p.amountCents - (sent.get(p.id) ?? 0),
       status: p.status,
       createdAt: p.createdAt,
       receivedAt: p.receivedAt,
@@ -121,8 +133,8 @@ table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.4rem .5
 <script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="${botUsername.replace(/[^A-Za-z0-9_]/g, '')}" data-size="large" data-auth-url="/api/login?ref=${ref}" data-request-access="write"></script>
 </div>
 <div id="data" hidden>
-<div class="totals"><div>Collected: <b id="collected"></b></div><div>Pending: <b id="pending"></b></div></div>
-<table><thead><tr><th>Description</th><th>Payer</th><th class="num">Amount</th><th>Status</th><th>Ref</th><th>Created</th><th>Received</th></tr></thead><tbody id="rows"></tbody></table>
+<div class="totals"><div>Collected: <b id="collected"></b></div><div>Paid back: <b id="paidback"></b></div><div>Pending: <b id="pending"></b></div></div>
+<table><thead><tr><th>Description</th><th>Payer</th><th class="num">Amount</th><th class="num">Paid back</th><th class="num">Net</th><th>Status</th><th>Ref</th><th>Created</th><th>Received</th></tr></thead><tbody id="rows"></tbody></table>
 </div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -136,14 +148,15 @@ fetch('/api/events/${ref}', { credentials: 'same-origin' }).then(async (res) => 
   const d = await res.json();
   $('title').textContent = d.event.name;
   $('collected').textContent = sgd(d.totals.collectedCents);
+  $('paidback').textContent = sgd(d.totals.paidBackCents);
   $('pending').textContent = sgd(d.totals.pendingCents);
   if (d.payments.length === 0) { $('msg').textContent = 'No payments yet.'; }
   else { $('msg').hidden = true; }
   for (const p of d.payments) {
     const tr = document.createElement('tr');
     if (p.status === 'voided') tr.className = 'voided';
-    [p.description, p.payerName || '', sgd(p.amountCents), p.status, p.ref, when(p.createdAt), when(p.receivedAt)]
-      .forEach((v, i) => { const td = document.createElement('td'); if (i === 2) td.className = 'num'; td.textContent = v; tr.appendChild(td); });
+    [p.description, p.payerName || '', sgd(p.amountCents), sgd(p.paidBackCents), sgd(p.netCents), p.status, p.ref, when(p.createdAt), when(p.receivedAt)]
+      .forEach((v, i) => { const td = document.createElement('td'); if (i >= 2 && i <= 4) td.className = 'num'; td.textContent = v; tr.appendChild(td); });
     $('rows').appendChild(tr);
   }
   $('data').hidden = false;

@@ -39,6 +39,18 @@ describe('D1EventRepository', () => {
         received_at TEXT,
         FOREIGN KEY (event_id) REFERENCES events(id)
       )`,
+      `CREATE TABLE IF NOT EXISTS paybacks (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        ref TEXT NOT NULL UNIQUE,
+        payment_id INTEGER NOT NULL,
+        payer_type TEXT NOT NULL,
+        payer_value TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        status TEXT NOT NULL CHECK(status IN ('pending', 'sent', 'cancelled')),
+        qr_payload TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        sent_at TEXT
+      )`,
     ];
     for (const stmt of statements) {
       await env.paynow_db.prepare(stmt).run();
@@ -374,7 +386,12 @@ describe('D1EventRepository', () => {
 
       const stats = await repo.getEventStats(event.id);
 
-      expect(stats).toEqual({ paymentCount: 2, collectedCents: 1000, pendingCents: 500 });
+      expect(stats).toEqual({
+        paymentCount: 2,
+        collectedCents: 1000,
+        paidBackCents: 0,
+        pendingCents: 500,
+      });
     });
   });
 });

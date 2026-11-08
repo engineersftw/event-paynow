@@ -138,6 +138,7 @@ export class EndEventHandler {
           `🔒 Event "${event.name}" closed.\n\n` +
             `Payments: ${stats.paymentCount}\n` +
             `Collected: $${(stats.collectedCents / 100).toFixed(2)}\n` +
+            `Paid back: $${(stats.paidBackCents / 100).toFixed(2)}\n` +
             `Pending: $${(stats.pendingCents / 100).toFixed(2)}\n\n` +
             'No new payments can be created for this event.',
           { reply_markup: { inline_keyboard: [] } }
@@ -176,6 +177,7 @@ export class EndEventHandler {
       `🔒 Close event "${event.name}"?\n\n` +
         `Payments: ${stats.paymentCount}\n` +
         `Collected: $${(stats.collectedCents / 100).toFixed(2)}\n` +
+        `Paid back: $${(stats.paidBackCents / 100).toFixed(2)}\n` +
         `Pending: $${(stats.pendingCents / 100).toFixed(2)}\n\n` +
         'This will prevent new payments. Existing payments remain tracked.',
       { reply_markup: keyboard }

@@ -155,7 +155,7 @@ describe('web admin', () => {
     const raw = await res.text();
     const body = JSON.parse(raw);
     expect(body.payments).toHaveLength(3);
-    expect(body.totals).toEqual({ collectedCents: 1000, pendingCents: 250 });
+    expect(body.totals).toEqual({ collectedCents: 1000, paidBackCents: 0, pendingCents: 250 });
     expect(body.payments.map((p: { status: string }) => p.status).sort()).toEqual([
       'pending',
       'received',
@@ -164,6 +164,51 @@ describe('web admin', () => {
     expect(raw).not.toContain('+6598887777'); // payer number
     expect(raw).not.toContain('+6591110000'); // payee number
     expect(raw).toContain('Alice');
+  });
+
+  it('API: sent paybacks reduce net and collected; pending and cancelled are ignored', async () => {
+    const e = await seedEvent('EVTWEB0005', -8);
+    await seedPayment(e.id, 'WEBP000020', 1, 2000);
+    await seedPayment(e.id, 'WEBP000021', 2, 1000);
+    await repo.updatePaymentStatus('WEBP000020', 'received', 'manual', T);
+    await repo.updatePaymentStatus('WEBP000021', 'received', 'manual', T);
+    const [p20, p21] = [
+      (await repo.getPaymentByRef('WEBP000020'))!,
+      (await repo.getPaymentByRef('WEBP000021'))!,
+    ];
+    const payback = async (
+      paymentId: number,
+      ref: string,
+      cents: number,
+      status?: 'sent' | 'cancelled'
+    ) => {
+      await repo.createPayback({
+        ref,
+        paymentId,
+        payerType: 'mobile',
+        payerValue: '+6592220000',
+        amountCents: cents,
+        status: 'pending',
+        qrPayload: 'p',
+        timestamp: T,
+      });
+      if (status) await repo.updatePaybackStatus(ref, status, T);
+    };
+    await payback(p20.id, 'WEBPB00001', 500, 'sent');
+    await payback(p21.id, 'WEBPB00002', 300); // pending
+    await payback(p21.id, 'WEBPB00003', 200, 'cancelled');
+
+    const raw = await (await get(`/api/events/${e.ref}`, 99)).text();
+    const body = JSON.parse(raw);
+    const byRef = Object.fromEntries(body.payments.map((p: { ref: string }) => [p.ref, p]));
+    expect(byRef.WEBP000020).toMatchObject({
+      amountCents: 2000,
+      paidBackCents: 500,
+      netCents: 1500,
+    });
+    expect(byRef.WEBP000021).toMatchObject({ amountCents: 1000, paidBackCents: 0, netCents: 1000 });
+    expect(body.totals).toEqual({ collectedCents: 2500, paidBackCents: 500, pendingCents: 0 });
+    expect(raw).not.toContain('+6592220000'); // payback recipient number
   });
 
   it('API: a private-chat owner sees their own event without a bot-API call', async () => {
@@ -179,6 +224,7 @@ describe('web admin', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('data-telegram-login="my_bot"');
+    expect(html).toContain('<th class="num">Paid back</th><th class="num">Net</th>');
     expect(html).not.toMatch(/<form|method=["']post/i);
     expect((await get('/events/bad ref')).status).toBe(404);
     expect(

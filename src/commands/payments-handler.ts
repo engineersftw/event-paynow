@@ -62,7 +62,7 @@ export class PaymentsCommandHandler {
 
         lines.push(`${statusIcon} *${escapeMarkdown(event.name)}* (${statusLabel})`);
         lines.push(
-          `   Payee: ${event.payeeValue} | ${stats.paymentCount} payments | $${formatCents(stats.collectedCents)} collected | $${formatCents(stats.pendingCents)} pending`
+          `   Payee: ${event.payeeValue} | ${stats.paymentCount} payments | $${formatCents(stats.collectedCents)} collected | $${formatCents(stats.paidBackCents)} paid back | $${formatCents(stats.pendingCents)} pending`
         );
         lines.push('');
 
@@ -105,17 +105,24 @@ export class PaymentsCommandHandler {
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
+    const sentByPayment = await this.repository.sentPaybackTotalsByEvent(event.id);
     const lines: string[] = [`💰 *${escapeMarkdown(event.name)}*\n`];
     const keyboard = new InlineKeyboard();
 
     for (const payment of sorted) {
       const { icon: statusIcon, label: status } = PAYMENT_STATUS_DISPLAY[payment.status];
-      const amount = `$${formatCents(payment.amountCents)}`;
+      // Net of SENT paybacks only (pending/cancelled never reduce it); unchanged without any
+      const sent = sentByPayment.get(payment.id) ?? 0;
+      const amount =
+        sent > 0
+          ? `$${formatCents(payment.amountCents - sent)}* (of $${formatCents(payment.amountCents)})`
+          : `$${formatCents(payment.amountCents)}*`;
       const date = this.formatDate(payment.createdAt);
 
       const payer = payment.payerName ? ` (${escapeMarkdown(payment.payerName)})` : '';
-      lines.push(`${statusIcon} *${amount}* - ${escapeMarkdown(payment.description)}${payer}`);
-      lines.push(`   Ref: \`${payment.ref}\` | ${status} | ${date}`);
+      lines.push(`${statusIcon} *${amount} - ${escapeMarkdown(payment.description)}${payer}`);
+      const paidBack = sent > 0 ? ` | Paid back $${formatCents(sent)}` : '';
+      lines.push(`   Ref: \`${payment.ref}\` | ${status} | ${date}${paidBack}`);
       lines.push('');
 
       keyboard.add({ text: 'View', callback_data: `view:${payment.ref}` });
