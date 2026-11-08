@@ -1,3 +1,4 @@
+import { isChatAdmin } from '../access/chat-admin';
 import { captionPart, recipientName } from '../commands/payer-label';
 import { D1EventRepository, D1Repository } from '../db/drizzle-repository';
 import { createPaybackFor } from '../db/payback-service';
@@ -6,7 +7,7 @@ import type { Event, Payback, Payment } from '../db/repository';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { bmpToPng } from '../sgqr/png';
 import { renderQrPng } from '../sgqr/qr-render';
-import { canViewChat } from './access';
+
 import { SESSION_MAX_AGE_SEC, signSession, verifySession, verifyTelegramLogin } from './auth';
 
 /** Bindings of the Pages project (see web/wrangler.toml). */
@@ -94,7 +95,7 @@ async function eventAccess(
 
   const event = await new D1EventRepository(env.paynow_db).getEventByRef(ref);
   if (!event) return json({ error: 'not_found' }, 404);
-  if (!(await canViewChat(event.chatId, userId, env.TELEGRAM_BOT_TOKEN, fetchFn))) {
+  if (!(await isChatAdmin(event.chatId, userId, env.TELEGRAM_BOT_TOKEN, fetchFn))) {
     return json({ error: 'forbidden' }, 403);
   }
   return { userId, event };

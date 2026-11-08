@@ -1,8 +1,10 @@
 import type { BotConfig, Context } from 'grammy';
 import { Bot, webhookCallback } from 'grammy';
+import { isChatAdmin } from './access/chat-admin';
 import { EndEventHandler } from './commands/end-event-handler';
 import { InitCommandHandler } from './commands/init-handler';
 import { PaybackCommandHandler } from './commands/payback-handler';
+import { createPaymentAccess } from './commands/payment-access';
 import { PaymentCallbackHandler } from './commands/payment-callback-handler';
 import { PaymentsCommandHandler } from './commands/payments-handler';
 import { StartCommandHandler } from './commands/start-handler';
@@ -34,6 +36,10 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   const bot = new Bot(env.TELEGRAM_BOT_TOKEN, config);
   const repository = new D1Repository(env.paynow_db);
   const eventRepository = new D1EventRepository(env.paynow_db);
+  // Chat admins may act on any payment of their chat's events (live getChatMember check)
+  const isAdmin = (chatId: number, userId: number) =>
+    isChatAdmin(chatId, userId, env.TELEGRAM_BOT_TOKEN);
+  const canAct = createPaymentAccess(eventRepository, isAdmin);
 
   /** Per-chat conversation DO stub (keyed exactly like the webhook design). */
   const conversation = (ctx: Context): ConversationDO => {
@@ -58,7 +64,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   );
 
   bot.command('payments', (ctx) =>
-    new PaymentsCommandHandler(repository, eventRepository).handle(ctx)
+    new PaymentsCommandHandler(repository, eventRepository, isAdmin).handle(ctx)
   );
 
   bot.command('web_admin', (ctx) =>
@@ -67,7 +73,10 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
 
   bot.command('payback', (ctx) => {
     const arg = typeof ctx.match === 'string' ? ctx.match.trim() : '';
-    return new PaybackCommandHandler(conversation(ctx), repository).start(ctx, arg || undefined);
+    return new PaybackCommandHandler(conversation(ctx), repository, canAct).start(
+      ctx,
+      arg || undefined
+    );
   });
 
   bot.command('end_event', (ctx) =>
@@ -125,12 +134,12 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     }
     if (data.startsWith('event_view:')) {
       const eventRef = data.split(':')[1];
-      await new PaymentsCommandHandler(repository, eventRepository).handle(ctx, eventRef);
+      await new PaymentsCommandHandler(repository, eventRepository, isAdmin).handle(ctx, eventRef);
       return;
     }
     if (data.startsWith('payments:')) {
       const page = data.split(':')[1];
-      await new PaymentsCommandHandler(repository, eventRepository).handle(ctx, page);
+      await new PaymentsCommandHandler(repository, eventRepository, isAdmin).handle(ctx, page);
       return;
     }
     if (
@@ -140,10 +149,10 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
       data.startsWith('payback_confirm_amount:') ||
       data.startsWith('payback_cancel_amount:')
     ) {
-      await new PaybackCommandHandler(conversation(ctx), repository).handleCallback(ctx);
+      await new PaybackCommandHandler(conversation(ctx), repository, canAct).handleCallback(ctx);
       return;
     }
-    await new PaymentCallbackHandler(conversation(ctx), repository).handleCallback(ctx);
+    await new PaymentCallbackHandler(conversation(ctx), repository, canAct).handleCallback(ctx);
   });
 
   // --- free-text conversation routing --------------------------------------
@@ -151,7 +160,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   // returns false unless it owns the conversation.
   bot.on('message:text', async (ctx) => {
     const doStub = conversation(ctx);
-    if (await new PaybackCommandHandler(doStub, repository).handleInput(ctx)) return;
+    if (await new PaybackCommandHandler(doStub, repository, canAct).handleInput(ctx)) return;
     if (await new StartCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;
     if (await new InitCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;
     if (await new EndEventHandler(doStub, eventRepository).handleInput(ctx)) return;

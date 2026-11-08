@@ -215,6 +215,18 @@ The repository layer provides infra-neutral interfaces for database operations:
 - Tests verify cross-user isolation, read-back-after-write consistency, and status transitions
 - Tests run in Workers pool with real D1 bindings
 
+## Chat admin access and audit
+
+`src/commands/payment-access.ts`: `createPaymentAccess(events, isChatAdmin)` decides whether a user may act on a
+payment (view, received, void, payback, sent, cancel) — the owner always (no network call), otherwise an
+administrator/owner of the payment's event chat via live `getChatMember` (`src/access/chat-admin.ts`, shared with
+the web page); no event → owner only; a failed check denies. `createBot` injects it into `PaymentCallbackHandler` and
+`PaybackCommandHandler` (default `ownerOnly`, which is what unit tests use) and the admin check into
+`PaymentsCommandHandler`, where admins see every payment of the event in the drill-down. The acting user id
+(`ctx.from.id`) is passed to `updatePaymentStatus`, `voidPayment`, `updatePaybackStatus` and `createdBy` of
+paybacks, and stored in the same guarded statement (migration 0005 columns), so a lost race records nobody.
+Tests that tap buttons from a group chat stub `globalThis.fetch` for `getChatMember` (grammY uses the injected client).
+
 ## Web Admin (Cloudflare Pages)
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.

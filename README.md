@@ -9,6 +9,8 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - **SGQR PayNow QR codes**: EMVCo-compliant payloads with CRC16 checksum, rendered as BMP images with the payment details printed below the QR (names only, never PayNow numbers)
 - **Payment tracking**: List payments; mark received or void a pending request from the QR message; view details with payback history; per-payment amounts and event totals are net of **sent** paybacks, with the paid-back total shown (in the bot and on the web page)
 - **Payback support**: Bounded paybacks (pending + sent cannot exceed the original payment) with an SGQR QR for the payer; confirm a payback as sent or cancel it; the stored payer is proposed as the recipient and can be changed per payback
+- **Chat admins act on any payment**: administrators of an event's chat can view, receive, void, pay back and mark paybacks sent/cancelled on payments they did not create (checked live with `getChatMember`), and `/payments` shows them every payment of the event; ordinary members keep owner-only access
+- **Audit**: who received/voided a payment and who created/sent/cancelled a payback is recorded (Telegram user ids) for bot and web actions
 - **Names in messages**: Captions and status lines show `Payer: <name>` / `To: <name>`, never a PayNow number
 - **Web admin**: `/web_admin` links to a Cloudflare Pages page listing every payment in an event; chat admins (Telegram sign-in) can also create paybacks with a QR image and mark them sent or cancel them
 - **Inline buttons**: Confirm/cancel via buttons, action buttons on QR photos, paginated lists; double taps and racing taps resolve to one winner
@@ -277,7 +279,8 @@ npx wrangler deployments rollback
 
 - Webhook secret validation (`X-Telegram-Bot-Api-Secret-Token`) before bot processing
 - Per-chat Durable Object isolation for conversation state
-- Repository queries always filter by user ID; event actions check the event belongs to the chat
+- Payment actions are limited to the payment's owner and to administrators of the event's chat (live check, denied when it fails); other queries filter by user ID, and event actions check the event belongs to the chat
+- Every payment/payback action records who performed it (audit columns)
 - Web admin: Telegram Login data is HMAC-verified and expires after a day, sessions are signed HttpOnly cookies, and viewing requires chat-admin status checked live; the page never exposes PayNow numbers
 - All inputs validated before database operations
 - Parameterized SQL queries (Drizzle ORM)

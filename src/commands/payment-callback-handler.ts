@@ -5,6 +5,7 @@ import { formatCents } from '../sgqr/amount.js';
 import type { ConversationDO } from '../worker/conversation-do.js';
 import { PaybackCommandHandler } from './payback-handler.js';
 import { captionPart, escapeMarkdown, payerLabel, recipientName } from './payer-label.js';
+import { ownerOnly, type PaymentAccess } from './payment-access.js';
 
 /**
  * Callback query handler for payment actions
@@ -19,9 +20,16 @@ export class PaymentCallbackHandler {
   private conversationDO: ConversationDO;
   private repository: Repository;
 
-  constructor(conversationDO: ConversationDO, repository: Repository) {
+  private canAct: PaymentAccess;
+
+  constructor(
+    conversationDO: ConversationDO,
+    repository: Repository,
+    canAct: PaymentAccess = ownerOnly
+  ) {
     this.conversationDO = conversationDO;
     this.repository = repository;
+    this.canAct = canAct;
   }
 
   /**
@@ -54,7 +62,7 @@ export class PaymentCallbackHandler {
         return;
       }
 
-      if (payment.userId !== userId) {
+      if (!(await this.canAct(payment, userId))) {
         await ctx.answerCallbackQuery({ text: '❌ You do not own this payment' });
         return;
       }
@@ -243,7 +251,8 @@ export class PaymentCallbackHandler {
       payment.ref,
       'received',
       'manual',
-      timestamp
+      timestamp,
+      ctx.from!.id
     );
 
     if (!updatedPayment) {
@@ -309,7 +318,13 @@ export class PaymentCallbackHandler {
     }
 
     const timestamp = new Date().toISOString();
-    const updated = await this.repository.updatePaybackStatus(paybackRef, target, timestamp);
+    // The acting user (owner or chat admin) is recorded in the same guarded UPDATE
+    const updated = await this.repository.updatePaybackStatus(
+      paybackRef,
+      target,
+      timestamp,
+      ctx.from!.id
+    );
 
     if (!updated) {
       // Lost the race against a concurrent tap — distinguish the states.
@@ -383,7 +398,7 @@ export class PaymentCallbackHandler {
       return;
     }
 
-    const voided = await this.repository.voidPayment(payment.ref);
+    const voided = await this.repository.voidPayment(payment.ref, ctx.from!.id);
     if (!voided) {
       // Lost the race against ✓ Received (or another Void)
       const current = await this.repository.getPaymentByRef(payment.ref);
@@ -437,6 +452,9 @@ export class PaymentCallbackHandler {
 
     await ctx.answerCallbackQuery({ text: '🔄 Starting payback flow...' });
     // Same seeding and prompts as /payback <ref> (stored payer → confirm / change)
-    await new PaybackCommandHandler(this.conversationDO, this.repository).beginFlow(ctx, payment);
+    await new PaybackCommandHandler(this.conversationDO, this.repository, this.canAct).beginFlow(
+      ctx,
+      payment
+    );
   }
 }

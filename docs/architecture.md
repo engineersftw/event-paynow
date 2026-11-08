@@ -159,7 +159,7 @@
 **`/payments` handler**:
 
 - Top-level lists the chat's events with payment count and collected (net of sent paybacks), paid back and pending totals (voided payments excluded)
-- Drill into an event → the caller's payments (net of sent paybacks, with the original amount and `Paid back` when any were sent) with inline buttons (View / ✓ Received for pending / Payback for received)
+- Drill into an event → the caller's payments, or every payment of the event for a chat administrator (net of sent paybacks, with the original amount and `Paid back` when any were sent) with inline buttons (View / ✓ Received for pending / Payback for received)
 - Payment detail view shows status (⏳ / ✅ / 🚫), payer, timestamps, source and payback history with `Paid back` (sent), `Net`, `Pending paybacks` and `Remaining` (payable-back room); event names and descriptions are Markdown-escaped
 - An event from another chat reads as not found
 
@@ -171,7 +171,7 @@
 
 **`/payback` handler**:
 
-- Starts from `/payback <ref>` or the Payback button; refused unless the payment is `received`
+- Starts from `/payback <ref>` or the Payback button; refused unless the payment is `received`. The owner or a chat administrator of the event's chat may pay it back.
 - A payment with a stored payer proposes it (Confirm / Change recipient / Cancel; a change applies to that payback only); legacy payments prompt for the payer
 - Then amount → Confirm; the payback row is created inside the bounded D1 transaction (pending + sent count toward the bound, cancelled do not)
 - The QR encodes the PAYER as payee proxy; caption and image text show `To: <name>` when the recipient is the stored payer
@@ -575,7 +575,8 @@ npm run test:watch
 ### Data Isolation
 
 - Per-chat DO ensures conversation state isolation
-- Repository queries always filter by user ID; event actions require the event to belong to the chat the tap came from
+- Payment actions (view, receive, void, pay back, sent, cancel) are limited to the payment's owner and to administrators of the event's chat, checked live with `getChatMember` (denied when the check fails; payments without an event stay owner-only); event actions require the event to belong to the chat the tap came from
+- Every such action records who performed it (audit columns `received_by`, `voided_by`, `created_by`, `sent_by`, `cancelled_by`)
 - No cross-user data leakage possible
 - Captions, status lines and QR images carry display names only, never PayNow numbers
 - Web admin: Telegram Login data is HMAC-verified and expires after a day, sessions are signed HttpOnly cookies, and viewing requires chat-admin status checked live

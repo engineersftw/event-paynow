@@ -526,6 +526,11 @@ export class D1EventRepository implements EventRepository {
     return results.map(toEvent);
   }
 
+  async getEventById(id: number): Promise<Event | null> {
+    const result = await this.db.select().from(schema.events).where(eq(schema.events.id, id)).get();
+    return result ? toEvent(result) : null;
+  }
+
   async getEventByRef(ref: string): Promise<Event | null> {
     const result = await this.db
       .select()

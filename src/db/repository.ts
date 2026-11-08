@@ -113,6 +113,7 @@ export interface EventRepository {
   listOpenEventsByChat(chatId: number, topicId: number): Promise<Event[]>;
   listAllEventsByChat(chatId: number, topicId: number): Promise<Event[]>;
   getEventByRef(ref: string): Promise<Event | null>;
+  getEventById(id: number): Promise<Event | null>;
   closeEvent(ref: string, timestamp: string): Promise<boolean>; // returns true if closed (was open)
   getEventStats(eventId: number): Promise<EventStats>;
 }

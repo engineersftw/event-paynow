@@ -3,6 +3,7 @@ import { InlineKeyboard } from 'grammy';
 import type { EventRepository, PaymentStatus, Repository } from '../db/repository.js';
 import { formatCents } from '../sgqr/amount.js';
 import { escapeMarkdown } from './payer-label.js';
+import type { ChatAdminCheck } from './payment-access.js';
 
 const PAYMENT_STATUS_DISPLAY: Record<PaymentStatus, { icon: string; label: string }> = {
   pending: { icon: '⏳', label: 'Pending' },
@@ -14,9 +15,16 @@ export class PaymentsCommandHandler {
   private repository: Repository;
   private eventRepository: EventRepository;
 
-  constructor(repository: Repository, eventRepository: EventRepository) {
+  private isAdmin: ChatAdminCheck;
+
+  constructor(
+    repository: Repository,
+    eventRepository: EventRepository,
+    isAdmin: ChatAdminCheck = async () => false
+  ) {
     this.repository = repository;
     this.eventRepository = eventRepository;
+    this.isAdmin = isAdmin;
   }
 
   /**
@@ -91,9 +99,10 @@ export class PaymentsCommandHandler {
       return;
     }
 
-    // Get all payments for this user, filter by event
-    const allPayments = await this.repository.listPaymentsByUser(userId);
-    const eventPayments = allPayments.filter((p) => p.eventId === event.id);
+    // Chat admins see every payment of the event; everyone else only their own
+    const eventPayments = (await this.isAdmin(event.chatId, userId))
+      ? await this.repository.listPaymentsByEvent(event.id)
+      : (await this.repository.listPaymentsByUser(userId)).filter((p) => p.eventId === event.id);
 
     if (eventPayments.length === 0) {
       await ctx.reply(`📭 No payments for event "${event.name}" yet.\n\nUse /start to create one!`);

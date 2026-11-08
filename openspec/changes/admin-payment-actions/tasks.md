@@ -8,14 +8,14 @@
 ## 2. Shared logic
 
 - [x] 2.1 Add `src/db/payback-service.ts` (`createPaybackFor`: ref, payload with the payer as payee and `Refund <ref>` description, `createPaybackBounded`) and switch `PaybackCommandHandler.createPaybackRecord` to it; verify the existing payback handler and bounds tests pass unchanged and a new node test checks the payload and result passthrough.
-- [ ] 2.2 Move the chat-admin check from `src/web/access.ts` to `src/access/chat-admin.ts` as `isChatAdmin` and update the web import; verify the existing admin-check tests pass against the new path.
+- [x] 2.2 Move the chat-admin check from `src/web/access.ts` to `src/access/chat-admin.ts` as `isChatAdmin` and update the web import; verify the existing admin-check tests pass against the new path.
 - [x] 2.3 Add `src/sgqr/png.ts` with `bmpToPng(bmp)` (24-bit top-down BMP → PNG using `CompressionStream('deflate')` and CRC-32 chunks); verify with a node test that `pngjs` decodes the output to the same pixels as the BMP, jsQR still decodes the QR payload, and the PNG is smaller than the BMP.
 
 ## 3. Bot: admins can act on any payment
 
-- [ ] 3.1 Add `EventRepository.getEventById` and `canActOnPayment(payment, userId)` (owner → allowed without a call; no event → denied; else `isChatAdmin(event.chatId, userId)`, denying on failure) in `src/commands/payment-access.ts`; verify with node tests for owner, admin, ordinary member, event-less payment and a failing check.
-- [ ] 3.2 Inject `isChatAdmin` from `createBot` and replace the two `payment.userId !== userId` checks in `PaymentCallbackHandler` and `PaybackCommandHandler`; pass `ctx.from.id` as the actor for received, void, payback creation, sent and cancel; verify with handler tests that an admin can run each action on another user's payment, a member is refused with the existing message, and the actor is recorded.
-- [ ] 3.3 `/payments` drill-down: admins get `listPaymentsByEvent`, others keep their own payments; verify with node tests for both and with a bot-wiring test using a stubbed Telegram client.
+- [x] 3.1 Add `EventRepository.getEventById` and `canActOnPayment(payment, userId)` (owner → allowed without a call; no event → denied; else `isChatAdmin(event.chatId, userId)`, denying on failure) in `src/commands/payment-access.ts`; verify with node tests for owner, admin, ordinary member, event-less payment and a failing check.
+- [x] 3.2 Inject `isChatAdmin` from `createBot` and replace the two `payment.userId !== userId` checks in `PaymentCallbackHandler` and `PaybackCommandHandler`; pass `ctx.from.id` as the actor for received, void, payback creation, sent and cancel; verify with handler tests that an admin can run each action on another user's payment, a member is refused with the existing message, and the actor is recorded.
+- [x] 3.3 `/payments` drill-down: admins get `listPaymentsByEvent`, others keep their own payments; verify with node tests for both and with a bot-wiring test using a stubbed Telegram client.
 
 ## 4. Web admin payback
 
@@ -32,7 +32,7 @@
 
 ## 6. Wrap-up
 
-- [ ] 6.1 Update README.md, AGENTS.md and `docs/architecture.md` (chat admins act on all payments, audit columns, web admin is no longer read-only with its new routes and CSRF rule, shared helpers, migration `0005`, automatic migrations in the deploy workflow, and the security note that repository queries no longer always filter by owner); run `npm run check`, `npm run build` and `npm test` and confirm all pass.
+- [x] 6.1 Update README.md, AGENTS.md and `docs/architecture.md` (chat admins act on all payments, audit columns, web admin is no longer read-only with its new routes and CSRF rule, shared helpers, migration `0005`, automatic migrations in the deploy workflow, and the security note that repository queries no longer always filter by owner); run `npm run check`, `npm run build` and `npm test` and confirm all pass.
 
 ## Workflow follow-up
 

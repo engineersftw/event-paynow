@@ -13,6 +13,7 @@ import {
   plainPayerLabel,
   recipientName,
 } from './payer-label.js';
+import { ownerOnly, type PaymentAccess } from './payment-access.js';
 
 /**
  * /payback command handler - initiates payback flow for a payment
@@ -43,9 +44,16 @@ export class PaybackCommandHandler {
   private conversationDO: ConversationDO;
   private repository: Repository;
 
-  constructor(conversationDO: ConversationDO, repository: Repository) {
+  private canAct: PaymentAccess;
+
+  constructor(
+    conversationDO: ConversationDO,
+    repository: Repository,
+    canAct: PaymentAccess = ownerOnly
+  ) {
     this.conversationDO = conversationDO;
     this.repository = repository;
+    this.canAct = canAct;
   }
 
   /**
@@ -72,7 +80,7 @@ export class PaybackCommandHandler {
         return;
       }
 
-      if (payment.userId !== userId) {
+      if (!(await this.canAct(payment, userId))) {
         await ctx.reply('❌ You do not own this payment.');
         return;
       }
