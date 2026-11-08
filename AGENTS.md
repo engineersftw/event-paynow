@@ -71,6 +71,7 @@ This project uses OpenSpec for change management. All changes are archived:
 10. `payments-net-of-paybacks` (8 tasks) — archived 2026-11-08
 11. `admin-payment-actions` (16 tasks) — archived 2026-11-08
 12. `web-payment-requests` (7 tasks) — archived 2026-11-08
+13. `redesign-web-admin-ui` (12 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -233,7 +234,7 @@ Tests that tap buttons from a group chat stub `globalThis.fetch` for `getChatMem
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
-`handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell, data
+`handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell from `src/web/page.ts`: shadcn-style CSS tokens, compact payment cards, a native `<dialog>` for new requests, paybacks and pending QR/actions behind tap-to-expand buttons so no QR loads with the page; data
 written with `textContent`), `GET /api/events/:ref` (JSON), `GET /api/login` (Telegram Login Widget
 redirect target; HMAC check in `src/web/auth.ts`, then a 12 h signed HttpOnly cookie). Access =
 signed-in user is chat admin/creator via live `getChatMember` (`src/web/access.ts`), or the private-chat

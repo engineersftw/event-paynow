@@ -224,7 +224,8 @@ describe('web admin', () => {
     expect(res.status).toBe(200);
     const html = await res.text();
     expect(html).toContain('data-telegram-login="my_bot"');
-    expect(html).toContain('<th class="num">Paid back</th><th class="num">Net</th>');
+    expect(html).toContain('Paid back');
+    expect(html).toContain("'Net ' + sgd(p.netCents)");
     expect(html).not.toMatch(/<form|method=["']post/i);
     expect((await get('/events/bad ref')).status).toBe(404);
     expect(
