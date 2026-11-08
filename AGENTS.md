@@ -240,6 +240,8 @@ Tests that tap buttons from a group chat stub `globalThis.fetch` for `getChatMem
 
 ## Web Admin (Cloudflare Pages)
 
+The payer page `/pay/<event-ref>` (any Telegram-signed-in user; `GET /api/pay/:ref`, `GET|POST /api/pay/:ref/payments`, `GET .../payments/:paymentRef/qr`) shows a fixed default amount as plain text (the server still ignores any submitted amount), lists the user's own requests for the event (`listPaymentsByUserAndEvent`, newest first, max 50, no PayNow numbers) and, after creating one, sends the payer a private `sendPhoto` copy via `sendPaymentDm` in `src/web/telegram.ts` (no buttons; best-effort, `dm: false` in the response when Telegram refuses, e.g. the user never started the bot). It never posts to the event chat.
+
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
 `handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell from `src/web/page.ts`: shadcn-style CSS tokens, compact payment cards, a native `<dialog>` for new requests, paybacks and pending QR/actions behind tap-to-expand buttons so no QR loads with the page; header `Event: <name>` with the logo (`web/public/logo.png`), a light/dark toggle (`data-theme`, saved in `localStorage`), status-coloured pills and `dd-MMM-YYYY` dates; data

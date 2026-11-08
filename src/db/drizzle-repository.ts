@@ -161,6 +161,18 @@ export class D1Repository implements Repository {
     return results.map(toPayment);
   }
 
+  async listPaymentsByUserAndEvent(userId: number, eventId: number): Promise<Payment[]> {
+    const results = await this.db
+      .select()
+      .from(schema.payments)
+      .where(and(eq(schema.payments.userId, userId), eq(schema.payments.eventId, eventId)))
+      .orderBy(desc(schema.payments.createdAt), desc(schema.payments.id))
+      .limit(50)
+      .all();
+
+    return results.map(toPayment);
+  }
+
   async listPaymentsByEvent(eventId: number): Promise<Payment[]> {
     const results = await this.db
       .select()

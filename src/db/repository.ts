@@ -143,6 +143,8 @@ export interface Repository {
   ): Promise<Payment>;
   getPaymentByRef(ref: string): Promise<Payment | null>;
   listPaymentsByUser(userId: number): Promise<Payment[]>;
+  /** One user's payments of one event, newest first (at most 50). */
+  listPaymentsByUserAndEvent(userId: number, eventId: number): Promise<Payment[]>;
   /** Every payment of an event (all users), newest first. */
   listPaymentsByEvent(eventId: number): Promise<Payment[]>;
   /**
