@@ -2,7 +2,8 @@ name: Deploy
 
 # Deploys from main only, and only the part whose files changed:
 #   Worker -> src/ (except src/web/), wrangler.toml, package*.json, tsconfig.json
-#   Pages  -> web/, src/web/, src/db/, package*.json, tsconfig.json
+#   Pages  -> web/, src/{web,db,sgqr,payments,access}/, src/commands/payer-label.ts, package*.json,
+#             tsconfig.json   (everything the Pages Function bundles; check with esbuild --metafile)
 #   Migrate -> anything under drizzle/ (runs first; Worker and Pages wait for it, and are skipped
 #              if it fails)
 # Run it by hand (Actions -> Deploy -> Run workflow) to deploy both and apply pending migrations.
@@ -57,7 +58,7 @@ jobs:
           else
             echo "worker=false" >> "$GITHUB_OUTPUT"
           fi
-          if echo "$files" | grep -Eq '^(web/|src/web/|src/db/|package(-lock)?\.json$|tsconfig\.json$)'; then
+          if echo "$files" | grep -Eq '^(web/|src/(web|db|sgqr|payments|access)/|src/commands/payer-label\.ts$|package(-lock)?\.json$|tsconfig\.json$)'; then
             echo "pages=true" >> "$GITHUB_OUTPUT"
           else
             echo "pages=false" >> "$GITHUB_OUTPUT"
