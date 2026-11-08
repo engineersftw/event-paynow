@@ -131,6 +131,15 @@ export interface Repository {
   listPaymentsByUser(userId: number): Promise<Payment[]>;
   /** Every payment of an event (all users), newest first. */
   listPaymentsByEvent(eventId: number): Promise<Payment[]>;
+  /**
+   * One page of an event's payments, newest first (keyset on created_at, id). `q` matches payer
+   * name or reference literally and case-insensitively. Returns up to `limit` rows plus the cursor
+   * of the next page, or null on the last page.
+   */
+  searchPaymentsByEvent(
+    eventId: number,
+    opts: { status?: PaymentStatus; q?: string; limit: number; cursor?: string }
+  ): Promise<{ payments: Payment[]; nextCursor: string | null }>;
   /** paymentId → total of its SENT paybacks, for every payment of the event that has any. */
   sentPaybackTotalsByEvent(eventId: number): Promise<Map<number, number>>;
   updatePaymentStatus(
@@ -170,8 +179,8 @@ export interface Repository {
     actorId?: number
   ): Promise<Payback | null>;
   listPaybacksByPayment(paymentId: number): Promise<Payback[]>;
-  /** Every payback of every payment of the event, oldest first. */
-  listPaybacksByEvent(eventId: number): Promise<Payback[]>;
+  /** Paybacks of just these payments, oldest first (chunked under D1's 100 bound-parameter cap). */
+  listPaybacksByPayments(paymentIds: number[]): Promise<Payback[]>;
   /**
    * Total amount paid back against a payment across ALL statuses (pending + sent).
    * This is the quantity bounded by the payment amount (task 7.2).

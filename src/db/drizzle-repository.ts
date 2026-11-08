@@ -1,4 +1,4 @@
-import { and, desc, eq, ne, sql } from 'drizzle-orm';
+import { and, desc, eq, inArray, ne, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreatePaybackBoundedResult,
@@ -169,6 +169,46 @@ export class D1Repository implements Repository {
       .all();
 
     return results.map(toPayment);
+  }
+
+  async searchPaymentsByEvent(
+    eventId: number,
+    opts: { status?: PaymentStatus; q?: string; limit: number; cursor?: string }
+  ): Promise<{ payments: Payment[]; nextCursor: string | null }> {
+    const t = schema.payments;
+    const conds = [eq(t.eventId, eventId)];
+    if (opts.status) conds.push(eq(t.status, opts.status));
+    if (opts.q) {
+      const pat = `%${opts.q.toLowerCase().replace(/[\\%_]/g, '\\$&')}%`;
+      conds.push(
+        or(
+          sql`lower(${t.payerName}) LIKE ${pat} ESCAPE '\\'`,
+          sql`lower(${t.ref}) LIKE ${pat} ESCAPE '\\'`
+        )!
+      );
+    }
+    if (opts.cursor) {
+      const [createdAt, id] = opts.cursor.split('|') as [string, string];
+      conds.push(
+        or(
+          sql`${t.createdAt} < ${createdAt}`,
+          and(eq(t.createdAt, createdAt), sql`${t.id} < ${Number(id)}`)
+        )!
+      );
+    }
+    const rows = await this.db
+      .select()
+      .from(t)
+      .where(and(...conds))
+      .orderBy(desc(t.createdAt), desc(t.id))
+      .limit(opts.limit + 1)
+      .all();
+    const page = rows.slice(0, opts.limit);
+    const last = page[page.length - 1];
+    return {
+      payments: page.map(toPayment),
+      nextCursor: rows.length > opts.limit && last ? `${last.createdAt}|${last.id}` : null,
+    };
   }
 
   async sentPaybackTotalsByEvent(eventId: number): Promise<Map<number, number>> {
@@ -428,15 +468,18 @@ export class D1Repository implements Repository {
     return updated ? toPayback(updated) : null;
   }
 
-  async listPaybacksByEvent(eventId: number): Promise<Payback[]> {
-    const rows = await this.db
-      .select({ payback: schema.paybacks })
-      .from(schema.paybacks)
-      .innerJoin(schema.payments, eq(schema.paybacks.paymentId, schema.payments.id))
-      .where(eq(schema.payments.eventId, eventId))
-      .orderBy(schema.paybacks.id)
-      .all();
-    return rows.map((r) => toPayback(r.payback));
+  async listPaybacksByPayments(paymentIds: number[]): Promise<Payback[]> {
+    const chunks: number[][] = [];
+    for (let i = 0; i < paymentIds.length; i += 90) chunks.push(paymentIds.slice(i, i + 90));
+    const rows = await Promise.all(
+      chunks.map((ids) =>
+        this.db.select().from(schema.paybacks).where(inArray(schema.paybacks.paymentId, ids)).all()
+      )
+    );
+    return rows
+      .flat()
+      .map(toPayback)
+      .sort((x, y) => x.id - y.id);
   }
 
   async listPaybacksByPayment(paymentId: number): Promise<Payback[]> {

@@ -87,6 +87,163 @@ describe('listPaymentsByEvent', () => {
   });
 });
 
+const at = (i: number) => `2024-02-01T00:${String(i).padStart(2, '0')}:00Z`;
+const prefRef = (prefix: string, i: number) => `${prefix}${String(i).padStart(5, '0')}`;
+
+describe('searchPaymentsByEvent', () => {
+  it('pages newest first by cursor, including rows that share a created time', async () => {
+    const e = await seedEvent('EVTPAGE001', -20);
+    for (let i = 1; i <= 5; i++)
+      await seedPayment(e.id, prefRef('PGA', i), 1, 100 + i, { at: at(1) });
+    await seedPayment(e.id, prefRef('PGA', 6), 1, 106, { at: at(2) });
+
+    const p1 = await repo.searchPaymentsByEvent(e.id, { limit: 4 });
+    expect(p1.payments.map((p) => p.ref)).toEqual(['PGA00006', 'PGA00005', 'PGA00004', 'PGA00003']);
+    expect(p1.nextCursor).not.toBeNull();
+    const p2 = await repo.searchPaymentsByEvent(e.id, { limit: 4, cursor: p1.nextCursor! });
+    expect(p2.payments.map((p) => p.ref)).toEqual(['PGA00002', 'PGA00001']);
+    expect(p2.nextCursor).toBeNull();
+  });
+
+  it('filters by status and searches name or reference literally, ignoring case', async () => {
+    const e = await seedEvent('EVTPAGE002', -21);
+    await seedPayment(e.id, 'SRCH000001', 1, 100, { payerName: 'Alice Tan' });
+    await seedPayment(e.id, 'SRCH000002', 1, 100, { payerName: '50% Bob_x' });
+    await seedPayment(e.id, 'SRCH000003', 1, 100, { payerName: 'Bobby' });
+    await repo.updatePaymentStatus('SRCH000001', 'received', 'manual', T);
+    const refs = async (o: Parameters<typeof repo.searchPaymentsByEvent>[1]) =>
+      (await repo.searchPaymentsByEvent(e.id, o)).payments.map((p) => p.ref).sort();
+
+    expect(await refs({ limit: 20, status: 'received' })).toEqual(['SRCH000001']);
+    expect(await refs({ limit: 20, q: 'ALI' })).toEqual(['SRCH000001']);
+    expect(await refs({ limit: 20, q: 'srch000003' })).toEqual(['SRCH000003']);
+    expect(await refs({ limit: 20, q: 'bob' })).toEqual(['SRCH000002', 'SRCH000003']);
+    expect(await refs({ limit: 20, q: '%' })).toEqual(['SRCH000002']);
+    expect(await refs({ limit: 20, q: '_' })).toEqual(['SRCH000002']);
+    expect(await refs({ limit: 20, q: 'b_', status: 'pending' })).toEqual(['SRCH000002']); // _ is literal: Bobby does not match
+    expect(await refs({ limit: 20, q: 'bob', status: 'pending' })).toEqual([
+      'SRCH000002',
+      'SRCH000003',
+    ]);
+  });
+});
+
+describe('listPaybacksByPayments', () => {
+  it('returns only the given payments’ paybacks, across the 90-id chunk boundary', async () => {
+    const e = await seedEvent('EVTPAGE006', -25);
+    await seedPayment(e.id, 'PBK0000001', 1, 1000);
+    await seedPayment(e.id, 'PBK0000002', 1, 1000);
+    await seedPayment(e.id, 'PBK0000003', 1, 1000);
+    const [a, b, c] = await Promise.all(
+      ['PBK0000001', 'PBK0000002', 'PBK0000003'].map((r) => repo.getPaymentByRef(r))
+    );
+    for (const [pay, ref] of [
+      [a!, 'PBKBACK001'],
+      [b!, 'PBKBACK002'],
+      [c!, 'PBKBACK003'],
+    ] as const) {
+      await repo.createPayback({
+        ref,
+        paymentId: pay.id,
+        payerType: 'mobile',
+        payerValue: '+6592220000',
+        amountCents: 100,
+        status: 'pending',
+        qrPayload: 'p',
+        timestamp: T,
+      });
+    }
+    const filler = Array.from({ length: 93 }, (_, i) => 900_000 + i);
+    const ids = [a!.id, ...filler, c!.id]; // 95 ids: a and c fall in different chunks
+    expect((await repo.listPaybacksByPayments(ids)).map((p) => p.ref)).toEqual([
+      'PBKBACK001',
+      'PBKBACK003',
+    ]);
+    expect(await repo.listPaybacksByPayments([])).toEqual([]);
+  });
+});
+
+describe('web admin list paging', () => {
+  type Page = {
+    payments: { ref: string }[];
+    nextCursor: string | null;
+    totals: { collectedCents: number; paidBackCents: number; pendingCents: number };
+  };
+  const page = async (ref: string, query = '') => {
+    const res = await get(`/api/events/${ref}${query}`, 99);
+    return { status: res.status, body: (await res.json()) as Page };
+  };
+
+  it('returns 20 per page with a cursor, no duplicates, and event-wide totals', async () => {
+    const e = await seedEvent('EVTPAGE003', -22);
+    for (let i = 1; i <= 45; i++) await seedPayment(e.id, prefRef('PGB', i), 1, 100, { at: at(i) });
+    await repo.updatePaymentStatus('PGB00001', 'received', 'manual', T);
+    await repo.voidPayment('PGB00002');
+
+    const p1 = await page(e.ref);
+    expect(p1.body.payments).toHaveLength(20);
+    expect(p1.body.payments[0]!.ref).toBe('PGB00045');
+    expect(p1.body.totals).toEqual({ collectedCents: 100, paidBackCents: 0, pendingCents: 4300 });
+    const p2 = await page(e.ref, `?cursor=${encodeURIComponent(p1.body.nextCursor!)}`);
+    expect(p2.body.payments).toHaveLength(20);
+    // a payment created meanwhile does not shift the next page
+    await seedPayment(e.id, 'PGB99999', 1, 100, { at: at(59) });
+    const p3 = await page(e.ref, `?cursor=${encodeURIComponent(p2.body.nextCursor!)}`);
+    expect(p3.body.payments.map((p) => p.ref)).toEqual([
+      'PGB00005',
+      'PGB00004',
+      'PGB00003',
+      'PGB00002',
+      'PGB00001',
+    ]);
+    expect(p3.body.nextCursor).toBeNull();
+    const all = [...p1.body.payments, ...p2.body.payments, ...p3.body.payments].map((p) => p.ref);
+    expect(new Set(all).size).toBe(45);
+  });
+
+  it('filters and searches across all pages while totals stay event-wide', async () => {
+    const e = await seedEvent('EVTPAGE004', -23);
+    for (let i = 1; i <= 25; i++) {
+      await seedPayment(e.id, prefRef('PGC', i), 1, 100, {
+        at: at(i),
+        payerName: i === 3 ? 'Zed' : 'Amy',
+      });
+    }
+    await repo.updatePaymentStatus('PGC00003', 'received', 'manual', T);
+    await repo.voidPayment('PGC00004');
+
+    const voided = await page(e.ref, '?status=voided');
+    expect(voided.body.payments.map((p) => p.ref)).toEqual(['PGC00004']);
+    expect(voided.body.totals).toEqual({
+      collectedCents: 100,
+      paidBackCents: 0,
+      pendingCents: 2300,
+    });
+    const zed = await page(e.ref, '?q=zed');
+    expect(zed.body.payments.map((p) => p.ref)).toEqual(['PGC00003']);
+    expect(zed.body.nextCursor).toBeNull();
+    const none = await page(e.ref, '?q=nobody');
+    expect(none.body.payments).toEqual([]);
+    const refresh = await page(e.ref, '?limit=25');
+    expect(refresh.body.payments).toHaveLength(25);
+    expect(refresh.body.nextCursor).toBeNull();
+  });
+
+  it('refuses invalid parameters', async () => {
+    const e = await seedEvent('EVTPAGE005', -24);
+    for (const q of [
+      '?status=paid',
+      `?q=${'x'.repeat(41)}`,
+      '?limit=0',
+      '?limit=201',
+      '?limit=abc',
+    ]) {
+      expect((await page(e.ref, q)).status).toBe(400);
+    }
+    expect((await page(e.ref, '?cursor=garbage')).status).toBe(400);
+  });
+});
+
 describe('web admin', () => {
   it('login: valid sign-in sets a session cookie and redirects to the event; bad data is refused', async () => {
     // Build valid widget data with the same HMAC scheme (see test/node/web-auth.test.ts)

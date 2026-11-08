@@ -236,7 +236,7 @@ Tests that tap buttons from a group chat stub `globalThis.fetch` for `getChatMem
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
 `handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell from `src/web/page.ts`: shadcn-style CSS tokens, compact payment cards, a native `<dialog>` for new requests, paybacks and pending QR/actions behind tap-to-expand buttons so no QR loads with the page; header `Event: <name>` with the logo (`web/public/logo.png`), a light/dark toggle (`data-theme`, saved in `localStorage`), status-coloured pills and `dd-MMM-YYYY` dates; data
-written with `textContent`), `GET /api/events/:ref` (JSON), `GET /api/login` (Telegram Login Widget
+written with `textContent`), `GET /api/events/:ref?status=&q=&limit=&cursor=` (JSON; pages of 20 via `searchPaymentsByEvent` with a `created_at|id` keyset cursor and `nextCursor`, literal case-insensitive search on payer name or reference, status filter, event-wide totals from `getEventStats`; the page has a search box, status buttons and "Load more", and refreshes the rows already loaded after an action), `GET /api/login` (Telegram Login Widget
 redirect target; HMAC check in `src/web/auth.ts`, then a 12 h signed HttpOnly cookie). Access =
 signed-in user is chat admin/creator via live `getChatMember` (`src/web/access.ts`), or the private-chat
 owner; any failure denies. The API returns payer names only, never PayNow numbers, and voided
