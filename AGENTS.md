@@ -77,6 +77,7 @@ This project uses OpenSpec for change management. All changes are archived:
 16. `qr-bot-logo-and-font` (8 tasks) — archived 2026-11-08
 17. `restore-paynow-qr-logo` (6 tasks) — archived 2026-11-08
 18. `ignore-irrelevant-messages` (9 tasks) — archived 2026-11-08
+19. `event-default-amount` (13 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
