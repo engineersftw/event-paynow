@@ -38,7 +38,8 @@ const TEST_SCHEMA_STATEMENTS = [
     payee_value TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
     created_at TEXT NOT NULL,
-    closed_at TEXT
+    closed_at TEXT,
+    default_amount_cents INTEGER
   )`,
   `CREATE TABLE IF NOT EXISTS payments (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

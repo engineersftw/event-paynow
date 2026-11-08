@@ -25,6 +25,8 @@ export const events = sqliteTable('events', {
   status: text('status').notNull().default('open'), // 'open' | 'closed'
   createdAt: text('created_at').notNull(),
   closedAt: text('closed_at'),
+  // Amount suggested for each payment request, in cents (null = none); set in /init
+  defaultAmountCents: integer('default_amount_cents'),
 });
 
 export const payments = sqliteTable('payments', {

@@ -77,6 +77,7 @@ This project uses OpenSpec for change management. All changes are archived:
 16. `qr-bot-logo-and-font` (8 tasks) — archived 2026-11-08
 17. `restore-paynow-qr-logo` (6 tasks) — archived 2026-11-08
 18. `ignore-irrelevant-messages` (9 tasks) — archived 2026-11-08
+19. `event-default-amount` (13 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -272,12 +273,12 @@ Pages secrets: `TELEGRAM_BOT_TOKEN`, `SESSION_SECRET`; the Login Widget needs Bo
 **Flow:**
 
 1. User sends /init
-2. Bot prompts for mobile number or UEN
-3. Validates input (mobile → +65XXXXXXXX, UEN format check)
-4. Echoes normalized value for confirmation
-5. On "confirm", persists to users table via repository (creates or updates)
-6. On "cancel", resets state without saving (preserves existing data)
-7. On conversation expiry (alarm), state resets but existing user data remains intact
+2. Step 1: event name (≤ 50 chars)
+3. Step 2: payee mobile number or UEN (mobile → +65XXXXXXXX, UEN format check)
+4. Step 3: optional default amount to collect (`parseAmount`, or a Skip button `init_skip_amount:<userId>`); stored as `events.default_amount_cents`, offered by `/start` ("Use SGD x.xx", `start_use_default`) and pre-filled in the web admin dialog; typing another amount always works
+5. Step 4: echoes name + payee (+ amount) with Confirm/Cancel buttons
+6. On "confirm", creates the `events` row; on "cancel", resets state without saving
+7. On conversation expiry (alarm), state resets
 
 **Testing:**
 

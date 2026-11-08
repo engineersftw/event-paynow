@@ -242,6 +242,42 @@ describe('Migration 0000_initial_schema.sql', () => {
     db.close();
   });
 
+  it('0006 adds a nullable default amount and leaves existing events with none', () => {
+    const db = new Database(':memory:');
+    const run = (file: string) => {
+      for (const stmt of readFileSync(join(__dirname, `../../drizzle/${file}`), 'utf-8').split(
+        '--> statement-breakpoint'
+      )) {
+        if (stmt.trim()) db.exec(stmt.trim());
+      }
+    };
+    for (const f of [
+      '0000_initial_schema.sql',
+      '0001_certain_albert_cleary.sql',
+      '0002_empty_rocket_racer.sql',
+      '0003_paybacks_cancelled_status.sql',
+      '0004_payments_voided_status.sql',
+      '0005_admin_audit_columns.sql',
+    ]) {
+      run(f);
+    }
+    db.exec(
+      `INSERT INTO events (ref, chat_id, topic_id, name, payee_type, payee_value, status, created_at)
+       VALUES ('e1', -1, 0, 'Old event', 'mobile', '+6591234567', 'open', '2024-01-01')`
+    );
+
+    run('0006_event_default_amount.sql');
+
+    expect(db.prepare('SELECT default_amount_cents FROM events').get()).toEqual({
+      default_amount_cents: null,
+    });
+    db.exec(`UPDATE events SET default_amount_cents = 2100 WHERE ref = 'e1'`);
+    expect(db.prepare('SELECT default_amount_cents FROM events').get()).toEqual({
+      default_amount_cents: 2100,
+    });
+    db.close();
+  });
+
   it('0003 widens paybacks.status to allow cancelled and keeps existing rows', () => {
     const db = new Database(':memory:');
     const run = (file: string) => {

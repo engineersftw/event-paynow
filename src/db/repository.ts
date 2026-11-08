@@ -24,6 +24,8 @@ export interface Event {
   status: EventStatus;
   createdAt: string;
   closedAt: string | null;
+  /** Amount suggested for each payment request, in cents; null when none was set. */
+  defaultAmountCents: number | null;
 }
 
 /**
@@ -108,7 +110,10 @@ export type CreatePaybackBoundedResult =
 
 export interface EventRepository {
   createEvent(
-    event: Omit<Event, 'id' | 'createdAt' | 'closedAt'> & { timestamp: string }
+    event: Omit<Event, 'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents'> & {
+      defaultAmountCents?: number | null;
+      timestamp: string;
+    }
   ): Promise<Event>;
   listOpenEventsByChat(chatId: number, topicId: number): Promise<Event[]>;
   listAllEventsByChat(chatId: number, topicId: number): Promise<Event[]>;

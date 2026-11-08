@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { createBot } from '../../src/bot';
+import { D1EventRepository } from '../../src/db/drizzle-repository';
 import type { Env as WorkerEnv } from '../../src/env';
 import {
   applyTestSchema,
@@ -41,6 +42,7 @@ describe('init handler (Workers pool)', () => {
     expect(stub.lastText()).toContain('Event: Birthday Party');
 
     await bot.handleUpdate(textUpdate(userId, '91234567'));
+    await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     expect(confirmMsg.text).toContain('+6591234567');
 
@@ -63,6 +65,7 @@ describe('init handler (Workers pool)', () => {
     await bot.handleUpdate(textUpdate(userId, '/init'));
     await bot.handleUpdate(textUpdate(userId, 'Company Event'));
     await bot.handleUpdate(textUpdate(userId, '201234567A'));
+    await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
 
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     expect(confirmMsg.text).toContain('UEN: 201234567A');
@@ -96,6 +99,7 @@ describe('init handler (Workers pool)', () => {
     await bot.handleUpdate(textUpdate(userId, '/init'));
     await bot.handleUpdate(textUpdate(userId, 'Cancel Event'));
     await bot.handleUpdate(textUpdate(userId, '91234567'));
+    await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
 
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     const keyboard = confirmMsg.replyMarkup as {
@@ -118,5 +122,75 @@ describe('init handler (Workers pool)', () => {
 
     // Should stay in flow (no advancement)
     expect(stub.lastText()).toContain('create a new event');
+  });
+
+  const tap = async (
+    bot: ReturnType<typeof makeWiredBot>['bot'],
+    userId: number,
+    prefix: string
+  ) => {
+    const kb = stub.sentMessages[stub.sentMessages.length - 1]!.replyMarkup as {
+      inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+    };
+    const data = kb.inline_keyboard
+      .flat()
+      .find((b) => b.callback_data.startsWith(prefix))!.callback_data;
+    await bot.handleUpdate(callbackUpdate(userId, data));
+  };
+
+  it('default amount: shown in the confirmation and success message, and stored on the event', async () => {
+    const userId = 900000010;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(textUpdate(userId, '/init'));
+    await bot.handleUpdate(textUpdate(userId, 'Deepavali'));
+    await bot.handleUpdate(textUpdate(userId, '91234567'));
+    expect(stub.lastText()).toContain('Default amount to collect');
+    await bot.handleUpdate(textUpdate(userId, '21'));
+    expect(stub.lastText()).toContain('Default amount: SGD 21.00');
+
+    await tap(bot, userId, 'init_confirm:');
+    expect(stub.editedMessages.at(-1)!.text).toContain('Default amount: SGD 21.00');
+
+    const [event] = await new D1EventRepository(env.paynow_db).listOpenEventsByChat(userId, 0);
+    expect(event!.defaultAmountCents).toBe(2100);
+  });
+
+  it('Skip: the event is created with no default amount', async () => {
+    const userId = 900000011;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(textUpdate(userId, '/init'));
+    await bot.handleUpdate(textUpdate(userId, 'No Default'));
+    await bot.handleUpdate(textUpdate(userId, '91234567'));
+    await tap(bot, userId, 'init_skip_amount:');
+    // the prompt turns into the confirmation (edited in place), without an amount line
+    expect(stub.editedMessages.at(-1)!.text).toContain('Event: No Default');
+    expect(stub.editedMessages.at(-1)!.text).not.toContain('Default amount');
+
+    const kb = stub.editedMessages.at(-1)!.replyMarkup as {
+      inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+    };
+    const confirm = kb.inline_keyboard.flat().find((b) => b.text.startsWith('✅'))!.callback_data;
+    await bot.handleUpdate(callbackUpdate(userId, confirm, 501, 11));
+    expect(stub.editedMessages.at(-1)!.text).toContain('Event created');
+
+    const [event] = await new D1EventRepository(env.paynow_db).listOpenEventsByChat(userId, 0);
+    expect(event!.defaultAmountCents).toBeNull();
+  });
+
+  it('an invalid default amount re-asks and does not advance', async () => {
+    const userId = 900000012;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(textUpdate(userId, '/init'));
+    await bot.handleUpdate(textUpdate(userId, 'Bad Amount'));
+    await bot.handleUpdate(textUpdate(userId, '91234567'));
+    for (const bad of ['abc', '0', '-5', '1.234']) {
+      await bot.handleUpdate(textUpdate(userId, bad));
+      expect(stub.lastText()).toContain('Invalid amount');
+    }
+    await bot.handleUpdate(textUpdate(userId, '12.50'));
+    expect(stub.lastText()).toContain('Default amount: SGD 12.50');
   });
 });

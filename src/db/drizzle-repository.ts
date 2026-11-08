@@ -521,9 +521,17 @@ export class D1EventRepository implements EventRepository {
   }
 
   async createEvent(
-    input: Omit<Event, 'id' | 'createdAt' | 'closedAt'> & { timestamp: string }
+    input: Omit<Event, 'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents'> & {
+      defaultAmountCents?: number | null;
+      timestamp: string;
+    }
   ): Promise<Event> {
     const { ref, chatId, topicId, name, payeeType, payeeValue, status, timestamp } = input;
+    // Only a positive whole number of cents is a default amount; anything else means none
+    const defaultAmountCents =
+      Number.isInteger(input.defaultAmountCents) && (input.defaultAmountCents as number) > 0
+        ? (input.defaultAmountCents as number)
+        : null;
 
     const created = await this.db
       .insert(schema.events)
@@ -536,6 +544,7 @@ export class D1EventRepository implements EventRepository {
         payeeValue,
         status,
         createdAt: timestamp,
+        defaultAmountCents,
       })
       .returning()
       .get();
@@ -634,6 +643,7 @@ function toEvent(row: typeof schema.events.$inferSelect): Event {
     status: row.status as Event['status'],
     createdAt: row.createdAt,
     closedAt: row.closedAt,
+    defaultAmountCents: row.defaultAmountCents,
   };
 }
 

@@ -41,6 +41,7 @@ describe('end-to-end event flow (task 6.1)', () => {
     expect(stub.lastText()).toContain('Event: E2E Event');
 
     await bot.handleUpdate(textUpdate(userId, '91234567'));
+    await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     const keyboard = confirmMsg.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
@@ -108,6 +109,7 @@ describe('end-to-end event flow (task 6.1)', () => {
       await bot.handleUpdate(textUpdate(userId, '/init'));
       await bot.handleUpdate(textUpdate(userId, name));
       await bot.handleUpdate(textUpdate(userId, '91234567'));
+      await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
       const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
       const keyboard = confirmMsg.replyMarkup as {
         inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;

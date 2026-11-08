@@ -18,7 +18,8 @@ describe('D1EventRepository', () => {
         payee_value TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'closed')),
         created_at TEXT NOT NULL,
-        closed_at TEXT
+        closed_at TEXT,
+    default_amount_cents INTEGER
       )`,
       `CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -71,6 +72,37 @@ describe('D1EventRepository', () => {
   // ========================================================================
 
   describe('createEvent', () => {
+    it('stores an optional default amount; none, zero, negative or fractional become null', async () => {
+      const base = {
+        chatId: -42,
+        topicId: 0,
+        name: 'Default amount',
+        payeeType: 'mobile' as const,
+        payeeValue: '+6591234567',
+        status: 'open' as const,
+        timestamp: testTimestamp,
+      };
+      const withDefault = await repo.createEvent({
+        ...base,
+        ref: 'DEFAMT0001',
+        defaultAmountCents: 2100,
+      });
+      expect(withDefault.defaultAmountCents).toBe(2100);
+      expect((await repo.getEventByRef('DEFAMT0001'))!.defaultAmountCents).toBe(2100);
+
+      expect(
+        (await repo.createEvent({ ...base, ref: 'DEFAMT0002' })).defaultAmountCents
+      ).toBeNull();
+      for (const [i, bad] of [0, -5, 12.5, Number.NaN].entries()) {
+        const e = await repo.createEvent({
+          ...base,
+          ref: `DEFAMT01${i}0`,
+          defaultAmountCents: bad,
+        });
+        expect(e.defaultAmountCents).toBeNull();
+      }
+    });
+
     it('creates an event with all fields', async () => {
       const event = await repo.createEvent({
         ref: 'EVT-TEST01',

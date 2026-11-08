@@ -163,6 +163,32 @@ describe('listPaybacksByPayments', () => {
   });
 });
 
+describe('web admin event default amount', () => {
+  it('returns the event default amount in cents, or null when none was set', async () => {
+    const withDefault = await eventRepo.createEvent({
+      ref: 'EVTDEFAM01',
+      chatId: -30,
+      topicId: 0,
+      name: 'With default',
+      payeeType: 'mobile',
+      payeeValue: '+6591110000',
+      status: 'open',
+      defaultAmountCents: 2100,
+      timestamp: T,
+    });
+    const without = await seedEvent('EVTDEFAM02', -31);
+
+    const a = (await (await get(`/api/events/${withDefault.ref}`, 99)).json()) as {
+      event: { defaultAmountCents: number | null };
+    };
+    const b = (await (await get(`/api/events/${without.ref}`, 99)).json()) as {
+      event: { defaultAmountCents: number | null };
+    };
+    expect(a.event.defaultAmountCents).toBe(2100);
+    expect(b.event.defaultAmountCents).toBeNull();
+  });
+});
+
 describe('web admin list paging', () => {
   type Page = {
     payments: { ref: string }[];

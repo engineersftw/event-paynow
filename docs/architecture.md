@@ -142,7 +142,8 @@
 
 - Collects event name (non-empty, ≤ 50 chars)
 - Collects mobile number or UEN (payee for this event)
-- Echoes name + payee for confirmation via inline Confirm/Cancel buttons
+- Optionally collects a default amount (text or Skip), stored as `events.default_amount_cents`; `/start` offers it as a "Use SGD x.xx" button and the web admin dialog pre-fills it
+- Echoes name + payee (+ default amount) for confirmation via inline Confirm/Cancel buttons
 - Creates an `events` row on confirm (status: open)
 - Events are scoped by (chat_id, topic_id)
 - All outcomes update the original message in place via `editMessageText`
@@ -647,7 +648,7 @@ wrangler tail --format pretty
 
 ### Completed
 
-- `/init` (events), `/start` (payer details, confirmation step, QR with detail text), `/payments`, `/payback`, `/end_event`, `/web_admin`
+- `/init` (events, optional default amount), `/start` (payer details, confirmation step, QR with detail text), `/payments`, `/payback`, `/end_event`, `/web_admin`
 - Payment lifecycle: pending → received or voided; paybacks: pending → sent or cancelled (all guarded transitions)
 - Bounded paybacks, payer snapshotted on each payment, recipient confirmation and change
 - Inline-button UX (confirm/cancel, action buttons, pagination, in-place status lines)

@@ -198,9 +198,12 @@ describe('/init command handler (event creation)', () => {
 
       expect(result).toBe(true);
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Mobile number: +6591234567'),
+        expect.stringContaining('Default amount to collect'),
         expect.objectContaining({ reply_markup: expect.any(Object) })
       );
+      const saved = await ((mockConversationDO.fetch as any).mock.calls[1][0] as Request).json();
+      expect(saved.step).toBe(3);
+      expect(saved.context.pendingProxy).toEqual({ type: 'mobile', normalized: '+6591234567' });
     });
 
     it('should accept valid UEN and prompt with buttons', async () => {
@@ -231,7 +234,7 @@ describe('/init command handler (event creation)', () => {
 
       expect(result).toBe(true);
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('UEN: 201234567A'),
+        expect.stringContaining('Default amount to collect'),
         expect.objectContaining({ reply_markup: expect.any(Object) })
       );
     });
@@ -269,7 +272,92 @@ describe('/init command handler (event creation)', () => {
   // handleInput() - Step 3: text while buttons pending
   // ============================================================================
 
-  describe('handleInput() - Step 3: text while buttons pending', () => {
+  describe('handleInput() - Step 3: optional default amount', () => {
+    const stateAt3 = {
+      flow: 'init',
+      step: 3,
+      context: {
+        userId: 789,
+        chatId: 123456,
+        userName: 'John',
+        topicId: 0,
+        eventName: 'Dinner split',
+        pendingProxy: { type: 'mobile', normalized: '+6591234567' },
+      },
+      lastActivity: new Date().toISOString(),
+    };
+
+    it('accepts a valid amount, stores it in cents and shows the confirmation', async () => {
+      const mockCtx = { message: { text: '21' }, reply: vi.fn() } as any;
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({ status: 200, json: async () => stateAt3 })
+        .mockResolvedValueOnce({ status: 200 });
+
+      expect(await handler.handleInput(mockCtx)).toBe(true);
+
+      const written = await ((mockConversationDO.fetch as any).mock.calls[1][0] as Request).json();
+      expect(written.step).toBe(4);
+      expect(written.context.defaultAmountCents).toBe(2100);
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Default amount: SGD 21.00'),
+        expect.objectContaining({ reply_markup: expect.any(Object) })
+      );
+    });
+
+    it.each(['abc', '0', '-5', '1.234'])('rejects %s and stays on the step', async (text) => {
+      const mockCtx = { message: { text }, reply: vi.fn() } as any;
+      (mockConversationDO.fetch as any).mockResolvedValueOnce({
+        status: 200,
+        json: async () => stateAt3,
+      });
+
+      expect(await handler.handleInput(mockCtx)).toBe(true);
+
+      expect(mockCtx.reply).toHaveBeenCalledWith(expect.stringContaining('Invalid amount'));
+      expect(mockConversationDO.fetch).toHaveBeenCalledTimes(1); // no state write
+    });
+
+    it('Skip moves to the confirmation without an amount', async () => {
+      const mockCtx = {
+        from: { id: 789 },
+        callbackQuery: { data: 'init_skip_amount:789' },
+        editMessageText: vi.fn(),
+      } as any;
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({ status: 200, json: async () => stateAt3 })
+        .mockResolvedValueOnce({ status: 200 });
+
+      expect(await handler.handleCallback(mockCtx)).toBe(true);
+
+      const written = await ((mockConversationDO.fetch as any).mock.calls[1][0] as Request).json();
+      expect(written.step).toBe(4);
+      expect(written.context.defaultAmountCents).toBeUndefined();
+      const [text] = mockCtx.editMessageText.mock.calls[0];
+      expect(text).not.toContain('Default amount');
+      expect(text).toContain('Dinner split');
+    });
+
+    it('Skip after the step has moved on is rejected as expired', async () => {
+      const mockCtx = {
+        from: { id: 789 },
+        callbackQuery: { data: 'init_skip_amount:789' },
+        editMessageText: vi.fn(),
+      } as any;
+      (mockConversationDO.fetch as any).mockResolvedValueOnce({
+        status: 200,
+        json: async () => ({ ...stateAt3, step: 4 }),
+      });
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        '❌ Session expired. Run /init again.',
+        expect.anything()
+      );
+    });
+  });
+
+  describe('handleInput() - Step 4: text while buttons pending', () => {
     it('should nudge the user to tap a button instead of typing', async () => {
       const mockCtx = {
         message: { text: 'anything', message_id: 42 },
@@ -280,7 +368,7 @@ describe('/init command handler (event creation)', () => {
         status: 200,
         json: async () => ({
           flow: 'init',
-          step: 3,
+          step: 4,
           context: {
             userId: 789,
             chatId: 123456,
@@ -358,7 +446,7 @@ describe('/init command handler (event creation)', () => {
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 3,
+            step: 4,
             context: {
               userId: 789,
               chatId: 123456,
@@ -383,6 +471,7 @@ describe('/init command handler (event creation)', () => {
         status: 'open',
         createdAt: new Date().toISOString(),
         closedAt: null,
+        defaultAmountCents: null,
       } as Event);
 
       const result = await handler.handleCallback(mockCtx);
@@ -414,7 +503,7 @@ describe('/init command handler (event creation)', () => {
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 3,
+            step: 4,
             context: {
               userId: 789,
               chatId: 123456,
@@ -475,7 +564,7 @@ describe('/init command handler (event creation)', () => {
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 3,
+            step: 4,
             context: {
               userId: 789,
               chatId: 123456,
