@@ -65,7 +65,23 @@ async function get(path: string, userId?: number, fetchFn: typeof fetch = admin)
   return handleWeb(new Request(`https://x.test${path}`, { headers }), webEnv, fetchFn);
 }
 
-async function payerPost(path: string, userId: number, body: unknown, origin = 'https://x.test') {
+/** Telegram stub for payer requests: records each sendPhoto chat id; `refuse` simulates a 403. */
+function telegram(refuse = false) {
+  const chats: string[] = [];
+  const fetchFn = (async (_url: string, init?: { body?: FormData }) => {
+    chats.push(String(init?.body?.get('chat_id')));
+    return new Response('{}', { status: refuse ? 403 : 200 });
+  }) as unknown as typeof fetch;
+  return { chats, fetchFn };
+}
+
+async function payerPost(
+  path: string,
+  userId: number,
+  body: unknown,
+  origin = 'https://x.test',
+  fetchFn: typeof fetch = telegram().fetchFn
+) {
   return handleWeb(
     new Request(`https://x.test${path}`, {
       method: 'POST',
@@ -76,7 +92,8 @@ async function payerPost(path: string, userId: number, body: unknown, origin = '
       },
       body: JSON.stringify(body),
     }),
-    webEnv
+    webEnv,
+    fetchFn
   );
 }
 
@@ -84,6 +101,23 @@ beforeAll(async () => {
   await applyTestSchema(env.paynow_db);
   repo = new D1Repository(env.paynow_db);
   eventRepo = new D1EventRepository(env.paynow_db);
+});
+
+describe('listPaymentsByUserAndEvent', () => {
+  it('returns only that user’s payments for that event, newest first', async () => {
+    const e1 = await seedEvent('EVTUSER001', -1);
+    const e2 = await seedEvent('EVTUSER002', -1);
+    await seedPayment(e1.id, 'UEVP000001', 5, 100, { at: '2024-01-01T00:00:00Z' });
+    await seedPayment(e1.id, 'UEVP000002', 5, 200, { at: '2024-01-03T00:00:00Z' });
+    await seedPayment(e1.id, 'UEVP000003', 6, 300);
+    await seedPayment(e2.id, 'UEVP000004', 5, 400);
+
+    expect((await repo.listPaymentsByUserAndEvent(5, e1.id)).map((p) => p.ref)).toEqual([
+      'UEVP000002',
+      'UEVP000001',
+    ]);
+    expect(await repo.listPaymentsByUserAndEvent(7, e1.id)).toEqual([]);
+  });
 });
 
 describe('listPaymentsByEvent', () => {
@@ -282,6 +316,56 @@ describe('web admin list paging', () => {
       expect((await page(e.ref, q)).status).toBe(400);
     }
     expect((await page(e.ref, '?cursor=garbage')).status).toBe(400);
+  });
+});
+
+describe('payer page history and private copy', () => {
+  it('lists only the signed-in user’s requests for the event, newest first, without numbers', async () => {
+    const e = await seedEvent('EVTHIST001', -50);
+    const other = await seedEvent('EVTHIST002', -50);
+    await seedPayment(e.id, 'HISTP00001', 800, 100, { at: '2024-01-01T00:00:00Z' });
+    await seedPayment(e.id, 'HISTP00002', 800, 200, { at: '2024-01-02T00:00:00Z' });
+    await seedPayment(e.id, 'HISTP00003', 801, 300);
+    await seedPayment(other.id, 'HISTP00004', 800, 400);
+
+    const res = await get(`/api/pay/${e.ref}/payments`, 800, member);
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(
+      (JSON.parse(text) as { payments: Array<{ ref: string }> }).payments.map((p) => p.ref)
+    ).toEqual(['HISTP00002', 'HISTP00001']);
+    expect(text).not.toContain('+6598887777');
+    expect(text).not.toContain('payerValue');
+
+    expect((await get(`/api/pay/${e.ref}/payments`)).status).toBe(401);
+    expect((await get('/api/pay/NOPENOPE01/payments', 800)).status).toBe(404);
+  });
+
+  it('sends the payer a private copy, and keeps the payment when Telegram refuses', async () => {
+    const e = await seedEvent('EVTDM00001', -51);
+    const ok = telegram();
+    const sent = await payerPost(
+      `/api/pay/${e.ref}/payments`,
+      810,
+      { payer: '91234567', amount: '2.00' },
+      'https://x.test',
+      ok.fetchFn
+    );
+    expect(((await sent.json()) as { payment: { dm: boolean } }).payment.dm).toBe(true);
+    expect(ok.chats).toEqual(['810']); // only the payer; nothing posted to the event chat
+
+    const no = telegram(true);
+    const refused = await payerPost(
+      `/api/pay/${e.ref}/payments`,
+      811,
+      { payer: '91234567', amount: '2.00' },
+      'https://x.test',
+      no.fetchFn
+    );
+    expect(refused.status).toBe(201);
+    const body = (await refused.json()) as { payment: { ref: string; dm: boolean } };
+    expect(body.payment.dm).toBe(false);
+    expect(await repo.getPaymentByRef(body.payment.ref)).toMatchObject({ userId: 811 });
   });
 });
 

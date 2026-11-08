@@ -10,7 +10,7 @@ import { bmpToPng } from '../sgqr/png';
 import { renderQrPng } from '../sgqr/qr-render';
 import { SESSION_MAX_AGE_SEC, signSession, verifySession, verifyTelegramLogin } from './auth';
 import { renderPage, renderPayerPage } from './page';
-import { postPaymentQr } from './telegram';
+import { postPaymentQr, sendPaymentDm } from './telegram';
 
 /** Bindings of the Pages project (see web/wrangler.toml). */
 export interface WebEnv {
@@ -85,10 +85,9 @@ export async function handleWeb(
     return payerData(request, env, payerApi[1]!);
   }
 
-  const payerCreate = url.pathname.match(/^\/api\/pay\/([^/]+)\/payments$/);
-  if (payerCreate && REF.test(payerCreate[1]!)) {
-    if (!sameOriginJson(request, url)) return json({ error: 'forbidden' }, 403);
-    return createPayerPayment(request, env, payerCreate[1]!);
+  const payerList = url.pathname.match(/^\/api\/pay\/([^/]+)\/payments$/);
+  if (payerList && REF.test(payerList[1]!)) {
+    return payerHistory(request, env, payerList[1]!);
   }
 
   const payerQr = url.pathname.match(/^\/api\/pay\/([^/]+)\/payments\/([^/]+)\/qr$/);
@@ -143,7 +142,31 @@ async function payerData(request: Request, env: WebEnv, ref: string): Promise<Re
   });
 }
 
-async function createPayerPayment(request: Request, env: WebEnv, ref: string): Promise<Response> {
+/** The signed-in user's own requests for this event (no PayNow numbers), newest first. */
+async function payerHistory(request: Request, env: WebEnv, ref: string): Promise<Response> {
+  const access = await payerAccess(request, env, ref);
+  if (access instanceof Response) return access;
+  const payments = await new D1Repository(env.paynow_db).listPaymentsByUserAndEvent(
+    access.userId,
+    access.event.id
+  );
+  return json({
+    payments: payments.map((p) => ({
+      ref: p.ref,
+      amountCents: p.amountCents,
+      status: p.status,
+      payerName: p.payerName ?? null,
+      createdAt: p.createdAt,
+    })),
+  });
+}
+
+async function createPayerPayment(
+  request: Request,
+  env: WebEnv,
+  ref: string,
+  fetchFn: typeof fetch
+): Promise<Response> {
   const access = await payerAccess(request, env, ref);
   if (access instanceof Response) return access;
   if (access.event.status !== 'open') return json({ error: 'event_closed' }, 409);
@@ -168,6 +191,9 @@ async function createPayerPayment(request: Request, env: WebEnv, ref: string): P
     amountCents,
     userId: access.userId,
   });
+  // Private copy for the payer; best-effort (they may never have started the bot)
+  const bmp = await renderQrPng(payment.qrPayload, paymentImageLines(access.event, payment));
+  const dm = await sendPaymentDm(env.TELEGRAM_BOT_TOKEN, access.userId, payment, bmp, fetchFn);
   return json(
     {
       payment: {
@@ -175,6 +201,7 @@ async function createPayerPayment(request: Request, env: WebEnv, ref: string): P
         amountCents: payment.amountCents,
         status: payment.status,
         payerName: payment.payerName ?? null,
+        dm,
       },
     },
     201
@@ -237,7 +264,7 @@ async function handlePost(
   const payerCreate = path.match(/^\/api\/pay\/([^/]+)\/payments$/);
   if (payerCreate && REF.test(payerCreate[1]!)) {
     if (!sameOriginJson(request, url)) return json({ error: 'forbidden' }, 403);
-    return createPayerPayment(request, env, payerCreate[1]!);
+    return createPayerPayment(request, env, payerCreate[1]!, fetchFn);
   }
   const newPayment = path.match(/^\/api\/events\/([^/]+)\/payments$/);
   const newPayback = path.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/paybacks$/);

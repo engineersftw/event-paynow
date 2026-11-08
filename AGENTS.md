@@ -79,6 +79,7 @@ This project uses OpenSpec for change management. All changes are archived:
 18. `ignore-irrelevant-messages` (9 tasks) — archived 2026-11-08
 19. `event-default-amount` (13 tasks) — archived 2026-11-08
 20. `add-edit-event-command` (6 tasks) — archived 2026-11-08
+21. `payer-page-history-and-dm` (8 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -239,6 +240,8 @@ paybacks, and stored in the same guarded statement (migration 0005 columns), so 
 Tests that tap buttons from a group chat stub `globalThis.fetch` for `getChatMember` (grammY uses the injected client).
 
 ## Web Admin (Cloudflare Pages)
+
+The payer page `/pay/<event-ref>` (any Telegram-signed-in user; `GET /api/pay/:ref`, `GET|POST /api/pay/:ref/payments`, `GET .../payments/:paymentRef/qr`) shows a fixed default amount as plain text (the server still ignores any submitted amount), lists the user's own requests for the event (`listPaymentsByUserAndEvent`, newest first, max 50, no PayNow numbers) and, after creating one, sends the payer a private `sendPhoto` copy via `sendPaymentDm` in `src/web/telegram.ts` (no buttons; best-effort, `dm: false` in the response when Telegram refuses, e.g. the user never started the bot). It never posts to the event chat.
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to

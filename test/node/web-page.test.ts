@@ -74,8 +74,14 @@ describe('event page shell', () => {
     expect(html).toContain('/api/pay/EVT1');
     expect(html).toContain('/api/pay/EVT1/payments');
     expect(html).toContain('data-auth-url="/api/login?ref=EVT1&amp;next=pay"');
-    expect(html).toContain("$('amount').readOnly=defaultCents!==null");
-    expect(html).toContain("$('amount').required=defaultCents===null");
+    // A default amount is plain text (no disabled input); no default keeps the editable field
+    expect(html).toContain("$('amount-field').classList.toggle('hidden',defaultCents!==null)");
+    expect(html).toContain("$('amount-fixed').classList.toggle('hidden',defaultCents===null)");
+    expect(html).not.toContain('readOnly');
+    // History of the signed-in user's requests, and the hint shown when the private copy failed
+    expect(html).toContain("fetch('/api/pay/EVT1/payments'");
+    expect(html).toContain('Your previous requests');
+    expect(html).toContain("$('dm').classList.toggle('hidden',d.payment.dm!==false)");
     expect(html).toContain("alt:'Payment QR'");
     expect(html).not.toContain('sendPhoto');
   });

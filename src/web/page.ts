@@ -290,7 +290,7 @@ export function renderPayerPage(ref: string, botUsername: string): string {
 :root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa;--danger:#dc2626}
 @media(prefers-color-scheme:dark){:root{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--danger:#f87171}}
 *{box-sizing:border-box}body{max-width:32rem;margin:0 auto;padding:20px;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
-h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}.brand img{border-radius:8px}.card{border:1px solid var(--border);border-radius:8px;padding:16px;display:grid;gap:14px}.muted{color:var(--muted-fg)}.alert{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:12px}.err{color:var(--danger);margin:0}.fields{display:grid;gap:12px}label{display:grid;gap:5px;font-weight:600}.input{font:inherit;min-height:42px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}.input:read-only{background:var(--muted)}.btn{font:inherit;font-weight:600;min-height:42px;border:1px solid var(--border);border-radius:6px;padding:8px 16px;background:var(--primary);color:var(--primary-fg);cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}img{max-width:100%;height:auto}.qr{display:grid;justify-items:center;gap:8px}.qr img{width:280px}.hidden{display:none!important}
+h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}.brand img{border-radius:8px}.card{border:1px solid var(--border);border-radius:8px;padding:16px;display:grid;gap:14px}.muted{color:var(--muted-fg)}.alert{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:12px}.err{color:var(--danger);margin:0}.fields{display:grid;gap:12px}label{display:grid;gap:5px;font-weight:600}.input{font:inherit;min-height:42px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}.input:read-only{background:var(--muted)}.btn{font:inherit;font-weight:600;min-height:42px;border:1px solid var(--border);border-radius:6px;padding:8px 16px;background:var(--primary);color:var(--primary-fg);cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}img{max-width:100%;height:auto}.qr{display:grid;justify-items:center;gap:8px}.qr img{width:280px}.hidden{display:none!important}.amount{font-size:1.25rem;font-weight:600}h2{font-size:1rem;margin:0 0 8px}.hist{display:grid;gap:8px}.row{border:1px solid var(--border);border-radius:6px;padding:10px;display:grid;gap:8px}.row button{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left;display:flex;gap:10px;align-items:center;flex-wrap:wrap;cursor:pointer}.row button:disabled{cursor:default}.pill{border-radius:999px;padding:1px 8px;font-size:.8rem;background:var(--muted);border:1px solid var(--border)}
 </style></head><body>
 <div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Pay event</h1></div>
 <p id="msg" class="alert hidden"></p>
@@ -302,18 +302,43 @@ h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:cen
 <div id="form" class="fields">
 <label>Your PayNow mobile / UEN<input id="payer" class="input" autocomplete="off"></label>
 <label>Your name (optional)<input id="name" class="input" maxlength="40" autocomplete="name"></label>
-<label>Amount (SGD)<input id="amount" class="input" inputmode="decimal" autocomplete="off"></label>
+<label id="amount-field">Amount (SGD)<input id="amount" class="input" inputmode="decimal" autocomplete="off"></label>
+<div id="amount-fixed" class="hidden"><div class="muted">Amount (SGD)</div><div id="amount-text" class="amount"></div></div>
 <p id="err" class="err hidden"></p><button id="create" class="btn">Show payment QR</button>
 </div>
-<div id="result" class="hidden"><p id="note"></p><div id="qr" class="qr"></div><button id="again" class="btn">Create another</button></div>
+<div id="result" class="hidden"><p id="note"></p><p id="dm" class="muted hidden">Open the bot in Telegram and press Start to receive a copy of this QR there.</p><div id="qr" class="qr"></div><button id="again" class="btn">Create another</button></div>
+<div id="history" class="hidden"><h2>Your previous requests</h2><div id="hist-list" class="hist"></div></div>
 </div>
 <script>
 const $=id=>document.getElementById(id), sgd=c=>'SGD '+(c/100).toFixed(2);
 const say=t=>{$('msg').textContent=t;$('msg').classList.toggle('hidden',!t)};
 const errorText={invalid_payer:'Enter a valid mobile number or UEN.',invalid_amount:'Enter a positive amount with up to 2 decimals.',event_closed:'This event is closed.',forbidden:'Not allowed.',not_found:'Event not found.'};
 let defaultCents=null;
+const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const fmtDate=iso=>{const d=new Date(iso);return String(d.getUTCDate()).padStart(2,'0')+'-'+MONTHS[d.getUTCMonth()]+'-'+d.getUTCFullYear()};
+function setAmount(){
+  $('amount').value=defaultCents===null?'':(defaultCents/100).toFixed(2);
+  $('amount-field').classList.toggle('hidden',defaultCents!==null);
+  $('amount-fixed').classList.toggle('hidden',defaultCents===null);
+  $('amount-text').textContent=defaultCents===null?'':(defaultCents/100).toFixed(2);
+}
+async function loadHistory(){
+  const res=await fetch('/api/pay/${ref}/payments',{credentials:'same-origin'});
+  if(!res.ok)return;
+  const list=(await res.json()).payments;
+  $('history').classList.toggle('hidden',list.length===0);
+  $('hist-list').replaceChildren(...list.map(p=>{
+    const row=document.createElement('div');row.className='row';
+    const b=document.createElement('button');b.disabled=p.status!=='pending';
+    const pill=document.createElement('span');pill.className='pill';pill.textContent=p.status;
+    b.append(sgd(p.amountCents)+' ',pill,' '+fmtDate(p.createdAt)+' · '+p.ref);
+    row.append(b);
+    if(p.status==='pending'){let img=null;b.onclick=()=>{if(img){img.remove();img=null;return}img=Object.assign(document.createElement('img'),{src:'/api/pay/${ref}/payments/'+encodeURIComponent(p.ref)+'/qr',alt:'Payment QR'});row.append(img)}}
+    return row;
+  }));
+}
 function showError(t){$('err').textContent=t;$('err').classList.toggle('hidden',!t)}
-function reset(){showError('');$('result').classList.add('hidden');$('form').classList.remove('hidden');$('payer').value='';$('name').value='';$('amount').value=defaultCents===null?'':(defaultCents/100).toFixed(2)}
+function reset(){showError('');$('result').classList.add('hidden');$('form').classList.remove('hidden');$('payer').value='';$('name').value='';setAmount()}
 async function load(){
   const res=await fetch('/api/pay/${ref}',{credentials:'same-origin'});
   if(res.status===401){$('login').classList.remove('hidden');return}
@@ -322,15 +347,14 @@ async function load(){
   const d=await res.json(); document.title='Pay: '+d.event.name; $('title').textContent='Pay: '+d.event.name;
   defaultCents=d.event.defaultAmountCents; $('event-status').textContent=d.event.status==='open'?'Create your payment request.':'This event is closed.';
   if(d.event.status!=='open'){$('form').classList.add('hidden');$('app').classList.remove('hidden');return}
-  $('amount').value=defaultCents===null?'':(defaultCents/100).toFixed(2); $('amount').readOnly=defaultCents!==null; $('amount').required=defaultCents===null;
-  $('app').classList.remove('hidden');
+  setAmount(); $('app').classList.remove('hidden'); loadHistory();
 }
 async function create(){
   const b=$('create');b.disabled=true;showError('');
   const res=await fetch('/api/pay/${ref}/payments',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({payer:$('payer').value,name:$('name').value,amount:$('amount').value})});
   const d=await res.json().catch(()=>({}));b.disabled=false;
   if(!res.ok){showError(errorText[d.error]||'Something went wrong.');return}
-  $('form').classList.add('hidden');$('result').classList.remove('hidden');$('note').textContent='Payment '+d.payment.ref+' · '+sgd(d.payment.amountCents);$('qr').replaceChildren(Object.assign(document.createElement('img'),{src:'/api/pay/${ref}/payments/'+encodeURIComponent(d.payment.ref)+'/qr',alt:'Payment QR'}));
+  $('form').classList.add('hidden');$('result').classList.remove('hidden');$('dm').classList.toggle('hidden',d.payment.dm!==false);$('note').textContent='Payment '+d.payment.ref+' · '+sgd(d.payment.amountCents);$('qr').replaceChildren(Object.assign(document.createElement('img'),{src:'/api/pay/${ref}/payments/'+encodeURIComponent(d.payment.ref)+'/qr',alt:'Payment QR'}));loadHistory();
 }
 $('create').onclick=create;$('again').onclick=reset;load();
 </script></body></html>`;
