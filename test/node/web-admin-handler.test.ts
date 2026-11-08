@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { WebAdminCommandHandler } from '../../src/commands/web-admin-handler';
+import { WebPaymentCommandHandler } from '../../src/commands/web-payment-handler';
 import type { Event, EventRepository } from '../../src/db/repository';
 
 const ev = (ref: string, name: string, status: Event['status'] = 'open') =>
@@ -18,8 +19,21 @@ describe('WebAdminCommandHandler', () => {
     const kb = ctx.reply.mock.calls[0]![1].reply_markup.inline_keyboard.flat();
     expect(kb).toEqual([
       { text: '🟢 Dinner', url: 'https://web.test/events/AAA' },
+      { text: '💳 Pay', url: 'https://web.test/pay/AAA' },
       { text: '🔴 Trip', url: 'https://web.test/events/BBB' },
+      { text: '💳 Pay', url: 'https://web.test/pay/BBB' },
     ]);
+  });
+
+  it('replies with payer page links for each event', async () => {
+    const { ctx, repo } = setup([ev('AAA', 'Dinner'), ev('BBB', 'Trip', 'closed')]);
+    await new WebPaymentCommandHandler(repo, 'https://web.test/').handle(ctx as never);
+    const kb = ctx.reply.mock.calls[0]![1].reply_markup.inline_keyboard.flat();
+    expect(kb).toEqual([
+      { text: '🟢 Dinner', url: 'https://web.test/pay/AAA' },
+      { text: '🔴 Trip', url: 'https://web.test/pay/BBB' },
+    ]);
+    expect(ctx.reply.mock.calls[0]![0]).toContain('payment page');
   });
 
   it('says so when the chat has no events', async () => {

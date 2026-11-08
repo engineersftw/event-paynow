@@ -65,6 +65,21 @@ async function get(path: string, userId?: number, fetchFn: typeof fetch = admin)
   return handleWeb(new Request(`https://x.test${path}`, { headers }), webEnv, fetchFn);
 }
 
+async function payerPost(path: string, userId: number, body: unknown, origin = 'https://x.test') {
+  return handleWeb(
+    new Request(`https://x.test${path}`, {
+      method: 'POST',
+      headers: {
+        Cookie: `session=${await signSession(userId, 'sess')}`,
+        Origin: origin,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    }),
+    webEnv
+  );
+}
+
 beforeAll(async () => {
   await applyTestSchema(env.paynow_db);
   repo = new D1Repository(env.paynow_db);
@@ -271,6 +286,78 @@ describe('web admin list paging', () => {
 });
 
 describe('web admin', () => {
+  it('payer page allows any signed-in user and uses a configured default amount', async () => {
+    const e = await eventRepo.createEvent({
+      ref: 'EVTPAYER001',
+      chatId: -40,
+      topicId: 0,
+      name: 'Payer event',
+      payeeType: 'mobile',
+      payeeValue: '+6591110000',
+      status: 'open',
+      defaultAmountCents: 1250,
+      timestamp: T,
+    });
+    const metadata = await get(`/api/pay/${e.ref}`, 700, member);
+    expect(metadata.status).toBe(200);
+    expect(await metadata.json()).toMatchObject({
+      event: { name: 'Payer event', defaultAmountCents: 1250 },
+    });
+
+    const created = await payerPost(
+      `/api/pay/${e.ref}/payments`,
+      700,
+      { payer: '91234567', name: 'Alice', amount: '99.99' },
+      'https://x.test'
+    );
+    expect(created.status).toBe(201);
+    const body = (await created.json()) as { payment: { ref: string; amountCents: number } };
+    expect(body.payment.amountCents).toBe(1250);
+    const payment = await repo.getPaymentByRef(body.payment.ref);
+    expect(payment).toMatchObject({
+      userId: 700,
+      eventId: e.id,
+      status: 'pending',
+      amountCents: 1250,
+    });
+
+    const qr = await get(`/api/pay/${e.ref}/payments/${body.payment.ref}/qr`, 700);
+    expect(qr.status).toBe(200);
+    expect(qr.headers.get('Content-Type')).toBe('image/png');
+    expect((await get(`/api/pay/${e.ref}/payments/${body.payment.ref}/qr`, 701)).status).toBe(404);
+  });
+
+  it('payer page requires an amount only when the event has no default and rejects cross-origin writes', async () => {
+    const e = await seedEvent('EVTPAYER002', -41);
+    const created = await payerPost(`/api/pay/${e.ref}/payments`, 702, {
+      payer: '91234567',
+      amount: '3.50',
+    });
+    expect(created.status).toBe(201);
+    const body = (await created.json()) as { payment: { ref: string; amountCents: number } };
+    expect(body.payment.amountCents).toBe(350);
+    expect(
+      (
+        await payerPost(
+          `/api/pay/${e.ref}/payments`,
+          702,
+          { payer: '91234567', amount: '1.00' },
+          'https://evil.test'
+        )
+      ).status
+    ).toBe(403);
+  });
+
+  it('payer page refuses unauthenticated and closed-event creation', async () => {
+    const e = await seedEvent('EVTPAYER003', -42);
+    expect((await get(`/api/pay/${e.ref}`)).status).toBe(401);
+    await eventRepo.closeEvent(e.ref, T);
+    expect(
+      (await payerPost(`/api/pay/${e.ref}/payments`, 703, { payer: '91234567', amount: '1.00' }))
+        .status
+    ).toBe(409);
+  });
+
   it('login: valid sign-in sets a session cookie and redirects to the event; bad data is refused', async () => {
     // Build valid widget data with the same HMAC scheme (see test/node/web-auth.test.ts)
     const enc = new TextEncoder();
@@ -299,6 +386,9 @@ describe('web admin', () => {
     expect(ok.status).toBe(302);
     expect(ok.headers.get('Location')).toBe('/events/EVTLOGIN01');
     expect(ok.headers.get('Set-Cookie')).toMatch(/^session=.*HttpOnly.*Secure/);
+
+    q.set('next', 'pay');
+    expect((await get(`/api/login?${q}`)).headers.get('Location')).toBe('/pay/EVTLOGIN01');
 
     q.set('id', '43');
     expect((await get(`/api/login?${q}`)).status).toBe(403);

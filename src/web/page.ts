@@ -55,7 +55,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .foot{display:flex;justify-content:flex-end;gap:8px}
 img{max-width:100%;height:auto}
 </style></head><body>
-<div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div><div class="inline"><button id="theme" class="btn" aria-label="Switch between light and dark theme"></button><button id="new" class="btn primary" hidden>New request</button></div></div>
+<div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div><div class="inline"><a id="payer-link" class="btn" href="/pay/${ref}">Pay</a><button id="theme" class="btn" aria-label="Switch between light and dark theme"></button><button id="new" class="btn primary" hidden>New request</button></div></div>
 <p id="msg" class="alert" hidden></p>
 <div id="login" hidden>
 <p>Sign in with Telegram to view this event.</p>
@@ -112,6 +112,7 @@ function failure(e) { return e.error === 'over_bound' ? 'Too much: at most ' + s
 async function post(path, body) {
   return fetch(path, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
 }
+
 async function act(path, body, button) {
   if (button) button.disabled = true;
   say('');
@@ -276,5 +277,61 @@ $('dlg').addEventListener('click', (e) => { if (e.target === $('dlg')) $('dlg').
 $('dlg-form').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRequest(); });
 $('np-go').onclick = createRequest;
 load();
+</script></body></html>`;
+}
+
+/** Standalone payer page: no event history or administrator actions are exposed here. */
+export function renderPayerPage(ref: string, botUsername: string): string {
+  const bot = botUsername.replace(/[^A-Za-z0-9_]/g, '');
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pay event</title><link rel="icon" href="/logo.png">
+<style>
+:root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa;--danger:#dc2626}
+@media(prefers-color-scheme:dark){:root{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--danger:#f87171}}
+*{box-sizing:border-box}body{max-width:32rem;margin:0 auto;padding:20px;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
+h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}.brand img{border-radius:8px}.card{border:1px solid var(--border);border-radius:8px;padding:16px;display:grid;gap:14px}.muted{color:var(--muted-fg)}.alert{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:12px}.err{color:var(--danger);margin:0}.fields{display:grid;gap:12px}label{display:grid;gap:5px;font-weight:600}.input{font:inherit;min-height:42px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}.input:read-only{background:var(--muted)}.btn{font:inherit;font-weight:600;min-height:42px;border:1px solid var(--border);border-radius:6px;padding:8px 16px;background:var(--primary);color:var(--primary-fg);cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}img{max-width:100%;height:auto}.qr{display:grid;justify-items:center;gap:8px}.qr img{width:280px}.hidden{display:none!important}
+</style></head><body>
+<div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Pay event</h1></div>
+<p id="msg" class="alert hidden"></p>
+<div id="login" class="card hidden"><p>Sign in with Telegram to make a payment.</p>
+<script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="${bot}" data-size="large" data-auth-url="/api/login?ref=${ref}&amp;next=pay" data-request-access="write"></script>
+</div>
+<div id="app" class="card hidden">
+<p id="event-status" class="muted"></p>
+<div id="form" class="fields">
+<label>Your PayNow mobile / UEN<input id="payer" class="input" autocomplete="off"></label>
+<label>Your name (optional)<input id="name" class="input" maxlength="40" autocomplete="name"></label>
+<label>Amount (SGD)<input id="amount" class="input" inputmode="decimal" autocomplete="off"></label>
+<p id="err" class="err hidden"></p><button id="create" class="btn">Show payment QR</button>
+</div>
+<div id="result" class="hidden"><p id="note"></p><div id="qr" class="qr"></div><button id="again" class="btn">Create another</button></div>
+</div>
+<script>
+const $=id=>document.getElementById(id), sgd=c=>'SGD '+(c/100).toFixed(2);
+const say=t=>{$('msg').textContent=t;$('msg').classList.toggle('hidden',!t)};
+const errorText={invalid_payer:'Enter a valid mobile number or UEN.',invalid_amount:'Enter a positive amount with up to 2 decimals.',event_closed:'This event is closed.',forbidden:'Not allowed.',not_found:'Event not found.'};
+let defaultCents=null;
+function showError(t){$('err').textContent=t;$('err').classList.toggle('hidden',!t)}
+function reset(){showError('');$('result').classList.add('hidden');$('form').classList.remove('hidden');$('payer').value='';$('name').value='';$('amount').value=defaultCents===null?'':(defaultCents/100).toFixed(2)}
+async function load(){
+  const res=await fetch('/api/pay/${ref}',{credentials:'same-origin'});
+  if(res.status===401){$('login').classList.remove('hidden');return}
+  if(res.status===404){say('Event not found.');return}
+  if(!res.ok){say('Something went wrong.');return}
+  const d=await res.json(); document.title='Pay: '+d.event.name; $('title').textContent='Pay: '+d.event.name;
+  defaultCents=d.event.defaultAmountCents; $('event-status').textContent=d.event.status==='open'?'Create your payment request.':'This event is closed.';
+  if(d.event.status!=='open'){$('form').classList.add('hidden');$('app').classList.remove('hidden');return}
+  $('amount').value=defaultCents===null?'':(defaultCents/100).toFixed(2); $('amount').readOnly=defaultCents!==null; $('amount').required=defaultCents===null;
+  $('app').classList.remove('hidden');
+}
+async function create(){
+  const b=$('create');b.disabled=true;showError('');
+  const res=await fetch('/api/pay/${ref}/payments',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({payer:$('payer').value,name:$('name').value,amount:$('amount').value})});
+  const d=await res.json().catch(()=>({}));b.disabled=false;
+  if(!res.ok){showError(errorText[d.error]||'Something went wrong.');return}
+  $('form').classList.add('hidden');$('result').classList.remove('hidden');$('note').textContent='Payment '+d.payment.ref+' · '+sgd(d.payment.amountCents);$('qr').replaceChildren(Object.assign(document.createElement('img'),{src:'/api/pay/${ref}/payments/'+encodeURIComponent(d.payment.ref)+'/qr',alt:'Payment QR'}));
+}
+$('create').onclick=create;$('again').onclick=reset;load();
 </script></body></html>`;
 }

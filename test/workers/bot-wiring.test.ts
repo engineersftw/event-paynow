@@ -179,6 +179,15 @@ describe('bot wiring (src/bot.ts)', () => {
     };
     expect(kb.inline_keyboard.flat()).toEqual([
       { text: '🟢 Web Event', url: 'https://web.test/events/EVT-WEB0021' },
+      { text: '💳 Pay', url: 'https://web.test/pay/EVT-WEB0021' },
+    ]);
+
+    await bot.handleUpdate(textUpdate(userId, '/web_payment'));
+    const paymentKb = stub.sentMessages.at(-1)!.replyMarkup as {
+      inline_keyboard: Array<Array<{ text: string; url?: string }>>;
+    };
+    expect(paymentKb.inline_keyboard.flat()).toEqual([
+      { text: '🟢 Web Event', url: 'https://web.test/pay/EVT-WEB0021' },
     ]);
   });
 
