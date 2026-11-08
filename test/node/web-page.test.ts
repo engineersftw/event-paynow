@@ -46,6 +46,11 @@ describe('event page shell', () => {
     }
     expect(html).toContain("el('span', String(count), 'count')");
     expect(html).toContain('min-height:40px');
+    // the dialog pre-fills the event's default amount (opening and "Create another")
+    expect(html).toContain(
+      "d.event.defaultAmountCents ? (d.event.defaultAmountCents / 100).toFixed(2) : ''"
+    );
+    expect(html).toContain("$('np-amount').value = defaultAmount;");
     // list controls: paging, search and status filter
     expect(html).toContain('id="more"');
     expect(html).toContain('>Load more<');

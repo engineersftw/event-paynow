@@ -83,6 +83,7 @@ describe('bot wiring (src/bot.ts)', () => {
 
     // Step 2: payee
     await bot.handleUpdate(textUpdate(userId, '91234567'));
+    await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
     const confirmMessage = stub.sentMessages[stub.sentMessages.length - 1]!;
     expect(confirmMessage.text).toContain('+6591234567');
 

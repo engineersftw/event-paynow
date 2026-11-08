@@ -2,6 +2,7 @@ import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import { detectProxyType, generateRef } from '../db/proxy-validation.js';
 import type { EventRepository, Repository } from '../db/repository.js';
+import { formatCents, parseAmount } from '../sgqr/amount.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 
 /**
@@ -11,9 +12,10 @@ import type { ConversationDO, ConversationState } from '../worker/conversation-d
  * 1. User sends /init
  * 2. Step 1: collect event name (non-empty, ≤ 50 chars)
  * 3. Step 2: collect mobile number or UEN (payee for this event)
- * 4. Step 3: echo name + payee for confirmation via inline Confirm/Cancel buttons
- * 5. On Confirm: create events row, reply with ref + summary
- * 6. On Cancel: reset state without creating the event
+ * 4. Step 3: optional default amount to collect (text, or a Skip button)
+ * 5. Step 4: echo name + payee (+ amount) for confirmation via inline Confirm/Cancel buttons
+ * 6. On Confirm: create events row, reply with ref + summary
+ * 7. On Cancel: reset state without creating the event
  *
  * The event name becomes the fixed description for every payment in the event.
  */
@@ -71,7 +73,10 @@ export class InitCommandHandler {
         await this.handlePayeeInput(ctx, text, state);
         break;
       case 3:
-        // Step 3 is button-driven; text input gets a nudge
+        await this.handleDefaultAmountInput(ctx, text, state);
+        break;
+      case 4:
+        // Step 4 is button-driven; text input gets a nudge
         await ctx.reply('⏳ Waiting for confirmation. Please tap a button above.');
         break;
     }
@@ -125,7 +130,7 @@ export class InitCommandHandler {
 
     await this.setState({
       flow: 'init',
-      step: 3, // waiting for button confirmation
+      step: 3, // waiting for the optional default amount
       context: {
         ...state.context,
         pendingProxy: normalized,
@@ -133,17 +138,46 @@ export class InitCommandHandler {
       lastActivity: new Date().toISOString(),
     });
 
-    const typeLabel = normalized.type === 'mobile' ? 'Mobile number' : 'UEN';
-    const keyboard = new InlineKeyboard()
-      .text('✅ Confirm', `init_confirm:${state.context.userId as number}`)
-      .text('❌ Cancel', `init_cancel:${state.context.userId as number}`);
-
     await ctx.reply(
-      `📋 Event: ${state.context.eventName}\n` +
-        `📱 ${typeLabel}: ${normalized.normalized}\n\n` +
-        'Tap a button to confirm or cancel:',
-      { reply_markup: keyboard }
+      '💰 Default amount to collect (optional).\n\n' +
+        'Enter an amount in SGD (e.g. 21 or 12.50) and /start will offer it for every payment ' +
+        'in this event, or skip:',
+      {
+        reply_markup: new InlineKeyboard().text(
+          'Skip',
+          `init_skip_amount:${state.context.userId as number}`
+        ),
+      }
     );
+  }
+
+  /**
+   * Step 3: optional default amount typed as text.
+   */
+  private async handleDefaultAmountInput(
+    ctx: Context,
+    input: string,
+    state: ConversationState
+  ): Promise<void> {
+    const cents = parseAmount(input);
+    if (cents === null) {
+      await ctx.reply(
+        '❌ Invalid amount. Enter a positive number with up to 2 decimals (e.g. 21 or 12.50), or tap Skip.'
+      );
+      return;
+    }
+
+    const context = { ...state.context, defaultAmountCents: cents };
+    await this.setState({
+      flow: 'init',
+      step: 4,
+      context,
+      lastActivity: new Date().toISOString(),
+    });
+
+    await ctx.reply(`${summary(context)}\n\nTap a button to confirm or cancel:`, {
+      reply_markup: confirmKeyboard(state.context.userId as number),
+    });
   }
 
   /**
@@ -151,12 +185,37 @@ export class InitCommandHandler {
    */
   async handleCallback(ctx: Context): Promise<boolean> {
     const data = ctx.callbackQuery?.data;
-    if (!data || (!data.startsWith('init_confirm:') && !data.startsWith('init_cancel:'))) {
+    if (
+      !data ||
+      (!data.startsWith('init_confirm:') &&
+        !data.startsWith('init_cancel:') &&
+        !data.startsWith('init_skip_amount:'))
+    ) {
       return false;
     }
 
     const state = await this.getState();
-    if (state?.flow !== 'init' || state.step !== 3) {
+
+    if (data.startsWith('init_skip_amount:')) {
+      if (state?.flow !== 'init' || state.step !== 3) {
+        await ctx.editMessageText('❌ Session expired. Run /init again.', {
+          reply_markup: { inline_keyboard: [] },
+        });
+        return true;
+      }
+      await this.setState({
+        flow: 'init',
+        step: 4,
+        context: state.context,
+        lastActivity: new Date().toISOString(),
+      });
+      await ctx.editMessageText(`${summary(state.context)}\n\nTap a button to confirm or cancel:`, {
+        reply_markup: confirmKeyboard(state.context.userId as number),
+      });
+      return true;
+    }
+
+    if (state?.flow !== 'init' || state.step !== 4) {
       await ctx.editMessageText('❌ Session expired. Run /init again.', {
         reply_markup: { inline_keyboard: [] },
       });
@@ -176,7 +235,7 @@ export class InitCommandHandler {
         lastActivity: new Date().toISOString(),
       });
       await ctx.editMessageText(
-        `📋 Event: ${state.context.eventName}\n📱 ${pendingProxy.type === 'mobile' ? 'Mobile number' : 'UEN'}: ${pendingProxy.normalized}\n\n❌ Cancelled. Run /init again to start over.`,
+        `${summary(state.context)}\n\n❌ Cancelled. Run /init again to start over.`,
         { reply_markup: { inline_keyboard: [] } }
       );
     }
@@ -208,6 +267,7 @@ export class InitCommandHandler {
         payeeType: proxy.type as 'mobile' | 'uen',
         payeeValue: proxy.normalized,
         status: 'open',
+        defaultAmountCents: (state.context.defaultAmountCents as number | undefined) ?? null,
         timestamp: new Date().toISOString(),
       });
 
@@ -222,6 +282,9 @@ export class InitCommandHandler {
         `✅ Event created!\n\n` +
           `📋 Name: ${event.name}\n` +
           `📱 Payee: ${proxy.normalized}\n` +
+          (event.defaultAmountCents === null
+            ? ''
+            : `💰 Default amount: SGD ${formatCents(event.defaultAmountCents)}\n`) +
           `🔗 Ref: \`${event.ref}\`\n\n` +
           'Use /start to create payments for this event.',
         { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }
@@ -257,4 +320,20 @@ export class InitCommandHandler {
     );
     await response?.body?.cancel();
   }
+}
+
+const confirmKeyboard = (userId: number) =>
+  new InlineKeyboard()
+    .text('✅ Confirm', `init_confirm:${userId}`)
+    .text('❌ Cancel', `init_cancel:${userId}`);
+
+/** Event / payee / optional default amount lines shown on the confirmation and cancel messages. */
+function summary(context: Record<string, unknown>): string {
+  const proxy = context.pendingProxy as { type: string; normalized: string };
+  const cents = context.defaultAmountCents as number | undefined;
+  return (
+    `📋 Event: ${context.eventName}\n` +
+    `📱 ${proxy.type === 'mobile' ? 'Mobile number' : 'UEN'}: ${proxy.normalized}` +
+    (cents === undefined ? '' : `\n💰 Default amount: SGD ${formatCents(cents)}`)
+  );
 }

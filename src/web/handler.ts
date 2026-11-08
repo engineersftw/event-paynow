@@ -396,7 +396,7 @@ async function eventData(
 
   // Names only: never expose payer/payee PayNow numbers to the page.
   return json({
-    event: { name: event.name, status: event.status },
+    event: { name: event.name, status: event.status, defaultAmountCents: event.defaultAmountCents },
     totals: {
       collectedCents: stats.collectedCents,
       paidBackCents: stats.paidBackCents,

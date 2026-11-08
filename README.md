@@ -227,7 +227,7 @@ openspec/
 
 | Command | Description |
 |---|---|
-| `/init` | Create a new event (name + PayNow payee) |
+| `/init` | Create a new event (name, PayNow payee, optional default amount that `/start` and the web page suggest) |
 | `/start` | Create a payment QR for an event (payer, optional name, amount, confirm) |
 | `/payments` | List events and payments with inline buttons |
 | `/web_admin` | Links to the web page for each event (chat admins) |

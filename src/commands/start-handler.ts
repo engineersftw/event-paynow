@@ -157,6 +157,9 @@ export class StartCommandHandler {
     if (data === 'start_skip_name') {
       return this.handleSkipName(ctx);
     }
+    if (data === 'start_use_default') {
+      return this.handleUseDefault(ctx);
+    }
     if (data === 'start_confirm') {
       return this.handleConfirm(ctx);
     }
@@ -218,8 +221,51 @@ export class StartCommandHandler {
     });
     await ctx.answerCallbackQuery({ text: 'Skipped' });
     await ctx.editMessageText(amountPrompt(state.context.payerValue as string), {
-      reply_markup: { inline_keyboard: [] },
+      reply_markup: (await this.defaultAmountKeyboard(state.context.eventRef as string)) ?? {
+        inline_keyboard: [],
+      },
     });
+    return true;
+  }
+
+  /** "Use SGD x.xx" button when the (open) event has a default amount. */
+  private async defaultAmountKeyboard(eventRef: string): Promise<InlineKeyboard | undefined> {
+    const event = await this.eventRepository.getEventByRef(eventRef);
+    if (event?.status !== 'open' || !event.defaultAmountCents) return undefined;
+    return new InlineKeyboard().text(
+      `Use SGD ${formatCents(event.defaultAmountCents)}`,
+      'start_use_default'
+    );
+  }
+
+  /** Tap on the default amount button: same path as typing that amount. */
+  private async handleUseDefault(ctx: Context): Promise<boolean> {
+    const state = await this.getState();
+    if (state?.flow !== 'start' || state.step !== 4) {
+      await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /start again.' });
+      return true;
+    }
+    const event = await this.eventRepository.getEventByRef(state.context.eventRef as string);
+    if (event?.status !== 'open') {
+      await ctx.answerCallbackQuery({
+        text: '❌ This event is closed. Run /init to open a new one.',
+      });
+      await this.resetState();
+      return true;
+    }
+    if (!event.defaultAmountCents) {
+      await ctx.answerCallbackQuery({ text: '❌ This event has no default amount.' });
+      return true;
+    }
+
+    await ctx.answerCallbackQuery({ text: `SGD ${formatCents(event.defaultAmountCents)}` });
+    await ctx.editMessageText(
+      `💵 Amount: SGD ${formatCents(event.defaultAmountCents)} (event default)`,
+      {
+        reply_markup: { inline_keyboard: [] },
+      }
+    );
+    await this.proceedWithAmount(ctx, event.defaultAmountCents, state);
     return true;
   }
 
@@ -268,7 +314,10 @@ export class StartCommandHandler {
       lastActivity: new Date().toISOString(),
     });
 
-    await ctx.reply(amountPrompt(`${text} (${state.context.payerValue as string})`));
+    const prompt = amountPrompt(`${text} (${state.context.payerValue as string})`);
+    const keyboard = await this.defaultAmountKeyboard(state.context.eventRef as string);
+    if (keyboard) await ctx.reply(prompt, { reply_markup: keyboard });
+    else await ctx.reply(prompt);
   }
 
   private async handleAmountInput(
@@ -284,6 +333,15 @@ export class StartCommandHandler {
       return;
     }
 
+    await this.proceedWithAmount(ctx, amountCents, state);
+  }
+
+  /** A valid amount (typed, or the event's default): move to the confirmation summary. */
+  private async proceedWithAmount(
+    ctx: Context,
+    amountCents: number,
+    state: ConversationState
+  ): Promise<void> {
     try {
       const event = await this.eventRepository.getEventByRef(state.context.eventRef as string);
       if (event?.status !== 'open') {

@@ -185,6 +185,7 @@ function paymentCard(p) {
 const PAGE = 20;
 let rows = [];
 let nextCursor = null;
+let defaultAmount = '';
 let statusFilter = '';
 let query = '';
 let seq = 0;
@@ -204,6 +205,7 @@ async function show(res, mode) {
   document.title = 'Event: ' + d.event.name;
   $('title').textContent = 'Event: ' + d.event.name;
   $('new').hidden = d.event.status !== 'open';
+  defaultAmount = d.event.defaultAmountCents ? (d.event.defaultAmountCents / 100).toFixed(2) : '';
   $('collected').textContent = sgd(d.totals.collectedCents);
   $('paidback').textContent = sgd(d.totals.paidBackCents);
   $('pending').textContent = sgd(d.totals.pendingCents);
@@ -244,7 +246,7 @@ let timer;
 $('q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { query = $('q').value.trim(); restart(); }, 300); });
 $('more').onclick = loadMore;
 paintFilter();
-function showForm() { $('dlg-form').hidden = false; $('dlg-result').hidden = true; $('dlg-title').textContent = 'New payment request'; $('dlg-err').hidden = true; }
+function showForm() { $('np-amount').value = defaultAmount; $('dlg-form').hidden = false; $('dlg-result').hidden = true; $('dlg-title').textContent = 'New payment request'; $('dlg-err').hidden = true; }
 async function createRequest() {
   const go = $('np-go');
   go.disabled = true;

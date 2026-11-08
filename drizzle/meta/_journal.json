@@ -43,6 +43,13 @@
       "when": 1794107284432,
       "tag": "0005_admin_audit_columns",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794133296449,
+      "tag": "0006_event_default_amount",
+      "breakpoints": true
     }
   ]
 }

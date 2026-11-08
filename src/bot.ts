@@ -140,7 +140,11 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   // handler; everything else falls through to PaymentCallbackHandler.
   bot.on('callback_query:data', async (ctx) => {
     const data = ctx.callbackQuery?.data ?? '';
-    if (data.startsWith('init_confirm:') || data.startsWith('init_cancel:')) {
+    if (
+      data.startsWith('init_confirm:') ||
+      data.startsWith('init_cancel:') ||
+      data.startsWith('init_skip_amount:')
+    ) {
       await new InitCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(
         ctx
       );
@@ -149,6 +153,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     if (
       data.startsWith('start_pick:') ||
       data === 'start_skip_name' ||
+      data === 'start_use_default' ||
       data === 'start_confirm' ||
       data === 'start_cancel'
     ) {
