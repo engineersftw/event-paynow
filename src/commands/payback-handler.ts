@@ -1,9 +1,9 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
-import { detectProxyType, generateRef } from '../db/proxy-validation.js';
+import { createPaybackFor } from '../db/payback-service.js';
+import { detectProxyType } from '../db/proxy-validation.js';
 import type { PayeeType, Payment, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
-import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 import {
@@ -13,6 +13,7 @@ import {
   plainPayerLabel,
   recipientName,
 } from './payer-label.js';
+import { ownerOnly, type PaymentAccess } from './payment-access.js';
 
 /**
  * /payback command handler - initiates payback flow for a payment
@@ -43,9 +44,16 @@ export class PaybackCommandHandler {
   private conversationDO: ConversationDO;
   private repository: Repository;
 
-  constructor(conversationDO: ConversationDO, repository: Repository) {
+  private canAct: PaymentAccess;
+
+  constructor(
+    conversationDO: ConversationDO,
+    repository: Repository,
+    canAct: PaymentAccess = ownerOnly
+  ) {
     this.conversationDO = conversationDO;
     this.repository = repository;
+    this.canAct = canAct;
   }
 
   /**
@@ -72,7 +80,7 @@ export class PaybackCommandHandler {
         return;
       }
 
-      if (payment.userId !== userId) {
+      if (!(await this.canAct(payment, userId))) {
         await ctx.reply('❌ You do not own this payment.');
         return;
       }
@@ -451,28 +459,17 @@ export class PaybackCommandHandler {
         return;
       }
 
-      const paybackRef = generateRef();
       const recipient = this.recipientNameFor(state);
 
-      // Payback QR encodes the PAYER as the payee proxy (spec: the collecting
-      // user scans this in their own bank app and sends the money back)
-      const qrPayload = buildPayNowPayload({
-        proxyType: payerProxy.type,
-        proxyValue: payerProxy.normalized,
-        amountCents: paybackAmount,
-        reference: paybackRef,
-        description: `Refund ${paymentRef}`,
-      });
-
-      const result = await this.repository.createPaybackBounded({
-        ref: paybackRef,
+      // Payback QR encodes the PAYER as the payee proxy (spec: the collecting user scans this
+      // in their own bank app and sends the money back)
+      const result = await createPaybackFor(this.repository, {
         paymentId,
-        payerType: payerProxy.type,
-        payerValue: payerProxy.normalized,
+        paymentRef,
+        recipientType: payerProxy.type,
+        recipientValue: payerProxy.normalized,
         amountCents: paybackAmount,
-        status: 'pending',
-        qrPayload,
-        timestamp: new Date().toISOString(),
+        createdBy: ctx.from!.id,
       });
 
       if (!result.ok) {

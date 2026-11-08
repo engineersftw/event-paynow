@@ -1,5 +1,5 @@
 import { env } from 'cloudflare:test';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBot } from '../../src/bot';
 import { D1EventRepository, D1Repository } from '../../src/db/drizzle-repository';
 import type { Env as WorkerEnv } from '../../src/env';
@@ -178,6 +178,104 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(kb.inline_keyboard.flat()).toEqual([
       { text: '🟢 Web Event', url: 'https://web.test/events/EVT-WEB0021' },
     ]);
+  });
+
+  describe('chat admins acting on another user’s payment (real wiring)', () => {
+    const OWNER = 800000041;
+    const ADMIN = 800000042;
+    const MEMBER = 800000043;
+
+    afterEach(() => vi.unstubAllGlobals());
+
+    /** getChatMember stub: ADMIN is an administrator, everyone else a plain member. */
+    function stubTelegramAdmins() {
+      vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+        const url = new URL(String(input));
+        const status =
+          url.searchParams.get('user_id') === String(ADMIN) ? 'administrator' : 'member';
+        return new Response(JSON.stringify({ ok: true, result: { status } }));
+      });
+    }
+
+    /** Photo-message button press coming from the group chat (-100…), not a private chat. */
+    function groupPress(userId: number, data: string, updateId: number) {
+      const update = callbackUpdate(userId, data, 600, updateId, true) as unknown as {
+        callback_query: { message: { chat: { id: number; type: string } } };
+      };
+      update.callback_query.message.chat = { id: -1000000041, type: 'supergroup' };
+      return update as never;
+    }
+
+    async function seedGroupPayment(ref: string) {
+      const eventRepo = new D1EventRepository(env.paynow_db);
+      const event =
+        (await eventRepo.getEventByRef('EVT-ADM041')) ??
+        (await eventRepo.createEvent({
+          ref: 'EVT-ADM041',
+          chatId: -1000000041,
+          topicId: 0,
+          name: 'Group Event',
+          payeeType: 'mobile',
+          payeeValue: '+6591234567',
+          status: 'open',
+          timestamp: T0,
+        }));
+      const repo = new D1Repository(env.paynow_db);
+      await repo.createPayment({
+        ref,
+        userId: OWNER,
+        eventId: event.id,
+        description: 'Group Event',
+        amountCents: 1000,
+        payeeType: 'mobile',
+        payeeValue: '+6591234567',
+        status: 'pending',
+        source: 'manual',
+        qrPayload: 'p',
+        timestamp: T0,
+      });
+      return repo;
+    }
+
+    it('an admin who did not create the payment can receive it; the actor is recorded', async () => {
+      stubTelegramAdmins();
+      const repo = await seedGroupPayment('ADM-PAY-01');
+      const { bot } = makeWiredBot();
+
+      await bot.handleUpdate(groupPress(ADMIN, 'mark_received:ADM-PAY-01', 3));
+
+      expect(await repo.getPaymentByRef('ADM-PAY-01')).toMatchObject({
+        status: 'received',
+        receivedBy: ADMIN,
+      });
+    });
+
+    it('an ordinary member is refused and nothing changes; an admin can void', async () => {
+      stubTelegramAdmins();
+      const repo = await seedGroupPayment('ADM-PAY-02');
+      const { bot } = makeWiredBot();
+
+      await bot.handleUpdate(groupPress(MEMBER, 'void:ADM-PAY-02', 4));
+      expect(stub.callbackAnswers.at(-1)).toContain('do not own');
+      expect((await repo.getPaymentByRef('ADM-PAY-02'))!.status).toBe('pending');
+
+      await bot.handleUpdate(groupPress(ADMIN, 'void:ADM-PAY-02', 5));
+      expect(await repo.getPaymentByRef('ADM-PAY-02')).toMatchObject({
+        status: 'voided',
+        voidedBy: ADMIN,
+        receivedBy: null,
+      });
+    });
+
+    it('if Telegram cannot confirm admin status, access is denied', async () => {
+      vi.stubGlobal('fetch', async () => new Response('boom', { status: 500 }));
+      const repo = await seedGroupPayment('ADM-PAY-03');
+      const { bot } = makeWiredBot();
+
+      await bot.handleUpdate(groupPress(ADMIN, 'void:ADM-PAY-03', 6));
+
+      expect((await repo.getPaymentByRef('ADM-PAY-03'))!.status).toBe('pending');
+    });
   });
 
   it.skip('pagination callback renders the next page with Prev button', async () => {

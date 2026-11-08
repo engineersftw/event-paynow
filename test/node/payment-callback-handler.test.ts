@@ -77,7 +77,8 @@ describe('PaymentCallbackHandler', () => {
         'PAY123',
         'received',
         'manual',
-        expect.any(String)
+        expect.any(String),
+        123456789
       );
       expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
         text: '✅ Payment marked as received!',
@@ -270,7 +271,7 @@ describe('PaymentCallbackHandler', () => {
 
       await handler.handleCallback(mockCtx);
 
-      expect(mockRepository.voidPayment).toHaveBeenCalledWith('PAY123');
+      expect(mockRepository.voidPayment).toHaveBeenCalledWith('PAY123', 123456789);
       expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({ text: '🚫 Payment voided' });
       const line = vi.mocked(mockCtx.reply).mock.calls[0]![0] as string;
       expect(line).toMatch(/^Test payment \/ SGD 10\.00 \/ PAY123 \/ Payer: Alice \/ 🚫 Voided /);
@@ -700,7 +701,8 @@ describe('PaymentCallbackHandler', () => {
       expect(mockRepository.updatePaybackStatus).toHaveBeenCalledWith(
         'PB2',
         'sent',
-        expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/)
+        expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/),
+        123456789
       );
       expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
         text: '✅ Payback marked as sent',
@@ -755,7 +757,8 @@ describe('PaymentCallbackHandler', () => {
         expect(mockRepository.updatePaybackStatus).toHaveBeenCalledWith(
           'PB2',
           'cancelled',
-          expect.stringMatching(/^\d{4}-/)
+          expect.stringMatching(/^\d{4}-/),
+          123456789
         );
         expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({ text: '❌ Payback cancelled' });
         expect(mockCtx.reply).toHaveBeenCalledWith(

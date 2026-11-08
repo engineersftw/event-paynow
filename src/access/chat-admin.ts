@@ -3,7 +3,7 @@
  * themself for a private chat (where chat id === user id). Checked live via the bot API so a
  * demoted admin loses access at once; any failure denies.
  */
-export async function canViewChat(
+export async function isChatAdmin(
   chatId: number,
   userId: number,
   botToken: string,

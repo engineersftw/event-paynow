@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canViewChat } from '../../src/web/access';
+import { isChatAdmin } from '../../src/access/chat-admin';
 import { signSession, verifySession, verifyTelegramLogin } from '../../src/web/auth';
 
 const TOKEN = '123:bot-token';
@@ -60,7 +60,7 @@ describe('session cookie', () => {
   });
 });
 
-describe('canViewChat', () => {
+describe('isChatAdmin', () => {
   const stub = (status: string | null, ok = true) =>
     (async () =>
       new Response(JSON.stringify({ ok, result: status ? { status } : undefined }), {
@@ -68,13 +68,13 @@ describe('canViewChat', () => {
       })) as unknown as typeof fetch;
 
   it('allows administrators and the owner, denies members, outsiders and API errors', async () => {
-    expect(await canViewChat(-100, 1, TOKEN, stub('administrator'))).toBe(true);
-    expect(await canViewChat(-100, 1, TOKEN, stub('creator'))).toBe(true);
-    expect(await canViewChat(-100, 1, TOKEN, stub('member'))).toBe(false);
-    expect(await canViewChat(-100, 1, TOKEN, stub('left'))).toBe(false);
-    expect(await canViewChat(-100, 1, TOKEN, stub(null, false))).toBe(false);
+    expect(await isChatAdmin(-100, 1, TOKEN, stub('administrator'))).toBe(true);
+    expect(await isChatAdmin(-100, 1, TOKEN, stub('creator'))).toBe(true);
+    expect(await isChatAdmin(-100, 1, TOKEN, stub('member'))).toBe(false);
+    expect(await isChatAdmin(-100, 1, TOKEN, stub('left'))).toBe(false);
+    expect(await isChatAdmin(-100, 1, TOKEN, stub(null, false))).toBe(false);
     expect(
-      await canViewChat(-100, 1, TOKEN, (async () => {
+      await isChatAdmin(-100, 1, TOKEN, (async () => {
         throw new Error('down');
       }) as unknown as typeof fetch)
     ).toBe(false);
@@ -84,6 +84,6 @@ describe('canViewChat', () => {
     const never = (async () => {
       throw new Error('should not be called');
     }) as unknown as typeof fetch;
-    expect(await canViewChat(7, 7, TOKEN, never)).toBe(true);
+    expect(await isChatAdmin(7, 7, TOKEN, never)).toBe(true);
   });
 });

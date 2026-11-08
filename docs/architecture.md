@@ -85,7 +85,7 @@
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│  Cloudflare Pages (web/) — read-only event admin page            │
+│  Cloudflare Pages (web/) — event admin page (paybacks only)      │
 │  Pages Function → src/web/handler.ts → same D1 database          │
 │  Telegram Login Widget sign-in, chat-admin check via Bot API     │
 └─────────────────────────────────────────────────────────────────┘
@@ -159,7 +159,7 @@
 **`/payments` handler**:
 
 - Top-level lists the chat's events with payment count and collected (net of sent paybacks), paid back and pending totals (voided payments excluded)
-- Drill into an event → the caller's payments (net of sent paybacks, with the original amount and `Paid back` when any were sent) with inline buttons (View / ✓ Received for pending / Payback for received)
+- Drill into an event → the caller's payments, or every payment of the event for a chat administrator (net of sent paybacks, with the original amount and `Paid back` when any were sent) with inline buttons (View / ✓ Received for pending / Payback for received)
 - Payment detail view shows status (⏳ / ✅ / 🚫), payer, timestamps, source and payback history with `Paid back` (sent), `Net`, `Pending paybacks` and `Remaining` (payable-back room); event names and descriptions are Markdown-escaped
 - An event from another chat reads as not found
 
@@ -171,7 +171,7 @@
 
 **`/payback` handler**:
 
-- Starts from `/payback <ref>` or the Payback button; refused unless the payment is `received`
+- Starts from `/payback <ref>` or the Payback button; refused unless the payment is `received`. The owner or a chat administrator of the event's chat may pay it back.
 - A payment with a stored payer proposes it (Confirm / Change recipient / Cancel; a change applies to that payback only); legacy payments prompt for the payer
 - Then amount → Confirm; the payback row is created inside the bounded D1 transaction (pending + sent count toward the bound, cancelled do not)
 - The QR encodes the PAYER as payee proxy; caption and image text show `To: <name>` when the recipient is the stored payer
@@ -183,13 +183,15 @@
 
 ### Web Admin (web/, src/web/)
 
-**Role**: Read-only page listing every payment of an event, on Cloudflare Pages
+**Role**: Page listing every payment of an event and letting admins handle paybacks, on Cloudflare Pages
 
 - `web/functions/[[path]].ts` is a catch-all Pages Function that delegates to `handleWeb()` (`src/web/handler.ts`)
 - `GET /events/:ref` serves an HTML shell (data is written with `textContent`); `GET /api/events/:ref` returns JSON; `GET /api/login` is the Telegram Login Widget redirect target
 - Sign-in: HMAC-SHA256 over the widget data keyed with SHA256(bot token), rejected after 24 h; success sets a 12 h signed HttpOnly cookie (`src/web/auth.ts`)
 - Authorisation: the user must be a chat administrator/creator, checked live with `getChatMember`, or the owner of a private chat; any failure denies (`src/web/access.ts`)
 - The API returns payer names only (never PayNow numbers); per-payment `paidBackCents` / `netCents` and totals (`collectedCents` net of sent paybacks, `paidBackCents`, `pendingCents`); voided payments are listed but excluded from totals
+- Payback actions (all `POST`s require same-origin JSON, then session → event → live admin check): `POST /api/events/:ref/payments/:paymentRef/paybacks` (shared `createPaybackFor`, same validation and bound as the bot, stored payer as default recipient), `GET /api/events/:ref/paybacks/:ref/qr` (PNG via `bmpToPng`), `POST .../paybacks/:ref/sent` and `/cancel` (pending-only CAS)
+- Payments cannot be created, received or voided from the web
 - Reads the same D1 database through the Pages `paynow_db` binding and the shared repository code
 
 ### Repository Layer (src/db/repository.ts)
@@ -210,6 +212,8 @@
 - `createPaybackBounded`: Create a payback inside a D1 batch with an in-transaction `SUM(paybacks) <= amount` re-check (counts pending + sent, excludes cancelled)
 - `updatePaybackStatus`: Pending-only compare-and-set to `sent` or `cancelled`; racing taps yield exactly one winner
 - `sumPaybacks`: Total of pending + sent paybacks against a payment (the bounded quantity)
+- `listPaybacksByEvent`: every payback of an event's payments (web page payload)
+- Status transitions (`updatePaymentStatus`, `voidPayment`, `updatePaybackStatus`) and `createPaybackBounded` take an optional acting user id, written in the same guarded statement as the transition (audit columns)
 - `sentPaybackTotalsByEvent`: paymentId → total of SENT paybacks for an event (net amounts without a query per payment)
 - Event repository: `createEvent`, `listOpenEventsByChat`, `listAllEventsByChat`, `getEventByRef`, `closeEvent` (open → closed CAS), `getEventStats` (count, collected net of sent paybacks, paid back, pending; voided excluded)
 
@@ -273,6 +277,8 @@ payments (
   payer_name TEXT,
   created_at TEXT NOT NULL,
   received_at TEXT,
+  received_by INTEGER,      -- audit: Telegram user ids, null for older rows
+  voided_by INTEGER,
   FOREIGN KEY (user_id) REFERENCES users(telegram_id),
   FOREIGN KEY (event_id) REFERENCES events(id)
 )
@@ -288,6 +294,9 @@ paybacks (
   qr_payload TEXT NOT NULL,
   created_at TEXT NOT NULL,
   sent_at TEXT,
+  created_by INTEGER,       -- audit: Telegram user ids, null for older rows
+  sent_by INTEGER,
+  cancelled_by INTEGER,
   FOREIGN KEY (payment_id) REFERENCES payments(id)
 )
 ```
@@ -490,7 +499,7 @@ Pushes to `main` deploy automatically through `.github/workflows/deploy.yml`, wh
 - the **Worker** when `src/` (except `src/web/`), `wrangler.toml`, `package*.json` or `tsconfig.json` change
 - the **Pages app** when `web/`, `src/web/`, `src/db/`, `package*.json` or `tsconfig.json` change
 
-It needs the repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, can be run by hand to deploy both, and does **not** apply D1 migrations (run `wrangler d1 migrations apply paynow-db --remote` first). Manual deploys from `main`:
+It needs the repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, can be run by hand to deploy both, and runs `wrangler d1 migrations apply paynow-db --remote` first when `drizzle/` changed (the Worker and Pages deploys wait for it and are skipped if it fails, so migrations must be backward compatible). Manual deploys from `main`:
 
 ```bash
 npm run deploy        # Worker
@@ -566,7 +575,8 @@ npm run test:watch
 ### Data Isolation
 
 - Per-chat DO ensures conversation state isolation
-- Repository queries always filter by user ID; event actions require the event to belong to the chat the tap came from
+- Payment actions (view, receive, void, pay back, sent, cancel) are limited to the payment's owner and to administrators of the event's chat, checked live with `getChatMember` (denied when the check fails; payments without an event stay owner-only); event actions require the event to belong to the chat the tap came from
+- Every such action records who performed it (audit columns `received_by`, `voided_by`, `created_by`, `sent_by`, `cancelled_by`)
 - No cross-user data leakage possible
 - Captions, status lines and QR images carry display names only, never PayNow numbers
 - Web admin: Telegram Login data is HMAC-verified and expires after a day, sessions are signed HttpOnly cookies, and viewing requires chat-admin status checked live
@@ -639,7 +649,7 @@ wrangler tail --format pretty
 - Payment lifecycle: pending → received or voided; paybacks: pending → sent or cancelled (all guarded transitions)
 - Bounded paybacks, payer snapshotted on each payment, recipient confirmation and change
 - Inline-button UX (confirm/cancel, action buttons, pagination, in-place status lines)
-- Read-only web admin page on Cloudflare Pages with Telegram sign-in
+- Web admin page on Cloudflare Pages with Telegram sign-in: payments list plus payback create/QR/sent/cancel
 - D1 migrations (including table rebuilds), live deployment on Cloudflare Workers and Pages
 - GitHub Actions CI with branch protection, and path-filtered deploys from `main`
 - Node and Workers test pools (run `npm test` for the current count)

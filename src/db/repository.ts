@@ -62,6 +62,9 @@ export interface Payment {
   payerName?: string | null;
   createdAt: string;
   receivedAt: string | null;
+  /** Telegram user id of who marked it received / voided it; null for rows from before auditing. */
+  receivedBy?: number | null;
+  voidedBy?: number | null;
 }
 
 export interface Payback {
@@ -75,6 +78,10 @@ export interface Payback {
   qrPayload: string;
   createdAt: string;
   sentAt: string | null;
+  /** Telegram user ids of who created / marked sent / cancelled it; null for rows from before auditing. */
+  createdBy?: number | null;
+  sentBy?: number | null;
+  cancelledBy?: number | null;
 }
 
 /**
@@ -106,6 +113,7 @@ export interface EventRepository {
   listOpenEventsByChat(chatId: number, topicId: number): Promise<Event[]>;
   listAllEventsByChat(chatId: number, topicId: number): Promise<Event[]>;
   getEventByRef(ref: string): Promise<Event | null>;
+  getEventById(id: number): Promise<Event | null>;
   closeEvent(ref: string, timestamp: string): Promise<boolean>; // returns true if closed (was open)
   getEventStats(eventId: number): Promise<EventStats>;
 }
@@ -129,10 +137,11 @@ export interface Repository {
     ref: string,
     status: PaymentStatus,
     source: ReceiptSource,
-    timestamp: string
+    timestamp: string,
+    actorId?: number
   ): Promise<Payment | null>;
   /** Pending → voided compare-and-set. Returns null if missing or no longer pending. */
-  voidPayment(ref: string): Promise<Payment | null>;
+  voidPayment(ref: string, actorId?: number): Promise<Payment | null>;
 
   // Paybacks
   createPayback(
@@ -157,9 +166,12 @@ export interface Repository {
   updatePaybackStatus(
     ref: string,
     status: PaybackStatus,
-    timestamp: string
+    timestamp: string,
+    actorId?: number
   ): Promise<Payback | null>;
   listPaybacksByPayment(paymentId: number): Promise<Payback[]>;
+  /** Every payback of every payment of the event, oldest first. */
+  listPaybacksByEvent(eventId: number): Promise<Payback[]>;
   /**
    * Total amount paid back against a payment across ALL statuses (pending + sent).
    * This is the quantity bounded by the payment amount (task 7.2).
