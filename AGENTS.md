@@ -70,6 +70,7 @@ This project uses OpenSpec for change management. All changes are archived:
 9. `add-web-admin-event-view` (7 tasks) — archived 2026-11-08
 10. `payments-net-of-paybacks` (8 tasks) — archived 2026-11-08
 11. `admin-payment-actions` (16 tasks) — archived 2026-11-08
+12. `web-payment-requests` (7 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -243,8 +244,14 @@ payments are listed but excluded from totals. Admins can also pay received payme
 (PNG from `bmpToPng` in `src/sgqr/png.ts`; Telegram keeps the BMP) and `POST .../paybacks/:ref/sent|cancel`
 (pending-only CAS). Every POST must be same-origin JSON, then session → event → live admin check; the actor id
 is recorded in the audit columns (`payments.received_by` / `voided_by`, `paybacks.created_by` / `sent_by` /
-`cancelled_by`, written in the same guarded UPDATE so a lost race records nobody). Payments cannot be created,
-received or voided from the web. Type-checked by `tsc -p web` (part of `npm run build`).
+`cancelled_by`, written in the same guarded UPDATE so a lost race records nobody). Payment requests are created
+with `POST /api/events/:ref/payments` (shared `createPaymentRequest` / `paymentCaption` / `paymentImageLines` in
+`src/payments/payment-request.ts`, also used by `/start`; open events only; the signed-in admin owns the payment),
+the QR comes from `GET .../payments/:ref/qr` and is also posted to the event's chat by `postPaymentQr`
+(`src/web/telegram.ts`, direct `sendPhoto` with the bot token, `posted: false` on failure — the payment is kept),
+and pending payments are settled with `POST .../payments/:ref/received|void` (pending-only CAS, so web and
+Telegram taps have one winner; the chat message keeps stale buttons, which the bot already answers).
+Type-checked by `tsc -p web` (part of `npm run build`).
 Pages secrets: `TELEGRAM_BOT_TOKEN`, `SESSION_SECRET`; the Login Widget needs BotFather `/setdomain`.
 
 ## Command Handlers

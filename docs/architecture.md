@@ -85,7 +85,7 @@
 └─────────────────────────────────────────────────────────────────┘
 
 ┌─────────────────────────────────────────────────────────────────┐
-│  Cloudflare Pages (web/) — event admin page (paybacks only)      │
+│  Cloudflare Pages (web/) — event admin page (payments + paybacks)  │
 │  Pages Function → src/web/handler.ts → same D1 database          │
 │  Telegram Login Widget sign-in, chat-admin check via Bot API     │
 └─────────────────────────────────────────────────────────────────┘
@@ -191,7 +191,8 @@
 - Authorisation: the user must be a chat administrator/creator, checked live with `getChatMember`, or the owner of a private chat; any failure denies (`src/web/access.ts`)
 - The API returns payer names only (never PayNow numbers); per-payment `paidBackCents` / `netCents` and totals (`collectedCents` net of sent paybacks, `paidBackCents`, `pendingCents`); voided payments are listed but excluded from totals
 - Payback actions (all `POST`s require same-origin JSON, then session → event → live admin check): `POST /api/events/:ref/payments/:paymentRef/paybacks` (shared `createPaybackFor`, same validation and bound as the bot, stored payer as default recipient), `GET /api/events/:ref/paybacks/:ref/qr` (PNG via `bmpToPng`), `POST .../paybacks/:ref/sent` and `/cancel` (pending-only CAS)
-- Payments cannot be created, received or voided from the web
+- Payment requests: `POST /api/events/:ref/payments` (shared `createPaymentRequest`, same payload/caption/image text as `/start`, open events only, owned by the signed-in admin), `GET .../payments/:ref/qr` (PNG), and the QR photo is also posted to the event's chat by the Pages Function (`src/web/telegram.ts`, `sendPhoto` with Received/Void buttons; failure keeps the payment and reports `posted: false`)
+- Settling: `POST .../payments/:ref/received` and `/void` (pending-only CAS recording the acting admin; races with Telegram taps have one winner, the chat message keeps stale buttons the bot already handles)
 - Reads the same D1 database through the Pages `paynow_db` binding and the shared repository code
 
 ### Repository Layer (src/db/repository.ts)
