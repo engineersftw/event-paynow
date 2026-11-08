@@ -1,5 +1,6 @@
 import jsQR from 'jsqr';
 import { describe, expect, it } from 'vitest';
+import { LOGO_COLOR } from '../../src/sgqr/paynow-logo';
 import { renderQrPng } from '../../src/sgqr/qr-render';
 
 /**
@@ -35,18 +36,16 @@ function bmpToRgba(bytes: Uint8Array): {
   return { data, width, height };
 }
 
-/** The bot logo is red and green; the QR itself is pure black and white. */
 function isLogoColor(r: number, g: number, b: number): boolean {
-  const red = r > 180 && g < 70 && b < 70;
-  const green = g > 150 && r < 80 && b < 80;
-  return red || green;
+  const [lr, lg, lb] = LOGO_COLOR;
+  return Math.abs(r - lr) < 40 && Math.abs(g - lg) < 40 && Math.abs(b - lb) < 40;
 }
 
-describe('renderQrPng — bot logo overlay', () => {
+describe('renderQrPng — PayNow logo overlay', () => {
   const payload =
     '00020101021226490009SG.PAYNOW010100211+6591234567030100507INV-001520400005303702540512.505802SG5912ACME PTE LTD6009Singapore62160112Dinner split63041AAF';
 
-  it('overlays the bot logo in the center without breaking jsQR decoding', async () => {
+  it('overlays the PayNow logo in the center without breaking jsQR decoding', async () => {
     const bmp = await renderQrPng(payload);
     const { data, width, height } = bmpToRgba(bmp);
 
@@ -60,7 +59,7 @@ describe('renderQrPng — bot logo overlay', () => {
     const bmp = await renderQrPng(payload);
     const { data, width, height } = bmpToRgba(bmp);
 
-    // Count logo-color (red/green) pixels within the central quarter.
+    // Count PayNow-color pixels within the central quarter.
     let logoPixels = 0;
     const cx = width / 2;
     const cy = height / 2;
@@ -81,7 +80,7 @@ describe('renderQrPng — bot logo overlay', () => {
     const bmp = await renderQrPng(payload);
     const { data, width, height } = bmpToRgba(bmp);
 
-    // Top-left corner region should contain only pure black/white (no logo color).
+    // Top-left corner region should contain only pure black/white (no PayNow color).
     let brand = 0;
     for (let y = 0; y < height / 5; y++) {
       for (let x = 0; x < width / 5; x++) {
