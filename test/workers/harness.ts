@@ -393,6 +393,31 @@ export function textUpdate(userId: number, text: string, updateId = 1): Update {
   return { update_id: updateId, message } as Update;
 }
 
+/** Group-chat text message from `userId`, optionally inside a forum topic; commands get the entity. */
+export function groupTextUpdate(
+  chatId: number,
+  userId: number,
+  text: string,
+  topicId?: number,
+  updateId = 1
+): Update {
+  const message: Record<string, unknown> = {
+    message_id: updateId,
+    date: Math.floor(Date.now() / 1000),
+    chat: { id: chatId, type: topicId ? 'supergroup' : 'group' },
+    from: { id: userId, is_bot: false, first_name: `User${userId}` },
+    text,
+  };
+  if (topicId) {
+    message.message_thread_id = topicId;
+    message.is_topic_message = true;
+  }
+  if (text.startsWith('/')) {
+    message.entities = [{ type: 'bot_command', offset: 0, length: text.split(' ')[0]!.length }];
+  }
+  return { update_id: updateId, message } as Update;
+}
+
 /** Callback-query update (inline button press) on a message in the chat. */
 export function callbackUpdate(
   userId: number,

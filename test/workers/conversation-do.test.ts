@@ -513,3 +513,72 @@ describe('ConversationSerializer', () => {
     });
   });
 });
+
+describe('ConversationDO owner', () => {
+  let mockState: MockDurableObjectState;
+  let conversationDO: ConversationDO;
+
+  const post = (path: string, body: unknown) =>
+    conversationDO.fetch(
+      new Request(`http://localhost${path}`, { method: 'POST', body: JSON.stringify(body) })
+    );
+  const peek = async () =>
+    (await (
+      await conversationDO.fetch(new Request('http://localhost/peek'))
+    ).json()) as ConversationState;
+
+  beforeEach(() => {
+    mockState = new MockDurableObjectState();
+    conversationDO = new ConversationDO(mockState as any, mockEnv);
+  });
+
+  it('stamps the owner on an active conversation and keeps it across step updates', async () => {
+    await post('/state', { flow: 'start', step: 1, context: {} });
+    expect((await post('/owner', { userId: 7, topicId: 3 })).status).toBe(204);
+    expect((await peek()).owner).toEqual({ userId: 7, topicId: 3 });
+
+    await post('/state', { flow: 'start', step: 2, context: { eventRef: 'E' } }); // no owner given
+    const state = await peek();
+    expect(state.step).toBe(2);
+    expect(state.owner).toEqual({ userId: 7, topicId: 3 });
+  });
+
+  it('a new command restamps; the owner is dropped when the flow ends', async () => {
+    await post('/state', { flow: 'init', step: 1, context: {} });
+    await post('/owner', { userId: 7, topicId: 0 });
+    await post('/owner', { userId: 8, topicId: 0 }); // someone else starts a new flow
+    expect((await peek()).owner).toEqual({ userId: 8, topicId: 0 });
+
+    await post('/state', { flow: 'idle', step: 0, context: {} });
+    expect((await peek()).owner).toBeUndefined();
+  });
+
+  it('ignores /owner when idle, rejects a malformed body, and clears on /claim and /reset', async () => {
+    expect((await post('/owner', { userId: 7, topicId: 0 })).status).toBe(204);
+    expect((await peek()).owner).toBeUndefined();
+    expect((await post('/owner', { userId: 'x' })).status).toBe(400);
+
+    await post('/state', { flow: 'start', step: 4, context: {} });
+    await post('/owner', { userId: 7, topicId: 0 });
+    expect((await post('/claim', { flow: 'start', step: 4 })).status).toBe(200);
+    expect((await peek()).owner).toBeUndefined();
+
+    await post('/state', { flow: 'init', step: 1, context: {} });
+    await post('/owner', { userId: 7, topicId: 0 });
+    await post('/reset', {});
+    expect((await peek()).owner).toBeUndefined();
+  });
+
+  it('/peek is read-only: it creates nothing and sets no alarm', async () => {
+    expect((await peek()).flow).toBe('idle');
+    expect(await mockState.storage.get('conversation')).toBeUndefined();
+    expect(await mockState.storage.getAlarm()).toBeNull();
+  });
+
+  it('a stored state without an owner (older conversations) still parses', () => {
+    const state = new ConversationSerializer().deserialize(
+      JSON.stringify({ flow: 'init', step: 1, context: {} })
+    );
+    expect(state?.owner).toBeUndefined();
+  });
+});

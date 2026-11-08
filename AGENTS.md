@@ -76,6 +76,7 @@ This project uses OpenSpec for change management. All changes are archived:
 15. `web-admin-list-controls` (11 tasks) — archived 2026-11-08
 16. `qr-bot-logo-and-font` (8 tasks) — archived 2026-11-08
 17. `restore-paynow-qr-logo` (6 tasks) — archived 2026-11-08
+18. `ignore-irrelevant-messages` (9 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -90,7 +91,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (8 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (9 capabilities)
 
 ## Key Design Decisions
 
@@ -137,7 +138,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - Proxy validation and normalization (mobile → +65XXXXXXXX, UEN validation)
 - 10-char base32 reference generator using crypto.getRandomValues
 - Payment service with markPaymentReceived transition logic
-- Conversation Durable Object with FSM state, 10-min alarm expiry, eviction survival
+- Conversation Durable Object with FSM state, 10-min alarm expiry, eviction survival; the state records its `owner` (user + topic), stamped by `POST /owner` right after a flow command or the Payback button and dropped when the flow ends; `GET /peek` is a read-only view
 - public `alarm()` lifecycle method (workerd requirement, not a fetch route)
 - /init command with mobile/UEN validation, inline Confirm/Cancel buttons, in-place message updates, creates events
 - /start payment issuance with event picker, required payer PayNow proxy + optional payer name (snapshotted on the payment; the name — never the number — appears in the shareable QR caption), amount, then a Confirm/Cancel summary (event, payer, pay-to, amount) — nothing is persisted or rendered until Confirm, which takes the conversation via the DO's atomic `POST /claim {flow, step}` (200 = winner, 409 = loser) so double taps create one payment; payee snapshot, SGQR payload + BMP QR uploaded via sendPhoto
@@ -155,7 +156,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - Mark payback sent / cancel: guarded pending-only CAS transitions, duplicate and racing taps handled; `cancelled` status added by migration 0003 (table rebuild)
 - `src/bot.ts` wires all commands (/init, /start, /payments, /payback <ref>, /cancel, /help, /ping),
   inline-button callbacks (init_*, payments:N, payback_*, view/mark_received/payback/pb_sent),
-  and free-text conversation routing; bot cached per isolate
+  and free-text conversation routing; bot cached per isolate. Free text is answered only when the chat has an active conversation owned by the sender in the same topic; everything else (ordinary chatter, other members, other topics) is ignored silently, and `/cancel` only acts on your own conversation
 - `ChatSessionDO` binding serves the real conversation FSM
 - GitHub Actions CI: type-check + lint/format + both vitest pools on PRs and main pushes
 - Branch protection on `main` (2 required checks, linear history, enforce admins)

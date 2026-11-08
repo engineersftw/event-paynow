@@ -116,7 +116,7 @@
   - `payments:N` / `event_view:` → PaymentsCommandHandler (pagination, event drill-down)
   - `payback_confirm_payer:` / `payback_change_payer:` / `payback_cancel:` / `payback_confirm_amount:` / `payback_cancel_amount:` → PaybackCommandHandler
   - everything else (`view:`, `mark_received:`, `void:`, `payback:`, `pb_sent:`, `pb_cancel:`) → PaymentCallbackHandler
-- Registers message handlers for conversation flows (the active flow in the DO decides which handler owns the text)
+- Registers message handlers for conversation flows (the active flow in the DO decides which handler owns the text); text from anyone but the conversation's owner, or with no active conversation, is ignored
 - Sends QR images via `sendPhoto` with inline action buttons
 
 **Key behavior**: Uses `webhookCallback` adapter for Cloudflare Workers. Bot instance cached per isolate (single `bot.init()` getMe).
@@ -129,6 +129,7 @@
 - `POST /claim {flow, step}`: atomic compare-and-reset (200 = the caller won and gets the previous state, 409 = lost), so a double tap on Confirm creates exactly one payment
 - Validates all state transitions with Zod schema
 - Automatically expires idle conversations after 10 minutes
+- Records the conversation's owner (user and topic) beside `flow`; `POST /owner` stamps it, `GET /peek` reads without side effects, and it is dropped when the flow returns to idle
 - Survives cold starts and deployments (persistent storage)
 
 **Key behavior**: Get-or-create pattern - first access creates state, subsequent accesses retrieve it. Alarm-based expiry clears state but preserves user data in D1. The `alarm()` lifecycle method is required by workerd (not a fetch route).
