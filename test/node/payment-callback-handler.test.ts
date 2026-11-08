@@ -585,7 +585,9 @@ describe('PaymentCallbackHandler', () => {
       expect(message).toContain('💸 *Paybacks:*');
       expect(message).toContain('$30.00 to +6598765432');
       expect(message).toContain('$20.00 to 201234567A');
-      expect(message).toContain('*Total Payback:* $50.00');
+      expect(message).toContain('*Paid back:* $30.00');
+      expect(message).toContain('*Net:* $70.00');
+      expect(message).toContain('*Pending paybacks:* $20.00');
       expect(message).toContain('*Remaining:* $50.00');
       expect(message).toContain('Notification');
 
@@ -667,6 +669,20 @@ describe('PaymentCallbackHandler', () => {
       vi.mocked(mockRepository.getPaymentByRef).mockResolvedValue(detailPayment);
       vi.mocked(mockRepository.getPaybackByRef).mockResolvedValue(pendingPayback);
     }
+
+    it('a pending-only payback leaves the net amount alone and shows a pending line', async () => {
+      setupPaybackView();
+      mockCtx.callbackQuery!.data = 'view:PAY123';
+      vi.mocked(mockRepository.listPaybacksByPayment).mockResolvedValue([pendingPayback]);
+
+      await handler.handleCallback(mockCtx);
+
+      const message = vi.mocked(mockCtx.editMessageText).mock.calls[0]![0] as string;
+      expect(message).toContain('*Paid back:* $0.00');
+      expect(message).toContain('*Net:* $100.00');
+      expect(message).toContain('*Pending paybacks:* $20.00');
+      expect(message).toContain('*Remaining:* $80.00');
+    });
 
     it('transitions the payback to sent with a timestamp and re-renders details', async () => {
       setupPaybackView();
@@ -823,7 +839,9 @@ describe('PaymentCallbackHandler', () => {
         const message = vi.mocked(mockCtx.editMessageText).mock.calls[0]![0] as string;
         expect(message).toContain('❌ $20.00 to 201234567A');
         expect(message).toContain('(cancelled)');
-        expect(message).toContain('*Total Payback:* $0.00');
+        expect(message).toContain('*Paid back:* $0.00');
+        expect(message).toContain('*Net:* $100.00');
+        expect(message).not.toContain('Pending paybacks');
         expect(message).toContain('*Remaining:* $100.00');
         expect(mockCtx.reply).not.toHaveBeenCalled();
       });

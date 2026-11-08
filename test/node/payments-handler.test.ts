@@ -34,6 +34,7 @@ describe('PaymentsCommandHandler', () => {
     mockRepository = {
       getUser: vi.fn(),
       listPaymentsByUser: vi.fn(),
+      sentPaybackTotalsByEvent: vi.fn(async () => new Map<number, number>()),
       getPaymentByRef: vi.fn(),
       updatePaymentStatus: vi.fn(),
     } as unknown as Repository;
@@ -73,6 +74,7 @@ describe('PaymentsCommandHandler', () => {
       vi.mocked(mockEventRepository.getEventStats).mockResolvedValue({
         paymentCount: 2,
         collectedCents: 550,
+        paidBackCents: 300,
         pendingCents: 1500,
       });
 
@@ -85,6 +87,7 @@ describe('PaymentsCommandHandler', () => {
       const message = vi.mocked(mockCtx.reply).mock.calls[0]![0] as string;
       expect(message).toContain('2 payments');
       expect(message).toContain('$5.50 collected');
+      expect(message).toContain('$3.00 paid back');
       expect(message).toContain('$15.00 pending');
     });
 
@@ -127,6 +130,38 @@ describe('PaymentsCommandHandler', () => {
         expect.stringContaining('Lunch'),
         expect.objectContaining({ reply_markup: expect.any(Object) })
       );
+    });
+
+    it('shows net amount, original and paid back for payments with sent paybacks only', async () => {
+      const mk = (id: number, ref: string): Payment => ({
+        id,
+        ref,
+        userId: 123456789,
+        eventId: 1,
+        description: 'Lunch',
+        amountCents: 2000,
+        payeeType: 'mobile',
+        payeeValue: '+6591234567',
+        status: 'received',
+        source: 'manual',
+        qrPayload: 'p',
+        createdAt: '2024-01-15T12:30:00Z',
+        receivedAt: '2024-01-15T13:00:00Z',
+      });
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
+      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([
+        mk(1, 'PAYSENT01'),
+        mk(2, 'PAYPLAIN2'),
+      ]);
+      vi.mocked(mockRepository.sentPaybackTotalsByEvent).mockResolvedValue(new Map([[1, 500]]));
+
+      await handler.handle(mockCtx, 'EVT-TEST0001');
+
+      const text = vi.mocked(mockCtx.reply).mock.calls[0]![0] as string;
+      expect(text).toContain('*$15.00* (of $20.00) - Lunch');
+      expect(text).toMatch(/PAYSENT01.*Paid back \$5\.00/);
+      expect(text).toContain('*$20.00* - Lunch'); // untouched entry
+      expect(text.match(/Paid back/g)).toHaveLength(1);
     });
 
     it('treats an event from another chat as not found', async () => {

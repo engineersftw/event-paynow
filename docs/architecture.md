@@ -158,9 +158,9 @@
 
 **`/payments` handler**:
 
-- Top-level lists the chat's events with payment counts and collected/pending totals (voided payments excluded)
-- Drill into an event → the caller's payments with inline buttons (View / ✓ Received for pending / Payback for received)
-- Payment detail view shows status (⏳ / ✅ / 🚫), payer, timestamps, source and payback history; event names and descriptions are Markdown-escaped
+- Top-level lists the chat's events with payment count and collected (net of sent paybacks), paid back and pending totals (voided payments excluded)
+- Drill into an event → the caller's payments (net of sent paybacks, with the original amount and `Paid back` when any were sent) with inline buttons (View / ✓ Received for pending / Payback for received)
+- Payment detail view shows status (⏳ / ✅ / 🚫), payer, timestamps, source and payback history with `Paid back` (sent), `Net`, `Pending paybacks` and `Remaining` (payable-back room); event names and descriptions are Markdown-escaped
 - An event from another chat reads as not found
 
 **`/end_event` handler**:
@@ -189,7 +189,7 @@
 - `GET /events/:ref` serves an HTML shell (data is written with `textContent`); `GET /api/events/:ref` returns JSON; `GET /api/login` is the Telegram Login Widget redirect target
 - Sign-in: HMAC-SHA256 over the widget data keyed with SHA256(bot token), rejected after 24 h; success sets a 12 h signed HttpOnly cookie (`src/web/auth.ts`)
 - Authorisation: the user must be a chat administrator/creator, checked live with `getChatMember`, or the owner of a private chat; any failure denies (`src/web/access.ts`)
-- The API returns payer names only (never PayNow numbers); voided payments are listed but excluded from totals
+- The API returns payer names only (never PayNow numbers); per-payment `paidBackCents` / `netCents` and totals (`collectedCents` net of sent paybacks, `paidBackCents`, `pendingCents`); voided payments are listed but excluded from totals
 - Reads the same D1 database through the Pages `paynow_db` binding and the shared repository code
 
 ### Repository Layer (src/db/repository.ts)
@@ -210,7 +210,8 @@
 - `createPaybackBounded`: Create a payback inside a D1 batch with an in-transaction `SUM(paybacks) <= amount` re-check (counts pending + sent, excludes cancelled)
 - `updatePaybackStatus`: Pending-only compare-and-set to `sent` or `cancelled`; racing taps yield exactly one winner
 - `sumPaybacks`: Total of pending + sent paybacks against a payment (the bounded quantity)
-- Event repository: `createEvent`, `listOpenEventsByChat`, `listAllEventsByChat`, `getEventByRef`, `closeEvent` (open → closed CAS), `getEventStats` (voided excluded)
+- `sentPaybackTotalsByEvent`: paymentId → total of SENT paybacks for an event (net amounts without a query per payment)
+- Event repository: `createEvent`, `listOpenEventsByChat`, `listAllEventsByChat`, `getEventByRef`, `closeEvent` (open → closed CAS), `getEventStats` (count, collected net of sent paybacks, paid back, pending; voided excluded)
 
 ### Drizzle ORM (src/db/drizzle-repository.ts)
 

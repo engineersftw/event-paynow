@@ -580,6 +580,7 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(await eventRepo.getEventStats(event.id)).toEqual({
       paymentCount: 0,
       collectedCents: 0,
+      paidBackCents: 0,
       pendingCents: 0,
     });
 

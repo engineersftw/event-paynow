@@ -155,11 +155,13 @@ export class PaymentCallbackHandler {
       lines.push('');
       lines.push('💸 *Paybacks:*');
 
-      // Cancelled paybacks are history only: they don't count toward the totals
-      const totalPayback = paybacks
-        .filter((pb) => pb.status !== 'cancelled')
-        .reduce((sum, pb) => sum + pb.amountCents, 0);
-      const remaining = payment.amountCents - totalPayback;
+      // Cancelled paybacks are history only. The net amount counts SENT paybacks; the
+      // payable-back room ("Remaining") also counts pending ones.
+      const total = (status: Payback['status']) =>
+        paybacks.filter((pb) => pb.status === status).reduce((t, pb) => t + pb.amountCents, 0);
+      const paidBack = total('sent');
+      const pendingPaybacks = total('pending');
+      const remaining = payment.amountCents - paidBack - pendingPaybacks;
 
       for (const payback of paybacks) {
         const icon = { pending: '⏳', sent: '✅', cancelled: '❌' }[payback.status];
@@ -177,7 +179,9 @@ export class PaymentCallbackHandler {
       }
 
       lines.push('');
-      lines.push(`*Total Payback:* $${formatCents(totalPayback)}`);
+      lines.push(`*Paid back:* $${formatCents(paidBack)}`);
+      lines.push(`*Net:* $${formatCents(payment.amountCents - paidBack)}`);
+      if (pendingPaybacks > 0) lines.push(`*Pending paybacks:* $${formatCents(pendingPaybacks)}`);
       lines.push(`*Remaining:* $${formatCents(Math.max(0, remaining))}`);
     } else {
       lines.push('');

@@ -171,6 +171,19 @@ export class D1Repository implements Repository {
     return results.map(toPayment);
   }
 
+  async sentPaybackTotalsByEvent(eventId: number): Promise<Map<number, number>> {
+    const { results } = await this.d1
+      .prepare(
+        `SELECT pb.payment_id AS paymentId, SUM(pb.amount_cents) AS total
+         FROM paybacks pb JOIN payments p ON p.id = pb.payment_id
+         WHERE p.event_id = ? AND pb.status = 'sent'
+         GROUP BY pb.payment_id`
+      )
+      .bind(eventId)
+      .all<{ paymentId: number; total: number }>();
+    return new Map(results.map((r) => [r.paymentId, r.total]));
+  }
+
   async updatePaymentStatus(
     ref: string,
     status: PaymentStatus,
@@ -499,14 +512,18 @@ export class D1EventRepository implements EventRepository {
         paymentCount: sql<number>`COUNT(CASE WHEN status != 'voided' THEN 1 END)`,
         collectedCents: sql<number>`COALESCE(SUM(CASE WHEN status = 'received' THEN amount_cents ELSE 0 END), 0)`,
         pendingCents: sql<number>`COALESCE(SUM(CASE WHEN status = 'pending' THEN amount_cents ELSE 0 END), 0)`,
+        // Paybacks only exist for received payments; only SENT ones count (the bound counts pending too)
+        paidBackCents: sql<number>`COALESCE((SELECT SUM(pb.amount_cents) FROM paybacks pb JOIN payments p ON p.id = pb.payment_id WHERE p.event_id = ${eventId} AND p.status = 'received' AND pb.status = 'sent'), 0)`,
       })
       .from(schema.payments)
       .where(eq(schema.payments.eventId, eventId))
       .get();
 
+    const paidBackCents = result?.paidBackCents ?? 0;
     return {
       paymentCount: result?.paymentCount ?? 0,
-      collectedCents: result?.collectedCents ?? 0,
+      collectedCents: (result?.collectedCents ?? 0) - paidBackCents,
+      paidBackCents,
       pendingCents: result?.pendingCents ?? 0,
     };
   }

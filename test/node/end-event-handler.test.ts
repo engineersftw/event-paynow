@@ -19,7 +19,12 @@ const event = (chatId: number): Event => ({
 function setup(eventChatId: number, callerChatId: number) {
   const repo = {
     getEventByRef: vi.fn(async () => event(eventChatId)),
-    getEventStats: vi.fn(async () => ({ paymentCount: 2, collectedCents: 500, pendingCents: 0 })),
+    getEventStats: vi.fn(async () => ({
+      paymentCount: 2,
+      collectedCents: 500,
+      paidBackCents: 300,
+      pendingCents: 0,
+    })),
     closeEvent: vi.fn(async () => true),
   } as unknown as EventRepository;
   const doStub = {
@@ -47,6 +52,9 @@ describe('EndEventHandler chat check', () => {
     await handler.handleCallback(c);
     expect(repo.closeEvent).toHaveBeenCalledWith('EVTREF0001', expect.any(String));
     expect((c as any).editMessageText.mock.calls[0][0]).toContain('closed');
+    const summary = (c as any).editMessageText.mock.calls[0][0] as string;
+    expect(summary).toContain('Collected: $5.00');
+    expect(summary).toContain('Paid back: $3.00');
   });
 
   it('confirm on another chat’s event does not close it and reads as not found', async () => {

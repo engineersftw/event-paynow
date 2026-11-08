@@ -31,7 +31,8 @@ export interface Event {
  */
 export interface EventStats {
   paymentCount: number;
-  collectedCents: number; // sum of received payments
+  collectedCents: number; // received payments minus their SENT paybacks
+  paidBackCents: number; // sum of sent paybacks (pending and cancelled never count)
   pendingCents: number; // sum of pending payments
 }
 
@@ -122,6 +123,8 @@ export interface Repository {
   listPaymentsByUser(userId: number): Promise<Payment[]>;
   /** Every payment of an event (all users), newest first. */
   listPaymentsByEvent(eventId: number): Promise<Payment[]>;
+  /** paymentId → total of its SENT paybacks, for every payment of the event that has any. */
+  sentPaybackTotalsByEvent(eventId: number): Promise<Map<number, number>>;
   updatePaymentStatus(
     ref: string,
     status: PaymentStatus,
