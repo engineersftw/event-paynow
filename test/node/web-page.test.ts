@@ -46,6 +46,12 @@ describe('event page shell', () => {
     }
     expect(html).toContain("el('span', String(count), 'count')");
     expect(html).toContain('min-height:40px');
+    // list controls: paging, search and status filter
+    expect(html).toContain('id="more"');
+    expect(html).toContain('>Load more<');
+    expect(html).toContain('id="q"');
+    expect(html).toContain("['voided', 'Voided']");
+    expect(html).toContain("params.set('cursor', cursor)");
 
     const src = html.match(/const MONTHS = [^;]*;\nconst fmtDate = [^\n]*/)![0];
     const fmtDate = new Function(`${src}; return fmtDate;`)() as (t: unknown) => string;

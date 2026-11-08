@@ -36,6 +36,9 @@ h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
 .btn.destructive{color:var(--destructive);border-color:var(--destructive)}
 .btn:disabled{opacity:.5;cursor:not-allowed}
 .count{display:inline-block;min-width:1.6em;padding:0 6px;border-radius:999px;background:var(--primary);color:var(--primary-fg);font-size:13px;font-weight:700;line-height:1.6;text-align:center}
+.tools{display:grid;gap:8px;margin-bottom:12px}
+.seg{display:flex;flex-wrap:wrap;gap:6px}
+.more{width:100%;margin-top:8px}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
 .brand img{flex:none;border-radius:8px}
 :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
@@ -64,7 +67,12 @@ img{max-width:100%;height:auto}
 <div class="card stat"><span class="muted sm">Paid back</span><b id="paidback"></b></div>
 <div class="card stat"><span class="muted sm">Pending</span><b id="pending"></b></div>
 </div>
+<div class="tools">
+<input id="q" class="input" type="search" placeholder="Search payer or reference" maxlength="40" aria-label="Search payments" autocomplete="off">
+<div id="filter" class="seg" role="group" aria-label="Filter by status"></div>
+</div>
 <div id="rows" class="list"></div>
+<button id="more" class="btn more" hidden>Load more</button>
 </div>
 <dialog id="dlg" aria-labelledby="dlg-title"><div class="dlg">
 <h2 id="dlg-title">New payment request</h2>
@@ -174,12 +182,24 @@ function paymentCard(p) {
   }
   return card;
 }
-async function load() {
-  const res = await fetch('/api/events/${ref}', { credentials: 'same-origin' });
-  if (res.status === 401) { say(''); $('login').hidden = false; $('data').hidden = true; return; }
-  if (res.status === 403) { say('Not allowed: only chat administrators can view this event.'); return; }
-  if (res.status === 404) { say('Event not found.'); return; }
-  if (!res.ok) { say('Something went wrong.'); return; }
+const PAGE = 20;
+let rows = [];
+let nextCursor = null;
+let statusFilter = '';
+let query = '';
+let seq = 0;
+async function fetchPage(cursor, limit) {
+  const params = new URLSearchParams({ limit: String(limit) });
+  if (statusFilter) params.set('status', statusFilter);
+  if (query) params.set('q', query);
+  if (cursor) params.set('cursor', cursor);
+  return fetch('/api/events/${ref}?' + params, { credentials: 'same-origin' });
+}
+async function show(res, mode) {
+  if (res.status === 401) { say(''); $('login').hidden = false; $('data').hidden = true; return false; }
+  if (res.status === 403) { say('Not allowed: only chat administrators can view this event.'); return false; }
+  if (res.status === 404) { say('Event not found.'); return false; }
+  if (!res.ok) { say('Something went wrong.'); return false; }
   const d = await res.json();
   document.title = 'Event: ' + d.event.name;
   $('title').textContent = 'Event: ' + d.event.name;
@@ -187,10 +207,43 @@ async function load() {
   $('collected').textContent = sgd(d.totals.collectedCents);
   $('paidback').textContent = sgd(d.totals.paidBackCents);
   $('pending').textContent = sgd(d.totals.pendingCents);
-  $('rows').replaceChildren(...d.payments.map(paymentCard));
-  say(d.payments.length === 0 ? 'No payments yet.' : '');
+  if (mode === 'append') {
+    const seen = new Set(rows.map((p) => p.ref));
+    rows = rows.concat(d.payments.filter((p) => !seen.has(p.ref)));
+  } else rows = d.payments;
+  nextCursor = d.nextCursor;
+  $('rows').replaceChildren(...rows.map(paymentCard));
+  $('more').hidden = !nextCursor;
+  say(rows.length === 0 ? (statusFilter || query ? 'No payments match.' : 'No payments yet.') : '');
   $('data').hidden = false;
+  return true;
 }
+// Refresh what is already loaded (at least one page, up to the server cap), keeping the filter and search
+async function load() {
+  const mine = ++seq;
+  const res = await fetchPage(null, Math.min(200, Math.max(PAGE, rows.length)));
+  if (mine === seq) await show(res, 'replace');
+}
+async function loadMore() {
+  const mine = ++seq;
+  $('more').disabled = true;
+  const res = await fetchPage(nextCursor, PAGE);
+  $('more').disabled = false;
+  if (mine === seq) await show(res, 'append');
+}
+function restart() { rows = []; nextCursor = null; load(); }
+function paintFilter() {
+  $('filter').replaceChildren(...[['', 'All'], ['pending', 'Pending'], ['received', 'Received'], ['voided', 'Voided']].map(([value, label]) => {
+    const b = el('button', label, 'btn' + (statusFilter === value ? ' primary' : ''));
+    b.setAttribute('aria-pressed', String(statusFilter === value));
+    b.onclick = () => { statusFilter = value; paintFilter(); restart(); };
+    return b;
+  }));
+}
+let timer;
+$('q').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(() => { query = $('q').value.trim(); restart(); }, 300); });
+$('more').onclick = loadMore;
+paintFilter();
 function showForm() { $('dlg-form').hidden = false; $('dlg-result').hidden = true; $('dlg-title').textContent = 'New payment request'; $('dlg-err').hidden = true; }
 async function createRequest() {
   const go = $('np-go');

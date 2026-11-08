@@ -3,7 +3,7 @@ import { captionPart, recipientName } from '../commands/payer-label';
 import { D1EventRepository, D1Repository } from '../db/drizzle-repository';
 import { createPaybackFor } from '../db/payback-service';
 import { detectProxyType } from '../db/proxy-validation';
-import type { Event, Payback, Payment } from '../db/repository';
+import type { Event, Payback, Payment, PaymentStatus } from '../db/repository';
 import { createPaymentRequest, paymentImageLines } from '../payments/payment-request';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { bmpToPng } from '../sgqr/png';
@@ -22,6 +22,10 @@ export interface WebEnv {
 
 const REF = /^[A-Za-z0-9_-]{1,40}$/;
 const MAX_PAYER_NAME = 40; // same limit as /start
+const PAGE_SIZE = 20;
+const MAX_LIMIT = 200; // the page refetches the rows it already shows after an action
+const MAX_SEARCH = 40;
+const PAYMENT_STATUSES = ['pending', 'received', 'voided'];
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -354,28 +358,51 @@ async function eventData(
   if (access instanceof Response) return access;
   const { event } = access;
 
-  const repo = new D1Repository(env.paynow_db);
-  const payments = await repo.listPaymentsByEvent(event.id);
-  const paybacksByPayment = new Map<number, Payback[]>();
-  for (const b of await repo.listPaybacksByEvent(event.id)) {
-    paybacksByPayment.set(b.paymentId, [...(paybacksByPayment.get(b.paymentId) ?? []), b]);
+  const params = new URL(request.url).searchParams;
+  const status = params.get('status') ?? undefined;
+  const q = (params.get('q') ?? '').trim();
+  const limitParam = params.get('limit');
+  const limit = limitParam === null ? PAGE_SIZE : Number(limitParam);
+  const cursor = params.get('cursor') ?? undefined;
+  if (
+    (status !== undefined && !PAYMENT_STATUSES.includes(status)) ||
+    q.length > MAX_SEARCH ||
+    !Number.isInteger(limit) ||
+    limit < 1 ||
+    limit > MAX_LIMIT
+  ) {
+    return json({ error: 'invalid_request' }, 400);
   }
-  // Same rule as the bot: net = amount minus SENT paybacks (pending/cancelled never count)
-  const sent = await repo.sentPaybackTotalsByEvent(event.id);
-  const sum = (status: string) =>
-    payments.filter((p) => p.status === status).reduce((t, p) => t + p.amountCents, 0);
-  const paidBackCents = payments
-    .filter((p) => p.status === 'received')
-    .reduce((t, p) => t + (sent.get(p.id) ?? 0), 0);
+  if (cursor !== undefined && !/^[^|]+\|\d+$/.test(cursor)) {
+    return json({ error: 'invalid_cursor' }, 400);
+  }
+
+  const repo = new D1Repository(env.paynow_db);
+  const { payments, nextCursor } = await repo.searchPaymentsByEvent(event.id, {
+    ...(status ? { status: status as PaymentStatus } : {}),
+    ...(q ? { q } : {}),
+    limit,
+    ...(cursor ? { cursor } : {}),
+  });
+  // Only the paybacks of the payments on screen are read; sent totals come from the same rows.
+  const paybacksByPayment = new Map<number, Payback[]>();
+  const sent = new Map<number, number>();
+  for (const b of await repo.listPaybacksByPayments(payments.map((p) => p.id))) {
+    paybacksByPayment.set(b.paymentId, [...(paybacksByPayment.get(b.paymentId) ?? []), b]);
+    if (b.status === 'sent') sent.set(b.paymentId, (sent.get(b.paymentId) ?? 0) + b.amountCents);
+  }
+  // Event-wide totals: independent of the page, search and filter
+  const stats = await new D1EventRepository(env.paynow_db).getEventStats(event.id);
 
   // Names only: never expose payer/payee PayNow numbers to the page.
   return json({
     event: { name: event.name, status: event.status },
     totals: {
-      collectedCents: sum('received') - paidBackCents,
-      paidBackCents,
-      pendingCents: sum('pending'),
+      collectedCents: stats.collectedCents,
+      paidBackCents: stats.paidBackCents,
+      pendingCents: stats.pendingCents,
     },
+    nextCursor,
     payments: payments.map((p) => {
       const paybacks = paybacksByPayment.get(p.id) ?? [];
       // The payable-back room counts pending + sent (cancelled free their amount)
