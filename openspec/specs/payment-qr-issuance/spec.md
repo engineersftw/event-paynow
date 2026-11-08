@@ -95,14 +95,14 @@ The system SHALL print the payment details as visible text inside the QR image i
 - **WHEN** a detail line is longer than the image width or contains characters the image font cannot draw
 - **THEN** the line is truncated with an ellipsis and unsupported characters are drawn as `?`, and the QR still decodes to the same payload
 
-### Requirement: The QR image carries the bot logo in its centre
+### Requirement: The QR image carries the PayNow logo in its centre
 
-The system SHALL draw the bot's logo, in colour with smooth edges, over a white clear box at the centre of every QR image, in place of any other logo. The logo and its clear box SHALL cover no more of the QR than error-correction level H can recover, and the QR SHALL still decode to the same payload.
+The system SHALL draw the PayNow logo over a white clear box at the centre of every QR image, in place of any other logo. The logo and its clear box SHALL cover no more of the QR than error-correction level H can recover, and the QR SHALL still decode to the same payload.
 
 #### Scenario: Logo in the centre
 
 - **WHEN** a payment QR image is generated
-- **THEN** the bot logo's colours appear in the centre of the QR on a white clear box, and the PayNow wordmark does not
+- **THEN** the PayNow logo's colour appears in the centre of the QR on a white clear box, and the bot logo does not
 
 #### Scenario: Still scannable
 
