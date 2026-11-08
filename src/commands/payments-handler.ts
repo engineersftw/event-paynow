@@ -60,7 +60,7 @@ export class PaymentsCommandHandler {
         const statusIcon = event.status === 'open' ? '🟢' : '🔴';
         const statusLabel = event.status === 'open' ? 'Open' : 'Closed';
 
-        lines.push(`${statusIcon} *${event.name}* (${statusLabel})`);
+        lines.push(`${statusIcon} *${escapeMarkdown(event.name)}* (${statusLabel})`);
         lines.push(
           `   Payee: ${event.payeeValue} | ${stats.paymentCount} payments | $${formatCents(stats.collectedCents)} collected | $${formatCents(stats.pendingCents)} pending`
         );
@@ -105,7 +105,7 @@ export class PaymentsCommandHandler {
       (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
     );
 
-    const lines: string[] = [`💰 *${event.name}*\n`];
+    const lines: string[] = [`💰 *${escapeMarkdown(event.name)}*\n`];
     const keyboard = new InlineKeyboard();
 
     for (const payment of sorted) {
@@ -114,7 +114,7 @@ export class PaymentsCommandHandler {
       const date = this.formatDate(payment.createdAt);
 
       const payer = payment.payerName ? ` (${escapeMarkdown(payment.payerName)})` : '';
-      lines.push(`${statusIcon} *${amount}* - ${payment.description}${payer}`);
+      lines.push(`${statusIcon} *${amount}* - ${escapeMarkdown(payment.description)}${payer}`);
       lines.push(`   Ref: \`${payment.ref}\` | ${status} | ${date}`);
       lines.push('');
 

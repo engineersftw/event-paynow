@@ -55,6 +55,7 @@ describe('StartCommandHandler', () => {
     } as unknown as ConversationDO;
 
     mockRepository = {
+      voidPayment: vi.fn(async () => null),
       getUser: vi.fn(),
       createPayment: vi.fn(async (input: any) => ({
         id: 1,
@@ -359,6 +360,18 @@ describe('StartCommandHandler', () => {
       const lines = vi.mocked(renderQrPng).mock.calls.at(-1)![1]!;
       expect(lines).toEqual(['Test Event', 'SGD 12.50', expect.any(String), 'Payer: Alice']);
       expect(lines.join(' ')).not.toContain('91234568');
+    });
+
+    it('voids the just-created payment when the QR cannot be delivered', async () => {
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent);
+      vi.mocked(mockCtx.replyWithPhoto).mockRejectedValueOnce(new Error('telegram down'));
+      mockDo(step5);
+
+      await handler.handleCallback(callback('start_confirm'));
+
+      const created = await vi.mocked(mockRepository.createPayment).mock.results[0]!.value;
+      expect(mockRepository.voidPayment).toHaveBeenCalledWith(created.ref);
+      expect(lastReply()).toContain('Failed to create the payment');
     });
 
     it('a lost claim (double tap / expired) creates nothing', async () => {

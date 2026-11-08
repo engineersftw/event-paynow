@@ -4,7 +4,7 @@ import type { Payback, Payment, Repository } from '../db/repository.js';
 import { formatCents } from '../sgqr/amount.js';
 import type { ConversationDO } from '../worker/conversation-do.js';
 import { PaybackCommandHandler } from './payback-handler.js';
-import { captionPart, payerLabel, recipientName } from './payer-label.js';
+import { captionPart, escapeMarkdown, payerLabel, recipientName } from './payer-label.js';
 
 /**
  * Callback query handler for payment actions
@@ -138,7 +138,7 @@ export class PaymentCallbackHandler {
       '',
       `*Reference:* \`${payment.ref}\``,
       `*Amount:* $${formatCents(payment.amountCents)}`,
-      `*Description:* ${payment.description}`,
+      `*Description:* ${escapeMarkdown(payment.description)}`,
       ...(payment.payerValue
         ? [`*Payer:* ${payerLabel(payment.payerName, payment.payerValue)}`]
         : []),

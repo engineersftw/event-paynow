@@ -129,6 +129,35 @@ describe('PaymentsCommandHandler', () => {
       );
     });
 
+    it('escapes Markdown specials in the event name and description', async () => {
+      const payment: Payment = {
+        id: 1,
+        ref: 'PAY001',
+        userId: 123456789,
+        eventId: 1,
+        description: 'Sam_s *dinner*',
+        amountCents: 1500,
+        payeeType: 'mobile',
+        payeeValue: '+6591234567',
+        status: 'pending',
+        source: 'manual',
+        qrPayload: 'p',
+        createdAt: '2024-01-15T12:30:00Z',
+        receivedAt: null,
+      };
+      vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue({
+        ...openEvent,
+        name: 'Sam_s *dinner*',
+      } as any);
+      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([payment]);
+
+      await handler.handle(mockCtx, 'EVT-TEST0001');
+
+      const text = vi.mocked(mockCtx.reply).mock.calls[0]![0] as string;
+      expect(text).toContain('*Sam\\_s \\*dinner\\**');
+      expect(text).toContain('Sam\\_s \\*dinner\\*');
+    });
+
     it('shows the (escaped) payer name in list entries and nothing extra without one', async () => {
       const base: Payment = {
         id: 1,

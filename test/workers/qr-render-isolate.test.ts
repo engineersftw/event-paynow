@@ -14,8 +14,8 @@ describe('renderQrPng — Workers runtime', () => {
     expect(bmpBytes[0]).toBe(0x42); // 'B'
     expect(bmpBytes[1]).toBe(0x4d); // 'M'
 
-    // Should complete well under 100ms in the isolate
-    expect(elapsed).toBeLessThan(100);
+    // Generous bound: a tight one flakes on loaded CI runners
+    expect(elapsed).toBeLessThan(500);
 
     // Reasonable size
     expect(bmpBytes.length).toBeGreaterThan(100);

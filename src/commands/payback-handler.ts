@@ -6,7 +6,13 @@ import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
-import { captionPart, payerLabel, plainPayerLabel, recipientName } from './payer-label.js';
+import {
+  captionPart,
+  escapeMarkdown,
+  payerLabel,
+  plainPayerLabel,
+  recipientName,
+} from './payer-label.js';
 
 /**
  * /payback command handler - initiates payback flow for a payment
@@ -103,7 +109,7 @@ export class PaybackCommandHandler {
       `💸 *Payback for Payment*\n\n` +
       `Reference: \`${payment.ref}\`\n` +
       `Amount: $${formatCents(payment.amountCents)}\n` +
-      `Description: ${payment.description}\n\n`;
+      `Description: ${escapeMarkdown(payment.description)}\n\n`;
 
     if (payment.payerType && payment.payerValue) {
       await this.setState({
