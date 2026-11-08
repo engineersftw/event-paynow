@@ -5,11 +5,15 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 ## Features
 
 - **Event-based payments**: Create events with a shared PayNow payee; generate payment QRs per event
-- **SGQR PayNow QR codes**: EMVCo-compliant payloads with CRC16 checksum, rendered as BMP images
-- **Payment tracking**: List payments, mark as received, view details with payback history
-- **Payback support**: Bounded paybacks (sum cannot exceed original payment) with SGQR QR for the payer
-- **Inline buttons**: Confirm/cancel via buttons, action buttons on QR photos, paginated lists
+- **Payer details**: `/start` takes the payer's PayNow proxy (required) and a display name (optional), then shows a Confirm/Cancel summary before anything is created
+- **SGQR PayNow QR codes**: EMVCo-compliant payloads with CRC16 checksum, rendered as BMP images with the payment details printed below the QR (names only, never PayNow numbers)
+- **Payment tracking**: List payments; mark received or void a pending request from the QR message; view details with payback history
+- **Payback support**: Bounded paybacks (pending + sent cannot exceed the original payment) with an SGQR QR for the payer; confirm a payback as sent or cancel it; the stored payer is proposed as the recipient and can be changed per payback
+- **Names in messages**: Captions and status lines show `Payer: <name>` / `To: <name>`, never a PayNow number
+- **Web admin**: `/web_admin` links to a read-only Cloudflare Pages view of every payment in an event (chat admins only, Telegram sign-in)
+- **Inline buttons**: Confirm/cancel via buttons, action buttons on QR photos, paginated lists; double taps and racing taps resolve to one winner
 - **Conversation state**: Per-chat Durable Objects with 10-minute idle expiry
+- **Automatic deploys**: GitHub Actions deploys the Worker and Pages from `main` when their files change
 - **Two-pool testing**: Node pool for runtime-agnostic core, Workers pool for D1/DO integration
 
 ## Stack
@@ -20,6 +24,7 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - Durable Objects for per-chat conversation state
 - Drizzle ORM for database access
 - Pure-JS QR rendering (qrcode-generator + custom BMP builder)
+- Cloudflare Pages + Pages Functions for the read-only web admin page
 - Biome for lint + format
 
 ## Quick Start
@@ -69,6 +74,8 @@ Message [@BotFather](https://t.me/BotFather) in Telegram:
    init - Create a new event
    start - Create a payment QR
    payments - List events and payments
+   payback - Pay back a received payment
+   web_admin - Open the web page for an event
    end_event - Close an event
    cancel - Cancel current conversation
    help - Show help
@@ -80,6 +87,8 @@ Message [@BotFather](https://t.me/BotFather) in Telegram:
 ```bash
 npm run deploy
 ```
+
+Later deploys happen automatically from `main` (see [Deployment](#deployment)); run this by hand only for the first deploy.
 
 ### 5. Set webhook
 
@@ -95,14 +104,6 @@ Open Telegram, message your bot:
 - `/ping` → should reply "pong 🏓"
 - `/help` → should show the command list
 - `/init` → create your first event
-
-## Automatic deploys
-
-Pushes to `main` deploy through `.github/workflows/deploy.yml`: the Worker when `src/` (except `src/web/`),
-`wrangler.toml`, `package*.json` or `tsconfig.json` changed, and the Pages app when `web/`, `src/web/`,
-`src/db/`, `package*.json` or `tsconfig.json` changed. Add repo secrets `CLOUDFLARE_API_TOKEN` (permissions:
-Workers Scripts: Edit, Cloudflare Pages: Edit, D1: Edit) and `CLOUDFLARE_ACCOUNT_ID`. To deploy both without a code
-change, use Actions -> Deploy -> Run workflow. Database migrations are not applied automatically.
 
 ## Web admin (read-only event page)
 
@@ -171,21 +172,35 @@ src/
 │   ├── start-handler.ts   # /start — create payment QR (event picker → amount → QR)
 │   ├── payments-handler.ts # /payments — list events, drill into payments
 │   ├── end-event-handler.ts # /end_event — close event
-│   ├── payback-handler.ts  # /payback — payback flow (4 steps)
-│   └── payment-callback-handler.ts # Inline button callbacks
+│   ├── payback-handler.ts  # /payback — payback flow (confirm recipient → amount → QR)
+│   ├── payment-callback-handler.ts # Inline button callbacks (received, void, sent, cancel)
+│   ├── web-admin-handler.ts # /web_admin — links to the event page
+│   └── payer-label.ts     # Name formatting and Markdown escaping for messages
 ├── db/
 │   ├── schema.ts          # Drizzle table definitions (users, events, payments, paybacks)
 │   ├── repository.ts      # Infra-neutral interfaces
-│   └── drizzle-repository.ts # D1 implementation
+│   ├── drizzle-repository.ts # D1 implementation
+│   ├── payment-service.ts # Payment status transitions
+│   └── proxy-validation.ts # Mobile/UEN validation, reference generator
 ├── sgqr/
 │   ├── index.ts           # TLV encoder, CRC16
 │   ├── paynow.ts          # PayNow template builder
 │   ├── amount.ts          # Amount parsing (integer cents)
-│   ├── proxy-validation.ts # Mobile/UEN validation
-│   ├── qr-render.ts       # BMP renderer (Workers)
-│   └── qr-render-node.ts  # PNG renderer (Node)
+│   ├── qr-render.ts       # BMP renderer (Workers) with the detail text band
+│   ├── font5x7.ts         # Built-in ASCII bitmap font for the QR image text
+│   └── qr-render-node.ts  # PNG renderer (Node, tests)
+├── web/
+│   ├── handler.ts         # Event page + JSON API + login (used by Pages)
+│   ├── auth.ts            # Telegram Login verification, signed session cookie
+│   └── access.ts          # Chat-admin check via getChatMember
 └── worker/
-    └── conversation-do.ts # Per-chat Durable Object (FSM + alarm expiry)
+    └── conversation-do.ts # Per-chat Durable Object (FSM, atomic /claim, alarm expiry)
+
+web/                       # Cloudflare Pages project (functions/ delegates to src/web)
+
+drizzle/                   # SQL migrations (generated + hand-written table rebuilds)
+
+.github/workflows/         # ci.yml (checks + tests), deploy.yml (deploys from main)
 
 test/
 ├── node/                  # Node-pool tests (runtime-agnostic core)
@@ -196,7 +211,7 @@ docs/
 └── testing.md             # Testing strategy
 
 openspec/
-├── specs/                 # Main specs (6 capabilities)
+├── specs/                 # Main specs (7 capabilities)
 └── changes/archive/       # Archived changes
 ```
 
@@ -205,8 +220,9 @@ openspec/
 | Command | Description |
 |---|---|
 | `/init` | Create a new event (name + PayNow payee) |
-| `/start` | Create a payment QR for an event |
+| `/start` | Create a payment QR for an event (payer, optional name, amount, confirm) |
 | `/payments` | List events and payments with inline buttons |
+| `/web_admin` | Links to the read-only web page for each event (chat admins) |
 | `/end_event` | Close an event (no new payments) |
 | `/payback <ref>` | Pay back a received payment |
 | `/cancel` | Cancel current conversation |
@@ -221,15 +237,30 @@ Two vitest pools:
 2. **Workers pool** (`test/workers/`): Worker-runtime integration (D1, DO, webhook, integration)
 
 ```bash
-npm test                    # Run all (292 tests)
+npm test                    # Run all tests
 npx vitest run --project node      # Node only
 npx vitest run --project workers   # Workers only
 ```
 
 ## Deployment
 
+Pushes to `main` deploy through `.github/workflows/deploy.yml`. It diffs the push and deploys only what changed:
+
+| Part | Deployed when these change |
+|---|---|
+| Worker | `src/` (except `src/web/`), `wrangler.toml`, `package*.json`, `tsconfig.json` |
+| Pages | `web/`, `src/web/`, `src/db/`, `package*.json`, `tsconfig.json` |
+
+Add repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit, Cloudflare Pages: Edit, D1: Edit) and
+`CLOUDFLARE_ACCOUNT_ID`. To deploy both without a code change, use Actions → Deploy → Run workflow.
+**Database migrations are not applied automatically**: run `npx wrangler d1 migrations apply paynow-db --remote`
+before merging a change that adds one.
+
+Manual deploys (from `main` only):
+
 ```bash
-npm run deploy          # Deploy to Cloudflare Workers
+npm run deploy          # Worker
+npm run web:deploy      # Pages
 npx wrangler tail event-paynow  # Tail logs
 ```
 
@@ -243,7 +274,8 @@ npx wrangler deployments rollback
 
 - Webhook secret validation (`X-Telegram-Bot-Api-Secret-Token`) before bot processing
 - Per-chat Durable Object isolation for conversation state
-- Repository queries always filter by user ID
+- Repository queries always filter by user ID; event actions check the event belongs to the chat
+- Web admin: Telegram Login data is HMAC-verified and expires after a day, sessions are signed HttpOnly cookies, and viewing requires chat-admin status checked live; the page never exposes PayNow numbers
 - All inputs validated before database operations
 - Parameterized SQL queries (Drizzle ORM)
 - CHECK constraints at database level

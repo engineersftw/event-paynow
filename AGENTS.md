@@ -41,6 +41,8 @@ npx vitest run --project node      # Node-pool tests only
 npx vitest run --project workers   # Workers-pool tests only
 npm run dev            # wrangler dev (local Worker)
 npm run deploy         # wrangler deploy (production)
+npm run web:dev        # Pages dev server for the web admin page (web/)
+npm run web:deploy     # Pages deploy (normally done by GitHub Actions from main)
 npm run db:generate    # drizzle-kit generate (create SQL migrations)
 ```
 
@@ -103,6 +105,7 @@ This project uses OpenSpec for change management. All changes are archived:
   semicolons, es5 trailing commas; `style/noNonNullAssertion` off (the `ctx.chat!` /
   `calls[0]!` pattern is deliberate under strict + `noUncheckedIndexedAccess`);
   `noExplicitAny` off in `test/**` (mock casts). Run `npm run check` before committing.
+- **Keep README.md current** — update it in the same change when something significant changes: bot commands or user-facing features, setup/deploy steps, environment variables or secrets, workflows (CI/deploy), or the project structure. Also refresh the `/help` text, the BotFather command list and the specs count it mentions.
 - **Strict TypeScript** — `strict: true`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`
 - **ESM modules** — `"type": "module"` in package.json
 - **Integer cents for amounts** — Never floats. `parseAmount` / `formatCents` in `src/sgqr/amount.ts`.
@@ -257,6 +260,5 @@ Pages secrets: `TELEGRAM_BOT_TOKEN`, `SESSION_SECRET`; the Login Widget needs Bo
 
 ## What's Next
 
-- README quick-start (BotFather setup, secrets, deploy commands)
 - Automated payment notification webhook (bank-side transaction correlation)
 - Multi-currency support, payment expiry, export history, admin dashboard

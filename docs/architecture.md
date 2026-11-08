@@ -40,10 +40,12 @@
 │                       ▼                                         │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │         Command Handlers (src/commands/)                 │  │
-│  │  • /init - Set PayNow reference (mobile/UEN)            │  │
-│  │  • /start - Create payment request                      │  │
-│  │  • /payments - List payments                            │  │
+│  │  • /init - Create an event (name + payee)               │  │
+│  │  • /start - Payment request (payer, amount, confirm)    │  │
+│  │  • /payments - List events and payments                 │  │
 │  │  • /payback - Payback flow                              │  │
+│  │  • /end_event - Close an event                          │  │
+│  │  • /web_admin - Links to the web admin page             │  │
 │  └────────────────────┬─────────────────────────────────────┘  │
 │                       │                                         │
 │                       ▼                                         │
@@ -51,15 +53,15 @@
 │  │         Repository Layer (src/db/repository.ts)          │  │
 │  │  • Infra-neutral interfaces                              │  │
 │  │  • Users: upsertUser, getUser                            │  │
-│  │  • Payments: create, list, update status                 │  │
-│  │  • Paybacks: create, list, sum (pending + sent)           │  │
+│  │  • Payments: create, list, receive/void (pending CAS)    │  │
+│  │  • Paybacks: create, list, sum, sent/cancel (CAS)        │  │
 │  └────────────────────┬─────────────────────────────────────┘  │
 │                       │                                         │
 │                       ▼                                         │
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │         Drizzle ORM (src/db/drizzle-repository.ts)       │  │
 │  │  • Type-safe queries                                     │  │
-│  │  • Schema: users, payments, paybacks                     │  │
+│  │  • Schema: users, events, payments, paybacks             │  │
 │  │  • CHECK constraints enforced                            │  │
 │  └────────────────────┬─────────────────────────────────────┘  │
 │                       │                                         │
@@ -77,9 +79,15 @@
 │  │  • CRC16-CCITT-FALSE checksum                            │  │
 │  │  • PayNow template builder (tags 00-63)                  │  │
 │  │  • Amount parser (integer cents)                         │  │
-│  │  • QR renderer (BMP in Workers, PNG in Node)             │  │
+│  │  • QR renderer (BMP in Workers, PNG in Node) + text band │  │
 │  └──────────────────────────────────────────────────────────┘  │
 │                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────────┐
+│  Cloudflare Pages (web/) — read-only event admin page            │
+│  Pages Function → src/web/handler.ts → same D1 database          │
+│  Telegram Login Widget sign-in, chat-admin check via Bot API     │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -100,14 +108,16 @@
 **Role**: Telegram Bot framework integration
 
 - Creates Bot instance with webhook callback
-- Registers command handlers (`/init`, `/start`, `/payments`, `/payback`, `/cancel`, `/help`, `/ping`)
-- Registers inline-button callback dispatcher with prefix-based routing:
+- Registers command handlers (`/init`, `/start`, `/payments`, `/payback`, `/end_event`, `/web_admin`, `/cancel`, `/help`, `/ping`)
+- Registers an inline-button callback dispatcher with prefix-based routing:
   - `init_confirm:` / `init_cancel:` → InitCommandHandler
-  - `payments:N` → PaymentsCommandHandler (pagination)
-  - `payback_confirm_payer:` / `payback_cancel:` / `payback_confirm_amount:` / `payback_cancel_amount:` → PaybackCommandHandler
-  - `view:` / `mark_received:` / `payback:` / `pb_sent:` → PaymentCallbackHandler
-- Registers message handlers for conversation flows
-- Sends QR images via `sendPhoto` with FormData + inline action buttons
+  - `start_pick:` / `start_skip_name` / `start_confirm` / `start_cancel` → StartCommandHandler
+  - `end_pick:` / `end_confirm:` / `end_cancel:` → EndEventHandler
+  - `payments:N` / `event_view:` → PaymentsCommandHandler (pagination, event drill-down)
+  - `payback_confirm_payer:` / `payback_change_payer:` / `payback_cancel:` / `payback_confirm_amount:` / `payback_cancel_amount:` → PaybackCommandHandler
+  - everything else (`view:`, `mark_received:`, `void:`, `payback:`, `pb_sent:`, `pb_cancel:`) → PaymentCallbackHandler
+- Registers message handlers for conversation flows (the active flow in the DO decides which handler owns the text)
+- Sends QR images via `sendPhoto` with inline action buttons
 
 **Key behavior**: Uses `webhookCallback` adapter for Cloudflare Workers. Bot instance cached per isolate (single `bot.init()` getMe).
 
@@ -116,6 +126,7 @@
 **Role**: Per-chat conversation state management
 
 - Stores FSM state: current flow, step, context data, last activity timestamp
+- `POST /claim {flow, step}`: atomic compare-and-reset (200 = the caller won and gets the previous state, 409 = lost), so a double tap on Confirm creates exactly one payment
 - Validates all state transitions with Zod schema
 - Automatically expires idle conversations after 10 minutes
 - Survives cold starts and deployments (persistent storage)
@@ -137,37 +148,49 @@
 
 **`/start` handler**:
 
-- Fetches open events for the chat+topic
-- If 1 event: auto-advance to amount step
-- If N > 1: inline event picker buttons
-- If 0 events: prompts user to run /init
-- Collects amount (integer cents, ≤ 2 decimals)
-- Creates payment with event_id and event name as description
-- Renders SGQR PayNow QR (BMP, pure JS, with PayNow logo) and uploads via sendPhoto
-- QR photo carries inline action buttons (✓ Received / Payback)
-- On "✓ Received": QR photo is deleted and replaced with a text summary
+- Fetches open events for the chat+topic (1 event auto-advances, N shows a picker, 0 prompts `/init`)
+- Steps: event → payer PayNow proxy (required) → payer display name (optional, skippable) → amount → Confirm/Cancel summary (event, payer, pay-to, amount)
+- Nothing is persisted or rendered until Confirm, which claims the conversation through the DO's atomic `/claim`
+- Creates the payment (payee and payer snapshotted, event name as description), renders the SGQR PayNow QR (BMP, PayNow logo, detail text band) and uploads it via `sendPhoto`
+- If the QR cannot be delivered after the payment row exists, the payment is voided
+- Caption: `description / SGD amount / ref / Payer: <name> / hint` (name only, never the number)
+- QR photo carries ✓ Received and ✖ Void; both replace the photo with a text status line
 
 **`/payments` handler**:
 
-- Top-level lists events with payment counts, collected/pending totals
-- Drill into event → per-event payment list with inline buttons (View / ✓ Received / Payback)
-- Payment detail view shows status, timestamps, source, and payback summary
+- Top-level lists the chat's events with payment counts and collected/pending totals (voided payments excluded)
+- Drill into an event → the caller's payments with inline buttons (View / ✓ Received for pending / Payback for received)
+- Payment detail view shows status (⏳ / ✅ / 🚫), payer, timestamps, source and payback history; event names and descriptions are Markdown-escaped
+- An event from another chat reads as not found
 
-**`/end_event` handler** (new):
+**`/end_event` handler**:
 
-- Lists open events for the chat+topic
-- Inline picker if multiple events
-- Confirm/cancel via inline buttons
-- Close via guarded CAS (status: open → closed)
-- Summary: payments count, collected, pending
-- Closed events reject new /start requests
+- Lists open events for the chat+topic, inline picker if several, then Confirm/Cancel
+- Closes via guarded CAS (open → closed) and shows payments count, collected and pending
+- Refuses events that belong to another chat; closed events reject new `/start` requests
 
 **`/payback` handler**:
 
-- 4-step conversation: payer proxy → confirm → amount → confirm
-- Steps 2 and 4 use inline Confirm/Cancel buttons
-- Payback row created inside the bounded D1 transaction
-- Generates QR encoding the PAYER as payee proxy and uploads via sendPhoto
+- Starts from `/payback <ref>` or the Payback button; refused unless the payment is `received`
+- A payment with a stored payer proposes it (Confirm / Change recipient / Cancel; a change applies to that payback only); legacy payments prompt for the payer
+- Then amount → Confirm; the payback row is created inside the bounded D1 transaction (pending + sent count toward the bound, cancelled do not)
+- The QR encodes the PAYER as payee proxy; caption and image text show `To: <name>` when the recipient is the stored payer
+- QR photo carries ✓ Sent and ✖ Cancel (pending-only CAS; the photo is replaced by a status line)
+
+**`/web_admin` handler**:
+
+- Replies with a link button per event to `${WEB_ADMIN_URL}/events/<ref>`; says so when no events exist or the URL isn't configured
+
+### Web Admin (web/, src/web/)
+
+**Role**: Read-only page listing every payment of an event, on Cloudflare Pages
+
+- `web/functions/[[path]].ts` is a catch-all Pages Function that delegates to `handleWeb()` (`src/web/handler.ts`)
+- `GET /events/:ref` serves an HTML shell (data is written with `textContent`); `GET /api/events/:ref` returns JSON; `GET /api/login` is the Telegram Login Widget redirect target
+- Sign-in: HMAC-SHA256 over the widget data keyed with SHA256(bot token), rejected after 24 h; success sets a 12 h signed HttpOnly cookie (`src/web/auth.ts`)
+- Authorisation: the user must be a chat administrator/creator, checked live with `getChatMember`, or the owner of a private chat; any failure denies (`src/web/access.ts`)
+- The API returns payer names only (never PayNow numbers); voided payments are listed but excluded from totals
+- Reads the same D1 database through the Pages `paynow_db` binding and the shared repository code
 
 ### Repository Layer (src/db/repository.ts)
 
@@ -179,16 +202,15 @@
 
 **Key operations**:
 
-- `upsertUser`: Create or update user's PayNow reference
-- `createPayment`: Create pending payment record
-- `updatePaymentStatus`: Transition payment status (pending → received)
-- `createPayback`: Create payback record
-- `createPaybackBounded`: Create payback inside a D1 batch with in-transaction
-  `SUM(paybacks) <= amount` compare-and-set re-check (task 7.2; all statuses count)
-- `getPaybackByRef`: Look up a payback by its unique ref
-- `updatePaybackStatus`: Guarded `pending → sent` transition (compare-and-set);
-  duplicate/concurrent taps yield exactly one winner (task 7.4)
-- `sumPaybacks`: Total paybacks against a payment across ALL statuses (pending + sent) — the bounded quantity
+- `upsertUser`: Create or update a user's PayNow reference
+- `createPayment`: Create a pending payment (with optional payer type/value/name)
+- `updatePaymentStatus`: Pending-only compare-and-set to `received`
+- `voidPayment`: Pending-only compare-and-set to `voided`; null if missing or no longer pending
+- `listPaymentsByUser` / `listPaymentsByEvent`: a user's payments / every payment of an event, newest first
+- `createPaybackBounded`: Create a payback inside a D1 batch with an in-transaction `SUM(paybacks) <= amount` re-check (counts pending + sent, excludes cancelled)
+- `updatePaybackStatus`: Pending-only compare-and-set to `sent` or `cancelled`; racing taps yield exactly one winner
+- `sumPaybacks`: Total of pending + sent paybacks against a payment (the bounded quantity)
+- Event repository: `createEvent`, `listOpenEventsByChat`, `listAllEventsByChat`, `getEventByRef`, `closeEvent` (open → closed CAS), `getEventStats` (voided excluded)
 
 ### Drizzle ORM (src/db/drizzle-repository.ts)
 
@@ -206,7 +228,7 @@
 
 - Serverless SQLite database on Cloudflare
 - Four tables: `users`, `events`, `payments`, `paybacks`
-- CHECK constraints enforce valid states
+- CHECK constraints enforce valid states; widening one means rebuilding the table (migrations 0003 and 0004 do this for `paybacks` and `payments`)
 
 **Schema**:
 
@@ -242,9 +264,12 @@ payments (
   amount_cents INTEGER NOT NULL,
   payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
   payee_value TEXT NOT NULL,
-  status TEXT NOT NULL CHECK(status IN ('pending', 'received')),
+  status TEXT NOT NULL CHECK(status IN ('pending', 'received', 'voided')),
   source TEXT NOT NULL CHECK(source IN ('manual', 'notification')),
   qr_payload TEXT NOT NULL,
+  payer_type TEXT,          -- null on legacy rows
+  payer_value TEXT,
+  payer_name TEXT,
   created_at TEXT NOT NULL,
   received_at TEXT,
   FOREIGN KEY (user_id) REFERENCES users(telegram_id),
@@ -258,7 +283,7 @@ paybacks (
   payer_type TEXT NOT NULL CHECK(payer_type IN ('mobile', 'uen')),
   payer_value TEXT NOT NULL,
   amount_cents INTEGER NOT NULL,
-  status TEXT NOT NULL CHECK(status IN ('pending', 'sent')),
+  status TEXT NOT NULL CHECK(status IN ('pending', 'sent', 'cancelled')),
   qr_payload TEXT NOT NULL,
   created_at TEXT NOT NULL,
   sent_at TEXT,
@@ -288,7 +313,8 @@ paybacks (
 - **Amount parser** (`amount.ts`): Converts dollars to integer cents
 - **Proxy validation** (`proxy-validation.ts`): Validates mobile/UEN format
 - **Ref generator** (`proxy-validation.ts`): 10-char base32 reference
-- **QR renderer** (`qr-render.ts`): Renders QR as BMP (Workers) or PNG (Node); overlays PayNow logo in center (EC level H)
+- **QR renderer** (`qr-render.ts`): Renders QR as BMP (Workers) or PNG (Node); overlays PayNow logo in center (EC level H); `renderQrPng(payload, lines)` appends a white text band below the QR with the payment details
+- **Bitmap font** (`font5x7.ts`): built-in 5x7 ASCII glyphs for that text band (non-ASCII draws as `?`, long lines are truncated)
 
 **Key behavior**: Runtime-agnostic - no Node APIs, runs in both vitest and Workers isolate.
 
@@ -337,37 +363,22 @@ Handler updates original message in place with success text
 ```
 User sends /start
   ↓
-Handler checks if user has configured reference
-  ↓ (if not configured)
-Handler prompts user to run /init first
-  ↓ (if configured)
-Handler prompts for description (payee snapshot captured in DO state)
+Handler loads open events for the chat+topic (picker if several)
   ↓
-User sends description
+Payer PayNow proxy → optional payer name → amount
   ↓
-Handler prompts for amount
+Handler shows a Confirm/Cancel summary (event, payer, pay-to, amount); nothing is stored yet
   ↓
-User sends amount
+User taps Confirm
   ↓
-Handler validates amount via amount parser (integer cents)
+Handler claims the conversation (DO POST /claim); a second tap gets 409 and does nothing
   ↓
-Handler generates unique ref (10-char base32)
+Handler creates the payment (status 'pending', payee and payer snapshotted)
   ↓
-Handler builds SGQR PayNow payload (with PayNow logo overlay on QR)
-  ↓
-Handler renders QR as BMP
-  ↓
-Handler creates payment record (status: 'pending')
-  ↓
-D1 stores payment record
-  ↓
-Handler sends QR image via sendPhoto with inline buttons (✓ Received / Payback)
-  ↓
-User taps "✓ Received" button
-  ↓
-Handler marks payment as received
-  ↓
-QR photo deleted, text summary sent in its place
+Handler builds the SGQR payload, renders the BMP (logo + detail text) and sends it with ✓ Received / ✖ Void
+  ↓  (if delivery fails, the new payment is voided)
+User taps ✓ Received  →  pending-only CAS to 'received', photo replaced by a status line
+User taps ✖ Void      →  pending-only CAS to 'voided', photo replaced by a 🚫 line
 ```
 
 ### /payments Command Flow
@@ -395,35 +406,21 @@ Callback handler processes action (mark_received deletes photo + sends text)
 ### /payback Command Flow
 
 ```
-User sends /payback <ref>
+User sends /payback <ref> (or taps Payback on a received payment)
   ↓
-Handler verifies payment exists and belongs to user
+Handler verifies the payment exists, belongs to the user and is 'received'
   ↓
-Handler prompts for payer proxy (mobile/UEN)
+Stored payer proposed with Confirm / Change recipient / Cancel (legacy payments: prompt for the payer)
   ↓
-User sends payer reference
+Handler checks the remaining payback bound and prompts for the amount
   ↓
-Handler validates and echoes with inline Confirm/Cancel buttons
+User sends amount; handler validates it against the bound and asks for Confirm
   ↓
-User taps Confirm (callback_query)
+Handler calls createPaybackBounded() in one D1 batch
   ↓
-Handler checks remaining payback bound
+Handler renders the payback QR (payer as payee proxy) and sends it with ✓ Sent / ✖ Cancel
   ↓
-Handler prompts for amount (with bound info)
-  ↓
-User sends amount
-  ↓
-Handler validates amount against remaining bound
-  ↓
-Handler shows amount with inline Confirm/Cancel buttons
-  ↓
-User taps Confirm
-  ↓
-Handler calls createPaybackBounded() in D1 batch
-  ↓
-Handler renders payback QR (payer as payee proxy) and uploads via sendPhoto
-  ↓
-Handler updates confirmation message with success summary
+✓ Sent / ✖ Cancel: pending-only CAS, photo replaced by a status line (cancel frees the amount)
 ```
 
 ## Storage Strategy
@@ -431,8 +428,9 @@ Handler updates confirmation message with success summary
 ### What's stored in D1 (persistent)
 
 - **User records**: Telegram ID, PayNow reference (mobile/UEN), display name
-- **Payment records**: Reference number, user ID, amount, description, status, QR payload, timestamps
-- **Payback records**: Reference number, payment ID, payer reference, amount, status, QR payload, timestamps
+- **Event records**: Reference, chat/topic, name, payee, status
+- **Payment records**: Reference, user and event IDs, amount, description, status (pending/received/voided), payer details, QR payload, timestamps
+- **Payback records**: Reference, payment ID, payer reference, amount, status (pending/sent/cancelled), QR payload, timestamps
 
 **Why D1**: Relational data with foreign keys, CHECK constraints, complex queries (list by user, sum paybacks for bounding).
 
@@ -444,7 +442,7 @@ Handler updates confirmation message with success summary
 
 ### What's NOT stored
 
-- **QR images**: Generated on-demand from `qr_payload` field
+- **QR images**: Rendered when sent, from the stored `qr_payload`; they are not stored
 - **Bot session data**: No server-side sessions, all state in DO
 - **Logs**: Cloudflare Logs (external)
 
@@ -486,12 +484,17 @@ wrangler deploy
 
 ### Regular Deploy
 
-```bash
-# Deploy latest code
-wrangler deploy
+Pushes to `main` deploy automatically through `.github/workflows/deploy.yml`, which diffs the push and deploys:
 
-# Rollback to previous version
-wrangler deployments rollback
+- the **Worker** when `src/` (except `src/web/`), `wrangler.toml`, `package*.json` or `tsconfig.json` change
+- the **Pages app** when `web/`, `src/web/`, `src/db/`, `package*.json` or `tsconfig.json` change
+
+It needs the repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, can be run by hand to deploy both, and does **not** apply D1 migrations (run `wrangler d1 migrations apply paynow-db --remote` first). Manual deploys from `main`:
+
+```bash
+npm run deploy        # Worker
+npm run web:deploy    # Pages
+wrangler deployments rollback   # roll the Worker back
 ```
 
 ### Environment Variables
@@ -499,6 +502,9 @@ wrangler deployments rollback
 - `TELEGRAM_BOT_TOKEN`: Bot token from @BotFather (secret)
 - `TELEGRAM_WEBHOOK_SECRET`: Webhook secret for validating incoming requests (secret)
 - `BOT_USERNAME`: Bot username (default: `event_paynow_bot`)
+- `WEB_ADMIN_URL`: Base URL of the Pages event page (set on the Worker; `/web_admin` says "not configured" without it)
+
+Pages project (`event-paynow-web`): secrets `TELEGRAM_BOT_TOKEN` and `SESSION_SECRET`, variable `BOT_USERNAME` and the `paynow_db` binding (see `web/wrangler.toml`). The Login Widget needs the Pages domain registered with BotFather (`/setdomain`).
 
 ### Bindings
 
@@ -510,25 +516,27 @@ wrangler deployments rollback
 ### Two-Pool Architecture
 
 1. **Node pool** (`test/node/`): Runtime-agnostic core logic
-   - SGQR payload builder (CRC16, TLV, PayNow template)
-   - Amount parsing (dollars ↔ cents)
-   - Proxy validation (mobile/UEN normalization)
-   - Command handler logic (with mocked dependencies)
+   - SGQR payload builder (CRC16, TLV, PayNow template), amount parsing, proxy validation
+   - QR rendering, including the detail text band and a jsQR decode round-trip
+   - Command handlers with mocked dependencies (confirmation steps, void/sent/cancel, names, chat checks)
+   - Web admin auth (Telegram login HMAC, session cookie, chat-admin check)
+   - Migration tests for the hand-written table rebuilds
 
-2. **Workers pool** (`test/workers/`): Worker runtime integration
-   - Repository layer (real D1 bindings)
-   - Conversation DO (real DO bindings)
-   - Webhook secret validation
-   - Concurrent request handling
+2. **Workers pool** (`test/workers/`): Worker runtime integration (real D1 and Durable Object bindings)
+   - Repository layer, compare-and-set races and the payback bound under concurrency
+   - Conversation DO, alarm expiry and the atomic `/claim`
+   - Bot wiring and end-to-end flows driven through `createBot` with a stubbed Telegram client (`test/workers/harness.ts`)
+   - The web admin handler (401/403/404, admin view, no PayNow numbers)
 
 ### Test Coverage
 
-- Unit tests for all core logic
-- Integration tests for database operations
+- Unit tests for core logic; integration tests for database operations
 - Handler tests with mocked context
-- Cross-user isolation tests
-- State validation tests (corrupted data handling)
-- Alarm expiry tests
+- Cross-user and cross-chat isolation tests
+- State validation tests (corrupted data handling) and alarm expiry tests
+- Concurrency tests: double Confirm, Received vs Void, Sent vs Cancel, concurrent paybacks
+
+See `docs/testing.md` for details.
 
 ### Running Tests
 
@@ -557,8 +565,10 @@ npm run test:watch
 ### Data Isolation
 
 - Per-chat DO ensures conversation state isolation
-- Repository queries always filter by user ID
+- Repository queries always filter by user ID; event actions require the event to belong to the chat the tap came from
 - No cross-user data leakage possible
+- Captions, status lines and QR images carry display names only, never PayNow numbers
+- Web admin: Telegram Login data is HMAC-verified and expires after a day, sessions are signed HttpOnly cookies, and viewing requires chat-admin status checked live
 
 ### Input Validation
 
@@ -624,18 +634,14 @@ wrangler tail --format pretty
 
 ### Completed
 
-- `/init` command for PayNow reference configuration (mobile/UEN)
-- `/start` command for payment creation with SGQR QR codes
-- `/payments` listing with pagination and inline buttons
-- `/payback` command for payback flow with bounded paybacks
-- Payment status tracking (pending → received)
-- Payback history and "Mark as sent" tracking
-- Inline-button UX (confirm/cancel, action buttons, pagination)
-- QR codes with PayNow logo overlay
-- D1 database provisioning and migrations
-- Live deployment on Cloudflare Workers
-- GitHub Actions CI with branch protection
-- 282 passing tests (Node + Workers pools)
+- `/init` (events), `/start` (payer details, confirmation step, QR with detail text), `/payments`, `/payback`, `/end_event`, `/web_admin`
+- Payment lifecycle: pending → received or voided; paybacks: pending → sent or cancelled (all guarded transitions)
+- Bounded paybacks, payer snapshotted on each payment, recipient confirmation and change
+- Inline-button UX (confirm/cancel, action buttons, pagination, in-place status lines)
+- Read-only web admin page on Cloudflare Pages with Telegram sign-in
+- D1 migrations (including table rebuilds), live deployment on Cloudflare Workers and Pages
+- GitHub Actions CI with branch protection, and path-filtered deploys from `main`
+- Node and Workers test pools (run `npm test` for the current count)
 
 ### Future Enhancements
 
@@ -644,4 +650,3 @@ wrangler tail --format pretty
 - Export payment history
 - Admin dashboard
 - Analytics and reporting
-- `/end_event` and event management (see `add-event-management` change)
