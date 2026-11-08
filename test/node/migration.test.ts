@@ -201,6 +201,47 @@ describe('Migration 0000_initial_schema.sql', () => {
     db.close();
   });
 
+  it('0005 adds nullable audit columns and leaves existing rows with no actor', () => {
+    const db = new Database(':memory:');
+    const run = (file: string) => {
+      for (const stmt of readFileSync(join(__dirname, `../../drizzle/${file}`), 'utf-8').split(
+        '--> statement-breakpoint'
+      )) {
+        if (stmt.trim()) db.exec(stmt.trim());
+      }
+    };
+    for (const f of [
+      '0000_initial_schema.sql',
+      '0001_certain_albert_cleary.sql',
+      '0002_empty_rocket_racer.sql',
+      '0003_paybacks_cancelled_status.sql',
+      '0004_payments_voided_status.sql',
+    ]) {
+      run(f);
+    }
+    db.exec(
+      `INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at)
+       VALUES ('p1', 7, 'Dinner', 1250, 'mobile', '+6591234567', 'received', 'manual', 'payload', '2024-01-01')`
+    );
+    db.exec(
+      `INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at)
+       VALUES ('b1', 1, 'mobile', '+6598765432', 500, 'sent', 'payload', '2024-01-02')`
+    );
+
+    run('0005_admin_audit_columns.sql');
+
+    expect(db.prepare('SELECT received_by, voided_by FROM payments').get()).toEqual({
+      received_by: null,
+      voided_by: null,
+    });
+    expect(db.prepare('SELECT created_by, sent_by, cancelled_by FROM paybacks').get()).toEqual({
+      created_by: null,
+      sent_by: null,
+      cancelled_by: null,
+    });
+    db.close();
+  });
+
   it('0003 widens paybacks.status to allow cancelled and keeps existing rows', () => {
     const db = new Database(':memory:');
     const run = (file: string) => {

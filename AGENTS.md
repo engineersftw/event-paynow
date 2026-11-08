@@ -98,7 +98,7 @@ This project uses OpenSpec for change management. All changes are archived:
 9. **npm audit: 0 vulnerabilities** — zod 4.6.7, drizzle-orm 0.45.4, vitest 5.1, wrangler 4.158, drizzle-kit 0.31, eslint 10; overrides force minimatch ≥11 and esbuild ≥0.25.
 10. **D1 binding: `paynow_db`** — renamed from `DB`; `migrations_dir = "drizzle"` in wrangler.toml.
 11. **GitHub Actions CI** — Two jobs (checks + tests) on PRs and main pushes; branch protection on main (2 required checks, linear history, enforce admins).
-12. **Deploys run from GitHub Actions on main** — `.github/workflows/deploy.yml` diffs the push and deploys the Worker (`src/` except `src/web/`, `wrangler.toml`, `package*.json`, `tsconfig.json`) and/or Pages (`web/`, `src/web/`, `src/db/`, `package*.json`, `tsconfig.json`) only when their files changed; run it manually to deploy both. Needs repo secrets `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`. It does not apply D1 migrations (`wrangler d1 migrations apply paynow-db --remote` first). `npm run deploy` / `web:deploy` remain for manual use from main.
+12. **Deploys run from GitHub Actions on main** — `.github/workflows/deploy.yml` diffs the push and deploys the Worker (`src/` except `src/web/`, `wrangler.toml`, `package*.json`, `tsconfig.json`) and/or Pages (`web/`, `src/web/`, `src/db/`, `package*.json`, `tsconfig.json`) only when their files changed; run it manually to deploy both. Needs repo secrets `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`. A `migrate` job runs `wrangler d1 migrations apply paynow-db --remote` when `drizzle/` changed, before the Worker and Pages deploys (they are skipped if it fails), so migrations must be backward compatible. `npm run deploy` / `web:deploy` remain for manual use from main.
 
 ## Conventions
 
@@ -215,7 +215,7 @@ The repository layer provides infra-neutral interfaces for database operations:
 - Tests verify cross-user isolation, read-back-after-write consistency, and status transitions
 - Tests run in Workers pool with real D1 bindings
 
-## Web Admin (Cloudflare Pages, read-only)
+## Web Admin (Cloudflare Pages)
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
@@ -224,7 +224,14 @@ written with `textContent`), `GET /api/events/:ref` (JSON), `GET /api/login` (Te
 redirect target; HMAC check in `src/web/auth.ts`, then a 12 h signed HttpOnly cookie). Access =
 signed-in user is chat admin/creator via live `getChatMember` (`src/web/access.ts`), or the private-chat
 owner; any failure denies. The API returns payer names only, never PayNow numbers, and voided
-payments are listed but excluded from totals. Type-checked by `tsc -p web` (part of `npm run build`).
+payments are listed but excluded from totals. Admins can also pay received payments back from the page:
+`POST /api/events/:ref/payments/:paymentRef/paybacks` (via the shared `createPaybackFor` in
+`src/db/payback-service.ts`, same validation and transactional bound as the bot), `GET .../paybacks/:ref/qr`
+(PNG from `bmpToPng` in `src/sgqr/png.ts`; Telegram keeps the BMP) and `POST .../paybacks/:ref/sent|cancel`
+(pending-only CAS). Every POST must be same-origin JSON, then session → event → live admin check; the actor id
+is recorded in the audit columns (`payments.received_by` / `voided_by`, `paybacks.created_by` / `sent_by` /
+`cancelled_by`, written in the same guarded UPDATE so a lost race records nobody). Payments cannot be created,
+received or voided from the web. Type-checked by `tsc -p web` (part of `npm run build`).
 Pages secrets: `TELEGRAM_BOT_TOKEN`, `SESSION_SECRET`; the Login Widget needs BotFather `/setdomain`.
 
 ## Command Handlers

@@ -37,6 +37,8 @@ describe('D1EventRepository', () => {
         payer_name TEXT,
         created_at TEXT NOT NULL,
         received_at TEXT,
+        received_by INTEGER,
+        voided_by INTEGER,
         FOREIGN KEY (event_id) REFERENCES events(id)
       )`,
       `CREATE TABLE IF NOT EXISTS paybacks (
@@ -49,7 +51,10 @@ describe('D1EventRepository', () => {
         status TEXT NOT NULL CHECK(status IN ('pending', 'sent', 'cancelled')),
         qr_payload TEXT NOT NULL,
         created_at TEXT NOT NULL,
-        sent_at TEXT
+        sent_at TEXT,
+        created_by INTEGER,
+        sent_by INTEGER,
+        cancelled_by INTEGER
       )`,
     ];
     for (const stmt of statements) {

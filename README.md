@@ -10,7 +10,7 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - **Payment tracking**: List payments; mark received or void a pending request from the QR message; view details with payback history; per-payment amounts and event totals are net of **sent** paybacks, with the paid-back total shown (in the bot and on the web page)
 - **Payback support**: Bounded paybacks (pending + sent cannot exceed the original payment) with an SGQR QR for the payer; confirm a payback as sent or cancel it; the stored payer is proposed as the recipient and can be changed per payback
 - **Names in messages**: Captions and status lines show `Payer: <name>` / `To: <name>`, never a PayNow number
-- **Web admin**: `/web_admin` links to a read-only Cloudflare Pages view of every payment in an event (chat admins only, Telegram sign-in)
+- **Web admin**: `/web_admin` links to a Cloudflare Pages page listing every payment in an event; chat admins (Telegram sign-in) can also create paybacks with a QR image and mark them sent or cancel them
 - **Inline buttons**: Confirm/cancel via buttons, action buttons on QR photos, paginated lists; double taps and racing taps resolve to one winner
 - **Conversation state**: Per-chat Durable Objects with 10-minute idle expiry
 - **Automatic deploys**: GitHub Actions deploys the Worker and Pages from `main` when their files change
@@ -24,7 +24,7 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - Durable Objects for per-chat conversation state
 - Drizzle ORM for database access
 - Pure-JS QR rendering (qrcode-generator + custom BMP builder)
-- Cloudflare Pages + Pages Functions for the read-only web admin page
+- Cloudflare Pages + Pages Functions for the web admin page
 - Biome for lint + format
 
 ## Quick Start
@@ -105,11 +105,13 @@ Open Telegram, message your bot:
 - `/help` → should show the command list
 - `/init` → create your first event
 
-## Web admin (read-only event page)
+## Web admin (event page)
 
 `/web_admin` replies with a link per event to a Cloudflare Pages page (`web/`) that lists every payment
-of the event. Visitors sign in with the Telegram Login Widget; only the chat's administrators/owner
-(or the user in a private chat) can view it.
+of the event and lets admins pay a received payment back (amount, optional other recipient, QR shown as a PNG)
+and mark a payback sent or cancel it. Payments themselves cannot be changed here. Visitors sign in with the
+Telegram Login Widget; only the chat's administrators/owner (or the user in a private chat) can use it, and
+every change is same-origin and re-checks admin status.
 
 ```bash
 # 1. Create the Pages project, then set its secrets (D1 binding and BOT_USERNAME come from web/wrangler.toml)
@@ -222,7 +224,7 @@ openspec/
 | `/init` | Create a new event (name + PayNow payee) |
 | `/start` | Create a payment QR for an event (payer, optional name, amount, confirm) |
 | `/payments` | List events and payments with inline buttons |
-| `/web_admin` | Links to the read-only web page for each event (chat admins) |
+| `/web_admin` | Links to the web page for each event (chat admins) |
 | `/end_event` | Close an event (no new payments) |
 | `/payback <ref>` | Pay back a received payment |
 | `/cancel` | Cancel current conversation |
@@ -253,8 +255,9 @@ Pushes to `main` deploy through `.github/workflows/deploy.yml`. It diffs the pus
 
 Add repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit, Cloudflare Pages: Edit, D1: Edit) and
 `CLOUDFLARE_ACCOUNT_ID`. To deploy both without a code change, use Actions → Deploy → Run workflow.
-**Database migrations are not applied automatically**: run `npx wrangler d1 migrations apply paynow-db --remote`
-before merging a change that adds one.
+A change under `drizzle/` also runs `wrangler d1 migrations apply paynow-db --remote` first (job "Apply D1 migrations");
+the Worker and Pages deploys wait for it and are skipped if it fails. Migrations therefore have to be backward
+compatible (the old code keeps serving until the deploy finishes).
 
 Manual deploys (from `main` only):
 

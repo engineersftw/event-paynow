@@ -188,7 +188,8 @@ export class D1Repository implements Repository {
     ref: string,
     status: PaymentStatus,
     source: ReceiptSource,
-    timestamp: string
+    timestamp: string,
+    actorId?: number
   ): Promise<Payment | null> {
     const receivedAt = status === 'received' ? timestamp : null;
 
@@ -205,6 +206,8 @@ export class D1Repository implements Repository {
         status,
         source,
         receivedAt,
+        // Written in the same guarded UPDATE, so a lost race records nobody
+        ...(status === 'received' && actorId !== undefined ? { receivedBy: actorId } : {}),
       })
       .where(where)
       .returning()
@@ -214,10 +217,10 @@ export class D1Repository implements Repository {
   }
 
   /** Void a payment: pending-only compare-and-set; null if missing or no longer pending. */
-  async voidPayment(ref: string): Promise<Payment | null> {
+  async voidPayment(ref: string, actorId?: number): Promise<Payment | null> {
     const updated = await this.db
       .update(schema.payments)
-      .set({ status: 'voided' })
+      .set({ status: 'voided', ...(actorId !== undefined ? { voidedBy: actorId } : {}) })
       .where(and(eq(schema.payments.ref, ref), eq(schema.payments.status, 'pending')))
       .returning()
       .get();
@@ -232,8 +235,17 @@ export class D1Repository implements Repository {
   async createPayback(
     input: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
   ): Promise<Payback> {
-    const { ref, paymentId, payerType, payerValue, amountCents, status, qrPayload, timestamp } =
-      input;
+    const {
+      ref,
+      paymentId,
+      payerType,
+      payerValue,
+      amountCents,
+      status,
+      qrPayload,
+      timestamp,
+      createdBy,
+    } = input;
 
     const created = await this.db
       .insert(schema.paybacks)
@@ -246,6 +258,7 @@ export class D1Repository implements Repository {
         status,
         qrPayload,
         createdAt: timestamp,
+        createdBy: createdBy ?? null,
       })
       .returning()
       .get();
@@ -267,13 +280,22 @@ export class D1Repository implements Repository {
   async createPaybackBounded(
     input: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
   ): Promise<CreatePaybackBoundedResult> {
-    const { ref, paymentId, payerType, payerValue, amountCents, status, qrPayload, timestamp } =
-      input;
+    const {
+      ref,
+      paymentId,
+      payerType,
+      payerValue,
+      amountCents,
+      status,
+      qrPayload,
+      timestamp,
+      createdBy,
+    } = input;
 
     const guardedInsert = this.d1
       .prepare(
-        `INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at)
-         SELECT ?, ?, ?, ?, ?, ?, ?, ?
+        `INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at, created_by)
+         SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
          WHERE (
            SELECT COALESCE(SUM(amount_cents), 0) FROM paybacks
            WHERE payment_id = ? AND status != 'cancelled'
@@ -288,6 +310,7 @@ export class D1Repository implements Repository {
         status,
         qrPayload,
         timestamp,
+        createdBy ?? null,
         paymentId,
         amountCents,
         paymentId
@@ -379,7 +402,8 @@ export class D1Repository implements Repository {
   async updatePaybackStatus(
     ref: string,
     status: PaybackStatus,
-    timestamp: string
+    timestamp: string,
+    actorId?: number
   ): Promise<Payback | null> {
     const sentAt = status === 'sent' ? timestamp : null;
 
@@ -390,12 +414,29 @@ export class D1Repository implements Repository {
 
     const updated = await this.db
       .update(schema.paybacks)
-      .set({ status, sentAt })
+      .set({
+        status,
+        sentAt,
+        // Same guarded UPDATE: only the winning transition records its actor
+        ...(actorId !== undefined && status === 'sent' ? { sentBy: actorId } : {}),
+        ...(actorId !== undefined && status === 'cancelled' ? { cancelledBy: actorId } : {}),
+      })
       .where(where)
       .returning()
       .get();
 
     return updated ? toPayback(updated) : null;
+  }
+
+  async listPaybacksByEvent(eventId: number): Promise<Payback[]> {
+    const rows = await this.db
+      .select({ payback: schema.paybacks })
+      .from(schema.paybacks)
+      .innerJoin(schema.payments, eq(schema.paybacks.paymentId, schema.payments.id))
+      .where(eq(schema.payments.eventId, eventId))
+      .orderBy(schema.paybacks.id)
+      .all();
+    return rows.map((r) => toPayback(r.payback));
   }
 
   async listPaybacksByPayment(paymentId: number): Promise<Payback[]> {
@@ -577,6 +618,8 @@ function toPayment(row: typeof schema.payments.$inferSelect): Payment {
     payerName: row.payerName,
     createdAt: row.createdAt,
     receivedAt: row.receivedAt,
+    receivedBy: row.receivedBy,
+    voidedBy: row.voidedBy,
   };
 }
 
@@ -592,5 +635,8 @@ function toPayback(row: typeof schema.paybacks.$inferSelect): Payback {
     qrPayload: row.qrPayload,
     createdAt: row.createdAt,
     sentAt: row.sentAt,
+    createdBy: row.createdBy,
+    sentBy: row.sentBy,
+    cancelledBy: row.cancelledBy,
   };
 }

@@ -57,6 +57,8 @@ beforeAll(async () => {
       payer_name TEXT,
       created_at TEXT NOT NULL,
       received_at TEXT,
+      received_by INTEGER,
+      voided_by INTEGER,
       FOREIGN KEY (user_id) REFERENCES users(telegram_id),
       FOREIGN KEY (event_id) REFERENCES events(id)
     )`,
@@ -71,6 +73,9 @@ beforeAll(async () => {
       qr_payload TEXT NOT NULL,
       created_at TEXT NOT NULL,
       sent_at TEXT,
+      created_by INTEGER,
+      sent_by INTEGER,
+      cancelled_by INTEGER,
       FOREIGN KEY (payment_id) REFERENCES payments(id)
     )`,
     `CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`,

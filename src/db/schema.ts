@@ -44,6 +44,9 @@ export const payments = sqliteTable('payments', {
   payerName: text('payer_name'),
   createdAt: text('created_at').notNull(),
   receivedAt: text('received_at'),
+  // Audit: Telegram user ids of whoever performed the action (null for older rows)
+  receivedBy: integer('received_by'),
+  voidedBy: integer('voided_by'),
 });
 
 export const paybacks = sqliteTable('paybacks', {
@@ -57,4 +60,8 @@ export const paybacks = sqliteTable('paybacks', {
   qrPayload: text('qr_payload').notNull(),
   createdAt: text('created_at').notNull(),
   sentAt: text('sent_at'),
+  // Audit: Telegram user ids of whoever performed the action (null for older rows)
+  createdBy: integer('created_by'),
+  sentBy: integer('sent_by'),
+  cancelledBy: integer('cancelled_by'),
 });
