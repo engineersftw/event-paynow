@@ -1,0 +1,92 @@
+name: Deploy
+
+# Deploys from main only, and only the part whose files changed:
+#   Worker -> src/ (except src/web/), wrangler.toml, package*.json, tsconfig.json
+#   Pages  -> web/, src/web/, src/db/, package*.json, tsconfig.json
+# Run it by hand (Actions -> Deploy -> Run workflow) to deploy both regardless of changes.
+# Needs repo secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID.
+# Does NOT apply D1 migrations: run `wrangler d1 migrations apply paynow-db --remote` first.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      worker: ${{ steps.diff.outputs.worker }}
+      pages: ${{ steps.diff.outputs.pages }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: diff
+        env:
+          BEFORE: ${{ github.event.before }}
+          EVENT: ${{ github.event_name }}
+        run: |
+          # Manual runs, or a push whose previous commit is unknown (new branch, force push): deploy all
+          if [ "$EVENT" = workflow_dispatch ] || ! git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            echo "worker=true" >> "$GITHUB_OUTPUT"
+            echo "pages=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(git diff --name-only "$BEFORE" "$GITHUB_SHA")
+          echo "Changed files:"; echo "$files"
+          if echo "$files" | grep -Ev '^src/web/' | grep -Eq '^(src/|wrangler\.toml$|package(-lock)?\.json$|tsconfig\.json$)'; then
+            echo "worker=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "worker=false" >> "$GITHUB_OUTPUT"
+          fi
+          if echo "$files" | grep -Eq '^(web/|src/web/|src/db/|package(-lock)?\.json$|tsconfig\.json$)'; then
+            echo "pages=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "pages=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  worker:
+    name: Deploy Worker
+    needs: changes
+    if: needs.changes.outputs.worker == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  pages:
+    name: Deploy Pages
+    needs: changes
+    if: needs.changes.outputs.pages == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npx wrangler pages deploy public --project-name event-paynow-web --branch main
+        working-directory: web
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

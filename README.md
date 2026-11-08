@@ -96,6 +96,14 @@ Open Telegram, message your bot:
 - `/help` → should show the command list
 - `/init` → create your first event
 
+## Automatic deploys
+
+Pushes to `main` deploy through `.github/workflows/deploy.yml`: the Worker when `src/` (except `src/web/`),
+`wrangler.toml`, `package*.json` or `tsconfig.json` changed, and the Pages app when `web/`, `src/web/`,
+`src/db/`, `package*.json` or `tsconfig.json` changed. Add repo secrets `CLOUDFLARE_API_TOKEN` (permissions:
+Workers Scripts: Edit, Cloudflare Pages: Edit, D1: Edit) and `CLOUDFLARE_ACCOUNT_ID`. To deploy both without a code
+change, use Actions -> Deploy -> Run workflow. Database migrations are not applied automatically.
+
 ## Web admin (read-only event page)
 
 `/web_admin` replies with a link per event to a Cloudflare Pages page (`web/`) that lists every payment

@@ -95,6 +95,7 @@ This project uses OpenSpec for change management. All changes are archived:
 9. **npm audit: 0 vulnerabilities** — zod 4.6.7, drizzle-orm 0.45.4, vitest 5.1, wrangler 4.158, drizzle-kit 0.31, eslint 10; overrides force minimatch ≥11 and esbuild ≥0.25.
 10. **D1 binding: `paynow_db`** — renamed from `DB`; `migrations_dir = "drizzle"` in wrangler.toml.
 11. **GitHub Actions CI** — Two jobs (checks + tests) on PRs and main pushes; branch protection on main (2 required checks, linear history, enforce admins).
+12. **Deploys run from GitHub Actions on main** — `.github/workflows/deploy.yml` diffs the push and deploys the Worker (`src/` except `src/web/`, `wrangler.toml`, `package*.json`, `tsconfig.json`) and/or Pages (`web/`, `src/web/`, `src/db/`, `package*.json`, `tsconfig.json`) only when their files changed; run it manually to deploy both. Needs repo secrets `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID`. It does not apply D1 migrations (`wrangler d1 migrations apply paynow-db --remote` first). `npm run deploy` / `web:deploy` remain for manual use from main.
 
 ## Conventions
 
