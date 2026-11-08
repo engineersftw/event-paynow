@@ -73,6 +73,7 @@ This project uses OpenSpec for change management. All changes are archived:
 12. `web-payment-requests` (7 tasks) — archived 2026-11-08
 13. `redesign-web-admin-ui` (12 tasks) — archived 2026-11-08
 14. `web-admin-polish` (11 tasks) — archived 2026-11-08
+15. `web-admin-list-controls` (11 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
