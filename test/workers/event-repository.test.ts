@@ -313,6 +313,44 @@ describe('D1EventRepository', () => {
     });
   });
 
+  describe('updateEvent', () => {
+    const base = {
+      chatId: 900,
+      topicId: 0,
+      name: 'Before',
+      payeeType: 'mobile' as const,
+      payeeValue: '+6591234567',
+      status: 'open' as const,
+      timestamp: testTimestamp,
+    };
+
+    it('updates each field of an open event; null clears the default amount', async () => {
+      await repo.createEvent({ ...base, ref: 'EVT-UPD1', defaultAmountCents: 2100 });
+
+      expect((await repo.updateEvent('EVT-UPD1', { name: 'After' }))!.name).toBe('After');
+      const payee = await repo.updateEvent('EVT-UPD1', {
+        payeeType: 'uen',
+        payeeValue: '201234567A',
+      });
+      expect([payee!.payeeType, payee!.payeeValue]).toEqual(['uen', '201234567A']);
+      expect(
+        (await repo.updateEvent('EVT-UPD1', { defaultAmountCents: 500 }))!.defaultAmountCents
+      ).toBe(500);
+      const cleared = await repo.updateEvent('EVT-UPD1', { defaultAmountCents: null });
+      expect(cleared!.defaultAmountCents).toBeNull();
+      expect(cleared!.name).toBe('After');
+    });
+
+    it('returns null and changes nothing for a closed or unknown event', async () => {
+      await repo.createEvent({ ...base, ref: 'EVT-UPD2' });
+      await repo.closeEvent('EVT-UPD2', testTimestamp);
+
+      expect(await repo.updateEvent('EVT-UPD2', { name: 'Nope' })).toBeNull();
+      expect((await repo.getEventByRef('EVT-UPD2'))!.name).toBe('Before');
+      expect(await repo.updateEvent('MISSING', { name: 'Nope' })).toBeNull();
+    });
+  });
+
   // ========================================================================
   // closeEvent
   // ========================================================================

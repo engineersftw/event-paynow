@@ -147,6 +147,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - mark_received replaces QR photo with text summary (deleteMessage + reply)
 - /payments listing with pagination (5 per page), inline buttons, payment detail view
 - /payback 4-step conversation with inline buttons at payer and amount confirmation steps; a payment with a stored payer proposes it (Confirm / Change recipient — a changed recipient applies to that payback only), legacy payments without one prompt for the payer. `/payback <ref>` and the QR Payback button share `PaybackCommandHandler.beginFlow`
+- /edit_event command (chat admins; flow `edit`): pick event → field → value, saved at once via the open-only `updateEvent`, replies with every final value; existing payments keep their own snapshot
 - /end_event command: close event with CAS, summary of payments collected/pending
 - Events scoped by (chat_id, topic_id) for chat+topic isolation
 - Payback bounds: `createPaybackBounded()` enforces `SUM(paybacks) <= payment.amount_cents`

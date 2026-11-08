@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreatePaybackBoundedResult,
   Event,
+  EventPatch,
   EventRepository,
   EventStats,
   Payback,
@@ -602,6 +603,18 @@ export class D1EventRepository implements EventRepository {
       .get();
 
     return !!result;
+  }
+
+  async updateEvent(ref: string, patch: EventPatch): Promise<Event | null> {
+    if (Object.keys(patch).length === 0) return this.getEventByRef(ref);
+    const result = await this.db
+      .update(schema.events)
+      .set(patch)
+      .where(and(eq(schema.events.ref, ref), eq(schema.events.status, 'open')))
+      .returning()
+      .get();
+
+    return result ? toEvent(result) : null;
   }
 
   async getEventStats(eventId: number): Promise<EventStats> {
