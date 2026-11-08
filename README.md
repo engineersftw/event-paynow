@@ -257,7 +257,7 @@ Pushes to `main` deploy through `.github/workflows/deploy.yml`. It diffs the pus
 | Part | Deployed when these change |
 |---|---|
 | Worker | `src/` (except `src/web/`), `wrangler.toml`, `package*.json`, `tsconfig.json` |
-| Pages | `web/`, `src/web/`, `src/db/`, `package*.json`, `tsconfig.json` |
+| Pages | `web/`, `src/{web,db,sgqr,payments,access}/`, `src/commands/payer-label.ts`, `package*.json`, `tsconfig.json` |
 
 Add repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit, Cloudflare Pages: Edit, D1: Edit) and
 `CLOUDFLARE_ACCOUNT_ID`. To deploy both without a code change, use Actions → Deploy → Run workflow.

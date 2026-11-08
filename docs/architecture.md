@@ -498,7 +498,7 @@ wrangler deploy
 Pushes to `main` deploy automatically through `.github/workflows/deploy.yml`, which diffs the push and deploys:
 
 - the **Worker** when `src/` (except `src/web/`), `wrangler.toml`, `package*.json` or `tsconfig.json` change
-- the **Pages app** when `web/`, `src/web/`, `src/db/`, `package*.json` or `tsconfig.json` change
+- the **Pages app** when `web/`, `src/{web,db,sgqr,payments,access}/`, `src/commands/payer-label.ts`, `package*.json` or `tsconfig.json` change (everything the Pages Function bundles)
 
 It needs the repo secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`, can be run by hand to deploy both, and runs `wrangler d1 migrations apply paynow-db --remote` first when `drizzle/` changed (the Worker and Pages deploys wait for it and are skipped if it fails, so migrations must be backward compatible). Manual deploys from `main`:
 
