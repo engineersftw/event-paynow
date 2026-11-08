@@ -4,11 +4,12 @@ import { D1EventRepository, D1Repository } from '../db/drizzle-repository';
 import { createPaybackFor } from '../db/payback-service';
 import { detectProxyType } from '../db/proxy-validation';
 import type { Event, Payback, Payment } from '../db/repository';
+import { createPaymentRequest, paymentImageLines } from '../payments/payment-request';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { bmpToPng } from '../sgqr/png';
 import { renderQrPng } from '../sgqr/qr-render';
-
 import { SESSION_MAX_AGE_SEC, signSession, verifySession, verifyTelegramLogin } from './auth';
+import { postPaymentQr } from './telegram';
 
 /** Bindings of the Pages project (see web/wrangler.toml). */
 export interface WebEnv {
@@ -19,6 +20,7 @@ export interface WebEnv {
 }
 
 const REF = /^[A-Za-z0-9_-]{1,40}$/;
+const MAX_PAYER_NAME = 40; // same limit as /start
 
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), {
@@ -80,6 +82,11 @@ export async function handleWeb(
     return paybackQr(request, env, qr[1]!, qr[2]!, fetchFn);
   }
 
+  const paymentQr = url.pathname.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/qr$/);
+  if (paymentQr && REF.test(paymentQr[1]!) && REF.test(paymentQr[2]!)) {
+    return paymentQrImage(request, env, paymentQr[1]!, paymentQr[2]!, fetchFn);
+  }
+
   return new Response('Not found', { status: 404 });
 }
 
@@ -115,12 +122,13 @@ async function handlePost(
   url: URL,
   fetchFn: typeof fetch
 ): Promise<Response> {
-  const create = url.pathname.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/paybacks$/);
-  const transition = url.pathname.match(
-    /^\/api\/events\/([^/]+)\/paybacks\/([^/]+)\/(sent|cancel)$/
-  );
-  const match = create ?? transition;
-  if (!match || !REF.test(match[1]!) || !REF.test(match[2]!)) {
+  const path = url.pathname;
+  const newPayment = path.match(/^\/api\/events\/([^/]+)\/payments$/);
+  const newPayback = path.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/paybacks$/);
+  const settle = path.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/(received|void)$/);
+  const transition = path.match(/^\/api\/events\/([^/]+)\/paybacks\/([^/]+)\/(sent|cancel)$/);
+  const match = newPayment ?? newPayback ?? settle ?? transition;
+  if (!match || !REF.test(match[1]!) || (match[2] !== undefined && !REF.test(match[2]))) {
     return new Response('Not found', { status: 404 });
   }
   if (!sameOriginJson(request, url)) return json({ error: 'forbidden' }, 403);
@@ -128,9 +136,93 @@ async function handlePost(
   const access = await eventAccess(request, env, match[1]!, fetchFn);
   if (access instanceof Response) return access;
 
-  return create
-    ? createPayback(request, env, access, match[2]!)
-    : paybackTransition(env, access, match[2]!, match[3] === 'sent' ? 'sent' : 'cancelled');
+  if (newPayment) return createPaymentRequestRoute(request, env, access, fetchFn);
+  if (newPayback) return createPayback(request, env, access, match[2]!);
+  if (settle) return settlePayment(env, access, match[2]!, match[3] as 'received' | 'void');
+  return paybackTransition(env, access, match[2]!, match[3] === 'sent' ? 'sent' : 'cancelled');
+}
+
+async function createPaymentRequestRoute(
+  request: Request,
+  env: WebEnv,
+  { userId, event }: { userId: number; event: Event },
+  fetchFn: typeof fetch
+): Promise<Response> {
+  let body: { payer?: unknown; name?: unknown; amount?: unknown };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return json({ error: 'invalid_request' }, 400);
+  }
+
+  const payer = detectProxyType(String(body.payer ?? ''));
+  if (!payer) return json({ error: 'invalid_payer' }, 400);
+  const amountCents = parseAmount(String(body.amount ?? ''));
+  if (amountCents === null) return json({ error: 'invalid_amount' }, 400);
+  if (event.status !== 'open') return json({ error: 'event_closed' }, 409);
+
+  const name = typeof body.name === 'string' ? body.name.trim().slice(0, MAX_PAYER_NAME) : '';
+  const payment = await createPaymentRequest(new D1Repository(env.paynow_db), event, {
+    payerType: payer.type,
+    payerValue: payer.normalized,
+    payerName: name || null,
+    amountCents,
+    userId,
+  });
+
+  // Same QR as the page shows, posted to the event's chat; a failure keeps the payment
+  const bmp = await renderQrPng(payment.qrPayload, paymentImageLines(event, payment));
+  const posted = await postPaymentQr(env.TELEGRAM_BOT_TOKEN, event, payment, bmp, fetchFn);
+  return json({ payment: { ref: payment.ref, amountCents, status: payment.status, posted } }, 201);
+}
+
+async function settlePayment(
+  env: WebEnv,
+  { userId, event }: { userId: number; event: Event },
+  paymentRef: string,
+  action: 'received' | 'void'
+): Promise<Response> {
+  const repo = new D1Repository(env.paynow_db);
+  const payment = await repo.getPaymentByRef(paymentRef);
+  if (!payment || payment.eventId !== event.id) return json({ error: 'not_found' }, 404);
+
+  // Pending-only compare-and-set: racing taps, here or in Telegram, have exactly one winner
+  const updated =
+    action === 'received'
+      ? await repo.updatePaymentStatus(
+          paymentRef,
+          'received',
+          'manual',
+          new Date().toISOString(),
+          userId
+        )
+      : await repo.voidPayment(paymentRef, userId);
+  if (!updated) {
+    const current = await repo.getPaymentByRef(paymentRef);
+    return json({ error: 'not_pending', status: current?.status ?? null }, 409);
+  }
+  return json({ payment: { ref: updated.ref, status: updated.status } });
+}
+
+async function paymentQrImage(
+  request: Request,
+  env: WebEnv,
+  eventRef: string,
+  paymentRef: string,
+  fetchFn: typeof fetch
+): Promise<Response> {
+  const access = await eventAccess(request, env, eventRef, fetchFn);
+  if (access instanceof Response) return access;
+
+  const payment = await new D1Repository(env.paynow_db).getPaymentByRef(paymentRef);
+  if (!payment || payment.eventId !== access.event.id) return json({ error: 'not_found' }, 404);
+
+  const png = await bmpToPng(
+    await renderQrPng(payment.qrPayload, paymentImageLines(access.event, payment))
+  );
+  return new Response(png, {
+    headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' },
+  });
 }
 
 async function createPayback(
@@ -333,6 +425,14 @@ table{border-collapse:collapse;width:100%}th,td{text-align:left;padding:.4rem .5
 <script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="${botUsername.replace(/[^A-Za-z0-9_]/g, '')}" data-size="large" data-auth-url="/api/login?ref=${ref}" data-request-access="write"></script>
 </div>
 <div id="data" hidden>
+<div id="newreq" class="form" hidden>
+<b>New payment request</b>
+<input id="np-payer" placeholder="Payer mobile / UEN" size="18">
+<input id="np-name" placeholder="Payer name (optional)" size="18" maxlength="40">
+<input id="np-amount" placeholder="Amount" size="8">
+<button id="np-go">Create</button>
+<div id="created"></div>
+</div>
 <div class="totals"><div>Collected: <b id="collected"></b></div><div>Paid back: <b id="paidback"></b></div><div>Pending: <b id="pending"></b></div></div>
 <table><thead><tr><th>Description</th><th>Payer</th><th class="num">Amount</th><th class="num">Paid back</th><th class="num">Net</th><th>Status</th><th>Ref</th><th>Created</th><th>Received</th></tr></thead><tbody id="rows"></tbody></table>
 </div>
@@ -346,6 +446,8 @@ const ERRORS = {
   recipient_required: 'This payment has no stored payer: enter a recipient.',
   not_received: 'Only received payments can be paid back.',
   not_pending: 'That payback is no longer pending.',
+  invalid_payer: 'The payer must be a valid mobile number or UEN.',
+  event_closed: 'This event is closed.',
   forbidden: 'Not allowed.',
   not_found: 'Not found.',
 };
@@ -360,6 +462,30 @@ async function act(path, body, button) {
     say(e.error === 'over_bound' ? 'Too much: at most ' + sgd(e.remainingCents) + ' can still be paid back.' : (ERRORS[e.error] || 'Something went wrong.'));
   }
   await load();
+}
+async function createRequest() {
+  const go = $('np-go');
+  go.disabled = true;
+  say('');
+  const res = await fetch('/api/events/${ref}/payments', { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ payer: $('np-payer').value, name: $('np-name').value, amount: $('np-amount').value }) });
+  const out = await res.json().catch(() => ({}));
+  go.disabled = false;
+  if (!res.ok) { say(ERRORS[out.error] || 'Something went wrong.'); return; }
+  const box = $('created'); box.replaceChildren();
+  box.append(el('div', 'Created ' + sgd(out.payment.amountCents) + ' (' + out.payment.ref + '). ' + (out.payment.posted ? 'Posted to the chat.' : 'Could not post to the chat; share the QR below instead.')));
+  const img = el('img'); img.src = '/api/events/${ref}/payments/' + encodeURIComponent(out.payment.ref) + '/qr'; img.alt = 'Payment QR'; img.width = 220;
+  box.append(img);
+  for (const id of ['np-payer', 'np-name', 'np-amount']) $(id).value = '';
+  await load();
+}
+function paymentActions(p) {
+  const row = el('div', undefined, 'pb');
+  const base = '/api/events/${ref}/payments/' + encodeURIComponent(p.ref);
+  const received = el('button', 'Received'); received.onclick = () => act(base + '/received', {}, received);
+  const voided = el('button', 'Void'); voided.onclick = () => act(base + '/void', {}, voided);
+  const img = el('img'); img.src = base + '/qr'; img.alt = 'Payment QR'; img.width = 220;
+  row.append(received, voided, el('br'), img);
+  return row;
 }
 function paybackForm(p) {
   const form = el('div', undefined, 'form');
@@ -390,6 +516,7 @@ async function load() {
   if (!res.ok) { say('Something went wrong.'); return; }
   const d = await res.json();
   $('title').textContent = d.event.name;
+  $('newreq').hidden = d.event.status !== 'open';
   $('collected').textContent = sgd(d.totals.collectedCents);
   $('paidback').textContent = sgd(d.totals.paidBackCents);
   $('pending').textContent = sgd(d.totals.pendingCents);
@@ -402,8 +529,9 @@ async function load() {
       .forEach((v, i) => tr.appendChild(el('td', v, i >= 2 && i <= 4 ? 'num' : undefined)));
     $('rows').appendChild(tr);
     const canPayback = p.status === 'received' && p.remainingCents > 0;
-    if (p.paybacks.length > 0 || canPayback) {
+    if (p.paybacks.length > 0 || canPayback || p.status === 'pending') {
       const sub = el('tr'); const td = el('td'); td.colSpan = 9;
+      if (p.status === 'pending') td.appendChild(paymentActions(p));
       for (const b of p.paybacks) td.appendChild(paybackRow(b));
       if (canPayback) td.appendChild(paybackForm(p));
       sub.appendChild(td); $('rows').appendChild(sub);
@@ -411,6 +539,7 @@ async function load() {
   }
   $('data').hidden = false;
 }
+$('np-go').onclick = createRequest;
 load();
 </script></body></html>`;
 }

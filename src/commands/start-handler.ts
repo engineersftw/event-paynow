@@ -1,14 +1,17 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
-import { detectProxyType, generateRef } from '../db/proxy-validation.js';
+import { detectProxyType } from '../db/proxy-validation.js';
 import type { EventRepository, PayeeType, Payment, Repository } from '../db/repository.js';
+import {
+  createPaymentRequest,
+  paymentCaption,
+  paymentImageLines,
+} from '../payments/payment-request.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
-import { buildPayNowPayload } from '../sgqr/paynow.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
-import { captionPart, plainPayerLabel } from './payer-label.js';
+import { plainPayerLabel } from './payer-label.js';
 
-const SHARE_HINT = 'Forward this message to share';
 const MAX_PAYER_NAME = 40;
 
 function payerPrompt(eventName: string, payeeValue: string): string {
@@ -373,54 +376,18 @@ export class StartCommandHandler {
         return;
       }
 
-      // Verify event exists in DB
-      const verifyEvent = await this.eventRepository.getEventByRef(event.ref);
-      console.log('createPaymentAndSendQr: event.id =', event.id, 'verify.id =', verifyEvent?.id);
-
-      const ref = generateRef();
-      const qrPayload = buildPayNowPayload({
-        proxyType: event.payeeType,
-        proxyValue: event.payeeValue,
-        amountCents,
-        merchantName: event.name,
-        reference: ref,
-        description: event.name,
-      });
-
-      const payment: Payment = await this.repository.createPayment({
-        ref,
-        userId,
-        eventId: event.id,
-        description: event.name,
-        amountCents,
-        payeeType: event.payeeType,
-        payeeValue: event.payeeValue,
+      const payment: Payment = await createPaymentRequest(this.repository, event, {
         payerType: state.context.payerType as PayeeType,
         payerValue: state.context.payerValue as string,
         payerName: (state.context.payerName as string | undefined) ?? null,
-        status: 'pending',
-        source: 'manual',
-        qrPayload,
-        timestamp: new Date().toISOString(),
+        amountCents,
+        userId,
       });
       createdRef = payment.ref;
 
       // Same name-only rule as the caption: the image is forwarded too
-      const bmpBytes = await renderQrPng(qrPayload, [
-        event.name,
-        ...(payment.description === event.name ? [] : [payment.description]),
-        `SGD ${formatCents(payment.amountCents)}`,
-        payment.ref,
-        ...captionPart('Payer', payment.payerName),
-      ]);
-      // Name only: this caption is forwarded, so never include the payer's number
-      const caption = [
-        payment.description,
-        `SGD ${formatCents(payment.amountCents)}`,
-        payment.ref,
-        ...captionPart('Payer', payment.payerName),
-        SHARE_HINT,
-      ].join(' / ');
+      const bmpBytes = await renderQrPng(payment.qrPayload, paymentImageLines(event, payment));
+      const caption = paymentCaption(payment);
 
       const keyboard = new InlineKeyboard()
         .text('✓ Received', `mark_received:${payment.ref}`)

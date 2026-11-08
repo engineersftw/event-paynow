@@ -12,7 +12,7 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - **Chat admins act on any payment**: administrators of an event's chat can view, receive, void, pay back and mark paybacks sent/cancelled on payments they did not create (checked live with `getChatMember`), and `/payments` shows them every payment of the event; ordinary members keep owner-only access
 - **Audit**: who received/voided a payment and who created/sent/cancelled a payback is recorded (Telegram user ids) for bot and web actions
 - **Names in messages**: Captions and status lines show `Payer: <name>` / `To: <name>`, never a PayNow number
-- **Web admin**: `/web_admin` links to a Cloudflare Pages page listing every payment in an event; chat admins (Telegram sign-in) can also create paybacks with a QR image and mark them sent or cancel them
+- **Web admin**: `/web_admin` links to a Cloudflare Pages page listing every payment in an event; chat admins (Telegram sign-in) can also create payment requests (QR on the page and posted to the event's chat), mark pending payments received or void, and create paybacks with a QR image and mark them sent or cancel them
 - **Inline buttons**: Confirm/cancel via buttons, action buttons on QR photos, paginated lists; double taps and racing taps resolve to one winner
 - **Conversation state**: Per-chat Durable Objects with 10-minute idle expiry
 - **Automatic deploys**: GitHub Actions deploys the Worker and Pages from `main` when their files change
@@ -110,8 +110,10 @@ Open Telegram, message your bot:
 ## Web admin (event page)
 
 `/web_admin` replies with a link per event to a Cloudflare Pages page (`web/`) that lists every payment
-of the event and lets admins pay a received payment back (amount, optional other recipient, QR shown as a PNG)
-and mark a payback sent or cancel it. Payments themselves cannot be changed here. Visitors sign in with the
+of the event. Admins can create a payment request (payer mobile/UEN, optional name, amount; the QR is shown as a PNG
+and posted to the event's chat with Received/Void buttons), mark a pending payment received or void it, pay a
+received payment back (amount, optional other recipient, QR as a PNG) and mark a payback sent or cancel it.
+Visitors sign in with the
 Telegram Login Widget; only the chat's administrators/owner (or the user in a private chat) can use it, and
 every change is same-origin and re-checks admin status.
 
