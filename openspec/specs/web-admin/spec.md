@@ -499,6 +499,29 @@ The system SHALL, after the admin marks a payment received or void or changes a 
 - **WHEN** the admin marks a pending payment received after loading two pages
 - **THEN** both pages remain listed with the payment updated and "Load more" still works
 
+### Requirement: Admin and payer event views have separate access policies
+
+The system SHALL preserve the existing administrator-only event-management page while providing a separate payer-facing event page whose valid Telegram session is sufficient for payment creation.
+
+#### Scenario: Admin page remains protected
+
+- **WHEN** a signed-in non-admin requests the existing administrator event API or page
+- **THEN** the request remains forbidden
+
+#### Scenario: Payer page permits non-admin
+
+- **WHEN** a signed-in non-admin requests the payer-facing page for a valid event
+- **THEN** the payer page is available without returning administrator payment-management data
+
+### Requirement: Payer-page QR creation does not post to Telegram
+
+The payer-facing web flow SHALL show its created payment QR inline and SHALL not use the administrator page's Telegram posting behavior.
+
+#### Scenario: Inline-only payer creation
+
+- **WHEN** a payer creates a request through the payer-facing page
+- **THEN** the QR is available through the page and no Telegram `sendPhoto` operation is attempted
+
 ### Requirement: The new-request dialog pre-fills the event's default amount
 
 The system SHALL return the event's default amount (when set) with the event data, and the new payment request dialog SHALL pre-fill the amount field with it, in the same format the admin would type (such as `21.00`). The admin SHALL be able to change it, and an event without a default amount SHALL show an empty field. The default SHALL NOT be applied by the server when the request carries an amount.
