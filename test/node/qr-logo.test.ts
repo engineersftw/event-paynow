@@ -1,6 +1,5 @@
 import jsQR from 'jsqr';
 import { describe, expect, it } from 'vitest';
-import { LOGO_COLOR } from '../../src/sgqr/paynow-logo';
 import { renderQrPng } from '../../src/sgqr/qr-render';
 
 /**
@@ -36,16 +35,18 @@ function bmpToRgba(bytes: Uint8Array): {
   return { data, width, height };
 }
 
+/** The bot logo is red and green; the QR itself is pure black and white. */
 function isLogoColor(r: number, g: number, b: number): boolean {
-  const [lr, lg, lb] = LOGO_COLOR;
-  return Math.abs(r - lr) < 40 && Math.abs(g - lg) < 40 && Math.abs(b - lb) < 40;
+  const red = r > 180 && g < 70 && b < 70;
+  const green = g > 150 && r < 80 && b < 80;
+  return red || green;
 }
 
-describe('renderQrPng — PayNow logo overlay', () => {
+describe('renderQrPng — bot logo overlay', () => {
   const payload =
     '00020101021226490009SG.PAYNOW010100211+6591234567030100507INV-001520400005303702540512.505802SG5912ACME PTE LTD6009Singapore62160112Dinner split63041AAF';
 
-  it('overlays the logo in the center without breaking jsQR decoding', async () => {
+  it('overlays the bot logo in the center without breaking jsQR decoding', async () => {
     const bmp = await renderQrPng(payload);
     const { data, width, height } = bmpToRgba(bmp);
 
@@ -59,7 +60,7 @@ describe('renderQrPng — PayNow logo overlay', () => {
     const bmp = await renderQrPng(payload);
     const { data, width, height } = bmpToRgba(bmp);
 
-    // Count brand-color pixels within the central quarter.
+    // Count logo-color (red/green) pixels within the central quarter.
     let logoPixels = 0;
     const cx = width / 2;
     const cy = height / 2;
@@ -80,7 +81,7 @@ describe('renderQrPng — PayNow logo overlay', () => {
     const bmp = await renderQrPng(payload);
     const { data, width, height } = bmpToRgba(bmp);
 
-    // Top-left corner region should contain only pure black/white (no brand color).
+    // Top-left corner region should contain only pure black/white (no logo color).
     let brand = 0;
     for (let y = 0; y < height / 5; y++) {
       for (let x = 0; x < width / 5; x++) {
@@ -91,5 +92,13 @@ describe('renderQrPng — PayNow logo overlay', () => {
       }
     }
     expect(brand).toBe(0);
+  });
+
+  it('still decodes for short, medium and long payloads', async () => {
+    for (const extra of [0, 40, 120]) {
+      const long = payload.slice(0, -4) + 'x'.repeat(extra);
+      const { data, width, height } = bmpToRgba(await renderQrPng(long));
+      expect(jsQR(data, width, height)?.data, `extra=${extra}`).toBe(long);
+    }
   });
 });

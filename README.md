@@ -193,7 +193,9 @@ src/
 │   ├── paynow.ts          # PayNow template builder
 │   ├── amount.ts          # Amount parsing (integer cents)
 │   ├── qr-render.ts       # BMP renderer (Workers) with the detail text band
-│   ├── font5x7.ts         # Built-in ASCII bitmap font for the QR image text
+│   ├── bot-logo.ts        # Bot logo pixels for the QR center (generated)
+│   ├── font-atlas.ts      # Anti-aliased glyph atlas for the QR image text (generated)
+│   ├── text-band.ts       # Lays out and draws the text band
 │   └── qr-render-node.ts  # PNG renderer (Node, tests)
 ├── web/
 │   ├── handler.ts         # Event page + JSON API + login (used by Pages)

@@ -1,7 +1,8 @@
 import jsQR from 'jsqr';
 import { describe, expect, it } from 'vitest';
-import { glyph } from '../../src/sgqr/font5x7';
+import { COVERAGE, FONT_FIRST, GLYPHS } from '../../src/sgqr/font-atlas';
 import { renderQrPng } from '../../src/sgqr/qr-render';
+import { bandHeight, fitLine, LINE_HEIGHT, renderTextBand } from '../../src/sgqr/text-band';
 
 const PAYLOAD =
   '00020101021226490009SG.PAYNOW010100211+6591234567030100507INV-001520400005303702540512.505802SG5912ACME PTE LTD6009Singapore62160112Dinner split63041AAF';
@@ -26,11 +27,42 @@ function bmpToRgba(bmp: Uint8Array) {
   return { data, width, height };
 }
 
-describe('font5x7', () => {
-  it('has a glyph for every printable ASCII char and falls back to ? otherwise', () => {
-    for (let c = 0x20; c <= 0x7e; c++) expect(glyph(String.fromCharCode(c))).toHaveLength(5);
-    expect(glyph('é')).toEqual(glyph('?'));
-    expect(glyph('A')).not.toEqual(glyph('B'));
+describe('font atlas and text band', () => {
+  it('has anti-aliased glyphs for every printable ASCII char, and ? for anything else', () => {
+    expect(GLYPHS).toHaveLength(0x7e - FONT_FIRST + 1);
+    for (let c = 0x21; c <= 0x7e; c++) expect(GLYPHS[c - FONT_FIRST]![1]).toBeGreaterThan(0);
+    // coverage has intermediate grey levels, not just 0 and 255
+    expect(COVERAGE.some((v) => v > 20 && v < 235)).toBe(true);
+    const q = renderTextBand(['?'], 60, 4);
+    expect(renderTextBand(['é'], 60, 4)).toEqual(q);
+    expect(renderTextBand(['A'], 60, 4)).not.toEqual(q);
+  });
+
+  it('shortens by measured width with an ellipsis and never draws past the edge', () => {
+    expect(fitLine('Hi', 200)).toBe('Hi');
+    const fit = fitLine('x'.repeat(200), 300);
+    expect(fit.endsWith('...')).toBe(true);
+    expect(fit.length).toBeLessThan(200);
+    // narrow glyphs fit more characters than wide ones in the same width
+    expect(fitLine('i'.repeat(100), 300).length).toBeGreaterThan(
+      fitLine('W'.repeat(100), 300).length
+    );
+    const band = renderTextBand(['W'.repeat(100)], 300, 16);
+    expect(band).toHaveLength(300 * bandHeight(1));
+    for (let y = 0; y < bandHeight(1); y++) {
+      for (let x = 300 - 16; x < 300; x++) expect(band[y * 300 + x]).toBe(0);
+    }
+  });
+
+  it('draws each line inside its own row', () => {
+    const band = renderTextBand(['Hello', 'World'], 200, 8);
+    expect(band).toHaveLength(200 * bandHeight(2));
+    const inkRows = new Set<number>();
+    band.forEach((v, i) => {
+      if (v) inkRows.add(Math.floor(i / 200));
+    });
+    expect(Math.min(...inkRows)).toBeGreaterThanOrEqual(LINE_HEIGHT / 2 - 4);
+    expect(Math.max(...inkRows)).toBeLessThan(bandHeight(2));
   });
 });
 
@@ -56,7 +88,12 @@ describe('renderQrPng with detail lines', () => {
     expect(jsQR(data, width, height)?.data).toBe(PAYLOAD);
     const qrHeight = bmpToRgba(await renderQrPng(PAYLOAD)).height;
     let ink = 0;
-    for (let i = qrHeight * width * 4; i < data.length; i += 4) if (data[i] === 0) ink++;
+    for (let i = qrHeight * width * 4; i < data.length; i += 4) if (data[i]! < 128) ink++;
     expect(ink).toBeGreaterThan(100);
+    let grey = 0; // anti-aliased glyph edges
+    for (let i = qrHeight * width * 4; i < data.length; i += 4) {
+      if (data[i]! > 20 && data[i]! < 235) grey++;
+    }
+    expect(grey).toBeGreaterThan(50);
   });
 });

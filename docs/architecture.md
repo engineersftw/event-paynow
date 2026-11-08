@@ -151,7 +151,7 @@
 - Fetches open events for the chat+topic (1 event auto-advances, N shows a picker, 0 prompts `/init`)
 - Steps: event → payer PayNow proxy (required) → payer display name (optional, skippable) → amount → Confirm/Cancel summary (event, payer, pay-to, amount)
 - Nothing is persisted or rendered until Confirm, which claims the conversation through the DO's atomic `/claim`
-- Creates the payment (payee and payer snapshotted, event name as description), renders the SGQR PayNow QR (BMP, PayNow logo, detail text band) and uploads it via `sendPhoto`
+- Creates the payment (payee and payer snapshotted, event name as description), renders the SGQR PayNow QR (BMP, bot logo, detail text band) and uploads it via `sendPhoto`
 - If the QR cannot be delivered after the payment row exists, the payment is voided
 - Caption: `description / SGD amount / ref / Payer: <name> / hint` (name only, never the number)
 - QR photo carries ✓ Received and ✖ Void; both replace the photo with a text status line
@@ -324,8 +324,8 @@ paybacks (
 - **Amount parser** (`amount.ts`): Converts dollars to integer cents
 - **Proxy validation** (`proxy-validation.ts`): Validates mobile/UEN format
 - **Ref generator** (`proxy-validation.ts`): 10-char base32 reference
-- **QR renderer** (`qr-render.ts`): Renders QR as BMP (Workers) or PNG (Node); overlays PayNow logo in center (EC level H); `renderQrPng(payload, lines)` appends a white text band below the QR with the payment details
-- **Bitmap font** (`font5x7.ts`): built-in 5x7 ASCII glyphs for that text band (non-ASCII draws as `?`, long lines are truncated)
+- **QR renderer** (`qr-render.ts`): Renders QR as BMP (Workers) or PNG (Node); overlays the bot logo in the center (EC level H); `renderQrPng(payload, lines)` appends a white text band below the QR with the payment details
+- **Text band** (`text-band.ts`, `font-atlas.ts`): anti-aliased proportional DejaVu Sans glyphs (pre-rendered by `scripts/generate-font.py`) for that band; non-ASCII draws as `?`, long lines are shortened with an ellipsis by measured width
 
 **Key behavior**: Runtime-agnostic - no Node APIs, runs in both vitest and Workers isolate.
 

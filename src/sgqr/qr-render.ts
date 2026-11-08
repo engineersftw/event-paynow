@@ -1,9 +1,9 @@
 import qrcode from 'qrcode-generator';
-import { glyph } from './font5x7.js';
-import { isLogoOpaque, LOGO_COLOR, logoHeight, logoWidth } from './paynow-logo.js';
+import { BOT_LOGO_RGBA, BOT_LOGO_SIZE } from './bot-logo.js';
+import { bandHeight, renderTextBand } from './text-band.js';
 
 /**
- * Render a payload string as a QR code BMP image (Uint8Array) with the PayNow
+ * Render a payload string as a QR code BMP image (Uint8Array) with the bot
  * logo overlaid in the center.
  *
  * Uses error correction level H (30% recovery) so the center logo can be
@@ -31,10 +31,9 @@ export async function renderQrPng(payload: string, lines: string[] = []): Promis
   const scale = 8;
   const margin = 2; // modules of white border
 
-  // Center logo geometry (in modules), preserving the logo's aspect ratio.
-  const logoAspect = logoWidth / logoHeight;
-  const logoBoxW = Math.max(4, Math.floor(moduleCount * 0.24));
-  const logoBoxH = Math.max(2, Math.floor(logoBoxW / logoAspect));
+  // Center logo geometry (in modules): the bot logo is square.
+  const logoBoxW = Math.max(4, Math.floor(moduleCount * 0.22));
+  const logoBoxH = logoBoxW;
   const logoPad = 1; // modules of white padding around the logo
   const centerX = moduleCount / 2;
   const centerY = moduleCount / 2;
@@ -52,23 +51,11 @@ export async function renderQrPng(payload: string, lines: string[] = []): Promis
   // Pixel data: pixelSize * pixelSize * 3 bytes (24-bit BGR)
   // Row padding: each row must be multiple of 4 bytes
 
-  // Text band below the QR (outside its quiet zone). shortcut: lines are truncated, not wrapped.
-  const textScale = 2;
-  const advance = 6 * textScale;
-  const lineH = 10 * textScale;
-  const maxChars = Math.floor((pixelSize - 2 * margin * textScale) / advance);
-  const bandLines = lines.map((l) => (l.length > maxChars ? `${l.slice(0, maxChars - 3)}...` : l));
-  const bandH = bandLines.length ? bandLines.length * lineH + lineH : 0;
+  // Text band below the QR (outside its quiet zone), anti-aliased. shortcut: lines are shortened
+  // with an ellipsis, not wrapped.
+  const bandH = bandHeight(lines.length);
+  const textBand = renderTextBand(lines, pixelSize, margin * scale);
   const height = pixelSize + bandH;
-  const textOn = (x: number, y: number): boolean => {
-    const line = bandLines[Math.floor((y - lineH / 2) / lineH)];
-    if (!line) return false;
-    const gx = Math.floor((x - margin * textScale) / textScale);
-    const gy = Math.floor((((y - lineH / 2) % lineH) - textScale) / textScale);
-    if (gx < 0 || gy < 0 || gy > 7 || gx % 6 === 5) return false;
-    const ch = line[Math.floor(gx / 6)];
-    return ch !== undefined && (glyph(ch)[gx % 6]! >> gy) & 1 ? true : false;
-  };
 
   const rowBytes = pixelSize * 3;
   const padding = (4 - (rowBytes % 4)) % 4;
@@ -99,14 +86,12 @@ export async function renderQrPng(payload: string, lines: string[] = []): Promis
   view.setUint32(46, 0, true); // colors in palette
   view.setUint32(50, 0, true); // important colors
 
-  const [logoR, logoG, logoB] = LOGO_COLOR;
-
   // Pixel data (24-bit BGR, top-down)
   let offset = 54;
   for (let y = 0; y < height; y++) {
     if (y >= pixelSize) {
       for (let x = 0; x < pixelSize; x++) {
-        const c = textOn(x, y - pixelSize) ? 0 : 255;
+        const c = 255 - textBand[(y - pixelSize) * pixelSize + x]!;
         view.setUint8(offset++, c);
         view.setUint8(offset++, c);
         view.setUint8(offset++, c);
@@ -131,16 +116,7 @@ export async function renderQrPng(payload: string, lines: string[] = []): Promis
       if (Math.abs(dx) < halfClearW && Math.abs(dy) < halfClearH) {
         // Inside the white clear box behind the logo.
         if (Math.abs(dx) < halfLogoW && Math.abs(dy) < halfLogoH) {
-          // Sample the logo mask and draw the brand color where opaque.
-          const u = (dx + halfLogoW) / logoBoxW;
-          const v = (dy + halfLogoH) / logoBoxH;
-          const lx = Math.min(logoWidth - 1, Math.max(0, Math.floor(u * logoWidth)));
-          const ly = Math.min(logoHeight - 1, Math.max(0, Math.floor(v * logoHeight)));
-          if (isLogoOpaque(lx, ly)) {
-            r = logoR;
-            g = logoG;
-            b = logoB;
-          }
+          [r, g, b] = sampleLogo((dx + halfLogoW) / logoBoxW, (dy + halfLogoH) / logoBoxH);
         }
       } else if (moduleY >= 0 && moduleY < moduleCount && moduleX >= 0 && moduleX < moduleCount) {
         if (qr.isDark(moduleY, moduleX)) {
@@ -162,4 +138,26 @@ export async function renderQrPng(payload: string, lines: string[] = []): Promis
   }
 
   return new Uint8Array(buffer);
+}
+
+/**
+ * Bilinear sample of the bot logo at (u, v) in 0..1, composited over white. The embedded pixels
+ * are premultiplied, so the result is premultiplied color + (255 - alpha) of white.
+ */
+function sampleLogo(u: number, v: number): [number, number, number] {
+  const n = BOT_LOGO_SIZE;
+  const fx = Math.min(n - 1, Math.max(0, u * n - 0.5));
+  const fy = Math.min(n - 1, Math.max(0, v * n - 0.5));
+  const x0 = Math.floor(fx);
+  const y0 = Math.floor(fy);
+  const x1 = Math.min(n - 1, x0 + 1);
+  const y1 = Math.min(n - 1, y0 + 1);
+  const tx = fx - x0;
+  const ty = fy - y0;
+  const px = (x: number, y: number, c: number) => BOT_LOGO_RGBA[(y * n + x) * 4 + c]!;
+  const mix = (c: number) =>
+    (px(x0, y0, c) * (1 - tx) + px(x1, y0, c) * tx) * (1 - ty) +
+    (px(x0, y1, c) * (1 - tx) + px(x1, y1, c) * tx) * ty;
+  const white = 255 - mix(3);
+  return [Math.round(mix(0) + white), Math.round(mix(1) + white), Math.round(mix(2) + white)];
 }
