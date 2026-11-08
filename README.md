@@ -96,6 +96,26 @@ Open Telegram, message your bot:
 - `/help` → should show the command list
 - `/init` → create your first event
 
+## Web admin (read-only event page)
+
+`/web_admin` replies with a link per event to a Cloudflare Pages page (`web/`) that lists every payment
+of the event. Visitors sign in with the Telegram Login Widget; only the chat's administrators/owner
+(or the user in a private chat) can view it.
+
+```bash
+# 1. Create the Pages project, then set its secrets (D1 binding and BOT_USERNAME come from web/wrangler.toml)
+cd web && npx wrangler pages project create event-paynow-web --production-branch main
+npx wrangler pages secret put TELEGRAM_BOT_TOKEN --project-name event-paynow-web
+npx wrangler pages secret put SESSION_SECRET --project-name event-paynow-web   # e.g. openssl rand -hex 32
+cd .. && npm run web:deploy
+# 2. BotFather: /setdomain -> choose the bot -> event-paynow-web.pages.dev (the Login Widget needs this)
+# 3. Point the bot Worker at the page, then redeploy it
+npx wrangler secret put WEB_ADMIN_URL      # https://event-paynow-web.pages.dev
+npm run deploy
+```
+
+Preview deployments cannot sign in (the widget only works on the registered domain).
+
 ## Development
 
 ### Local development

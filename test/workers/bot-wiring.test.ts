@@ -143,6 +143,43 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(listReply.text).toContain('Wiring Event');
   });
 
+  it('/web_admin replies with a link button per event (and warns when unconfigured)', async () => {
+    const userId = 800000021;
+    const eventRepo = new D1EventRepository(env.paynow_db);
+    await eventRepo.createEvent({
+      ref: 'EVT-WEB0021',
+      chatId: userId,
+      topicId: 0,
+      name: 'Web Event',
+      payeeType: 'mobile',
+      payeeValue: '+6591234567',
+      status: 'open',
+      timestamp: T0,
+    });
+
+    const unconfigured = createBot(env as unknown as WorkerEnv, {
+      botInfo: TEST_BOT_INFO,
+      client: { fetch: stub.fetch },
+    });
+    await unconfigured.handleUpdate(textUpdate(userId, '/web_admin'));
+    expect(stub.lastText()).toContain('not configured');
+
+    const bot = createBot(
+      { ...(env as unknown as WorkerEnv), WEB_ADMIN_URL: 'https://web.test/' },
+      {
+        botInfo: TEST_BOT_INFO,
+        client: { fetch: stub.fetch },
+      }
+    );
+    await bot.handleUpdate(textUpdate(userId, '/web_admin'));
+    const kb = stub.sentMessages.at(-1)!.replyMarkup as {
+      inline_keyboard: Array<Array<{ text: string; url?: string }>>;
+    };
+    expect(kb.inline_keyboard.flat()).toEqual([
+      { text: '🟢 Web Event', url: 'https://web.test/events/EVT-WEB0021' },
+    ]);
+  });
+
   it.skip('pagination callback renders the next page with Prev button', async () => {
     const userId = 800000011;
     const { bot, repo } = makeWiredBot();
