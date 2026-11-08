@@ -79,6 +79,7 @@ Message [@BotFather](https://t.me/BotFather) in Telegram:
    payback - Pay back a received payment
     web_admin - Open the web page for an event
     web_payment - Open the payment page for an event
+   edit_event - Change an event's name, payee or default amount
    end_event - Close an event
    cancel - Cancel current conversation
    help - Show help
@@ -184,6 +185,7 @@ src/
 │   ├── init-handler.ts    # /init — create event (name + payee)
 │   ├── start-handler.ts   # /start — create payment QR (event picker → amount → QR)
 │   ├── payments-handler.ts # /payments — list events, drill into payments
+│   ├── edit-event-handler.ts # /edit_event — edit an open event
 │   ├── end-event-handler.ts # /end_event — close event
 │   ├── payback-handler.ts  # /payback — payback flow (confirm recipient → amount → QR)
 │   ├── payment-callback-handler.ts # Inline button callbacks (received, void, sent, cancel)
@@ -239,6 +241,7 @@ openspec/
 | `/payments` | List events and payments with inline buttons |
 | `/web_admin` | Links to the admin and payment pages for each event (chat admins) |
 | `/web_payment` | Links to the standalone payment page for each event |
+| `/edit_event` | Change an open event's name, payee or default amount (chat admins) |
 | `/end_event` | Close an event (no new payments) |
 | `/payback <ref>` | Pay back a received payment |
 | `/cancel` | Cancel current conversation |

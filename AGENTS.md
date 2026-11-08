@@ -78,6 +78,7 @@ This project uses OpenSpec for change management. All changes are archived:
 17. `restore-paynow-qr-logo` (6 tasks) — archived 2026-11-08
 18. `ignore-irrelevant-messages` (9 tasks) — archived 2026-11-08
 19. `event-default-amount` (13 tasks) — archived 2026-11-08
+20. `add-edit-event-command` (6 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -147,6 +148,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - mark_received replaces QR photo with text summary (deleteMessage + reply)
 - /payments listing with pagination (5 per page), inline buttons, payment detail view
 - /payback 4-step conversation with inline buttons at payer and amount confirmation steps; a payment with a stored payer proposes it (Confirm / Change recipient — a changed recipient applies to that payback only), legacy payments without one prompt for the payer. `/payback <ref>` and the QR Payback button share `PaybackCommandHandler.beginFlow`
+- /edit_event command (chat admins; flow `edit`): pick event → field → value, saved at once via the open-only `updateEvent`, replies with every final value; existing payments keep their own snapshot
 - /end_event command: close event with CAS, summary of payments collected/pending
 - Events scoped by (chat_id, topic_id) for chat+topic isolation
 - Payback bounds: `createPaybackBounded()` enforces `SUM(paybacks) <= payment.amount_cents`

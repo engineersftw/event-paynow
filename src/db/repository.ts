@@ -108,6 +108,13 @@ export type CreatePaybackBoundedResult =
 // Event Repository Interface
 // ============================================================================
 
+export interface EventPatch {
+  name?: string;
+  payeeType?: PayeeType;
+  payeeValue?: string;
+  defaultAmountCents?: number | null;
+}
+
 export interface EventRepository {
   createEvent(
     event: Omit<Event, 'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents'> & {
@@ -120,6 +127,8 @@ export interface EventRepository {
   getEventByRef(ref: string): Promise<Event | null>;
   getEventById(id: number): Promise<Event | null>;
   closeEvent(ref: string, timestamp: string): Promise<boolean>; // returns true if closed (was open)
+  /** Change fields of an OPEN event; returns the updated event, or null if missing or closed. */
+  updateEvent(ref: string, patch: EventPatch): Promise<Event | null>;
   getEventStats(eventId: number): Promise<EventStats>;
 }
 

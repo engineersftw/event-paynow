@@ -44,6 +44,7 @@
 │  │  • /start - Payment request (payer, amount, confirm)    │  │
 │  │  • /payments - List events and payments                 │  │
 │  │  • /payback - Payback flow                              │  │
+│  │  • /edit_event - Edit an open event                     │  │
 │  │  • /end_event - Close an event                          │  │
 │  │  • /web_admin - Links to the web admin page             │  │
 │  └────────────────────┬─────────────────────────────────────┘  │
@@ -108,7 +109,7 @@
 **Role**: Telegram Bot framework integration
 
 - Creates Bot instance with webhook callback
-- Registers command handlers (`/init`, `/start`, `/payments`, `/payback`, `/end_event`, `/web_admin`, `/cancel`, `/help`, `/ping`)
+- Registers command handlers (`/init`, `/start`, `/payments`, `/payback`, `/edit_event`, `/end_event`, `/web_admin`, `/cancel`, `/help`, `/ping`)
 - Registers an inline-button callback dispatcher with prefix-based routing:
   - `init_confirm:` / `init_cancel:` → InitCommandHandler
   - `start_pick:` / `start_skip_name` / `start_confirm` / `start_cancel` → StartCommandHandler
@@ -164,6 +165,8 @@
 - Drill into an event → the caller's payments, or every payment of the event for a chat administrator (net of sent paybacks, with the original amount and `Paid back` when any were sent) with inline buttons (View / ✓ Received for pending / Payback for received)
 - Payment detail view shows status (⏳ / ✅ / 🚫), payer, timestamps, source and payback history with `Paid back` (sent), `Net`, `Pending paybacks` and `Remaining` (payable-back room); event names and descriptions are Markdown-escaped
 - An event from another chat reads as not found
+
+**`/edit_event` handler** (`src/commands/edit-event-handler.ts`): flow `edit` (pick event, pick field, type value). Admin check at start and before the write; one guarded `updateEvent` (open events only); the reply lists the final name, payee and default amount. Payments keep the payee/description they were created with.
 
 **`/end_event` handler**:
 

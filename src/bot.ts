@@ -1,6 +1,7 @@
 import type { BotConfig, Context } from 'grammy';
 import { Bot, webhookCallback } from 'grammy';
 import { isChatAdmin } from './access/chat-admin';
+import { EditEventHandler } from './commands/edit-event-handler';
 import { EndEventHandler } from './commands/end-event-handler';
 import { InitCommandHandler } from './commands/init-handler';
 import { PaybackCommandHandler } from './commands/payback-handler';
@@ -22,6 +23,7 @@ const HELP_TEXT =
   '/web_admin — open the web page for an event (admins)\n' +
   '/web_payment — open the payment page for an event\n' +
   '/init — create a new event (name + PayNow payee)\n' +
+  "/edit_event — change an event's name, payee or default amount (admins)\n" +
   '/end_event — close an event\n' +
   '/cancel — abandon the current conversation\n\n' +
   'Commands must be set up with BotFather (task 1.3).';
@@ -115,6 +117,11 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     await stampOwner(ctx);
   });
 
+  bot.command('edit_event', async (ctx) => {
+    await new EditEventHandler(conversation(ctx), eventRepository, isAdmin).start(ctx);
+    await stampOwner(ctx);
+  });
+
   bot.command('end_event', async (ctx) => {
     await new EndEventHandler(conversation(ctx), eventRepository).start(ctx);
     await stampOwner(ctx);
@@ -176,6 +183,10 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
       await new EndEventHandler(conversation(ctx), eventRepository).handleCallback(ctx);
       return;
     }
+    if (data.startsWith('edit_')) {
+      await new EditEventHandler(conversation(ctx), eventRepository, isAdmin).handleCallback(ctx);
+      return;
+    }
     if (data.startsWith('event_view:')) {
       const eventRef = data.split(':')[1];
       await new PaymentsCommandHandler(repository, eventRepository, isAdmin).handle(ctx, eventRef);
@@ -212,6 +223,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     if (await new PaybackCommandHandler(doStub, repository, canAct).handleInput(ctx)) return;
     if (await new StartCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;
     if (await new InitCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;
+    if (await new EditEventHandler(doStub, eventRepository, isAdmin).handleInput(ctx)) return;
     await new EndEventHandler(doStub, eventRepository).handleInput(ctx);
   });
 
