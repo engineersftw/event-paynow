@@ -34,6 +34,7 @@ export class WebAdminCommandHandler {
           `${event.status === 'open' ? '🟢' : '🔴'} ${event.name}`,
           `${base}/events/${event.ref}`
         )
+        .url('💳 Pay', `${base}/pay/${event.ref}`)
         .row();
     }
     await ctx.reply('🌐 Open an event page (chat admins only, sign in with Telegram):', {

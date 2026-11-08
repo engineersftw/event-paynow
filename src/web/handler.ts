@@ -9,7 +9,7 @@ import { formatCents, parseAmount } from '../sgqr/amount';
 import { bmpToPng } from '../sgqr/png';
 import { renderQrPng } from '../sgqr/qr-render';
 import { SESSION_MAX_AGE_SEC, signSession, verifySession, verifyTelegramLogin } from './auth';
-import { renderPage } from './page';
+import { renderPage, renderPayerPage } from './page';
 import { postPaymentQr } from './telegram';
 
 /** Bindings of the Pages project (see web/wrangler.toml). */
@@ -62,14 +62,38 @@ export async function handleWeb(
     if (userId === null || !REF.test(ref)) {
       return new Response('Sign-in failed. Go back and try again.', { status: 403 });
     }
+    const next = url.searchParams.get('next');
     const cookie = await signSession(userId, env.SESSION_SECRET);
     return new Response(null, {
       status: 302,
       headers: {
-        Location: `/events/${ref}`,
+        Location: `${next === 'pay' ? '/pay' : '/events'}/${ref}`,
         'Set-Cookie': `session=${cookie}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_MAX_AGE_SEC}`,
       },
     });
+  }
+
+  const payerPage = url.pathname.match(/^\/pay\/([^/]+)$/);
+  if (payerPage && REF.test(payerPage[1]!)) {
+    return new Response(renderPayerPage(payerPage[1]!, env.BOT_USERNAME), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+
+  const payerApi = url.pathname.match(/^\/api\/pay\/([^/]+)$/);
+  if (payerApi && REF.test(payerApi[1]!)) {
+    return payerData(request, env, payerApi[1]!);
+  }
+
+  const payerCreate = url.pathname.match(/^\/api\/pay\/([^/]+)\/payments$/);
+  if (payerCreate && REF.test(payerCreate[1]!)) {
+    if (!sameOriginJson(request, url)) return json({ error: 'forbidden' }, 403);
+    return createPayerPayment(request, env, payerCreate[1]!);
+  }
+
+  const payerQr = url.pathname.match(/^\/api\/pay\/([^/]+)\/payments\/([^/]+)\/qr$/);
+  if (payerQr && REF.test(payerQr[1]!) && REF.test(payerQr[2]!)) {
+    return payerQrImage(request, env, payerQr[1]!, payerQr[2]!);
   }
 
   const page = url.pathname.match(/^\/events\/([^/]+)$/);
@@ -93,6 +117,88 @@ export async function handleWeb(
   }
 
   return new Response('Not found', { status: 404 });
+}
+
+async function payerAccess(
+  request: Request,
+  env: WebEnv,
+  ref: string
+): Promise<{ userId: number; event: Event } | Response> {
+  const userId = await verifySession(sessionCookie(request), env.SESSION_SECRET);
+  if (userId === null) return json({ error: 'sign_in' }, 401);
+  const event = await new D1EventRepository(env.paynow_db).getEventByRef(ref);
+  if (!event) return json({ error: 'not_found' }, 404);
+  return { userId, event };
+}
+
+async function payerData(request: Request, env: WebEnv, ref: string): Promise<Response> {
+  const access = await payerAccess(request, env, ref);
+  if (access instanceof Response) return access;
+  return json({
+    event: {
+      name: access.event.name,
+      status: access.event.status,
+      defaultAmountCents: access.event.defaultAmountCents,
+    },
+  });
+}
+
+async function createPayerPayment(request: Request, env: WebEnv, ref: string): Promise<Response> {
+  const access = await payerAccess(request, env, ref);
+  if (access instanceof Response) return access;
+  if (access.event.status !== 'open') return json({ error: 'event_closed' }, 409);
+
+  let body: { payer?: unknown; name?: unknown; amount?: unknown };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return json({ error: 'invalid_request' }, 400);
+  }
+
+  const payer = detectProxyType(String(body.payer ?? ''));
+  if (!payer) return json({ error: 'invalid_payer' }, 400);
+  const name = typeof body.name === 'string' ? body.name.trim().slice(0, MAX_PAYER_NAME) : '';
+  const amountCents = access.event.defaultAmountCents ?? parseAmount(String(body.amount ?? ''));
+  if (amountCents === null) return json({ error: 'invalid_amount' }, 400);
+
+  const payment = await createPaymentRequest(new D1Repository(env.paynow_db), access.event, {
+    payerType: payer.type,
+    payerValue: payer.normalized,
+    payerName: name || null,
+    amountCents,
+    userId: access.userId,
+  });
+  return json(
+    {
+      payment: {
+        ref: payment.ref,
+        amountCents: payment.amountCents,
+        status: payment.status,
+        payerName: payment.payerName ?? null,
+      },
+    },
+    201
+  );
+}
+
+async function payerQrImage(
+  request: Request,
+  env: WebEnv,
+  eventRef: string,
+  paymentRef: string
+): Promise<Response> {
+  const access = await payerAccess(request, env, eventRef);
+  if (access instanceof Response) return access;
+  const payment = await new D1Repository(env.paynow_db).getPaymentByRef(paymentRef);
+  if (!payment || payment.eventId !== access.event.id || payment.userId !== access.userId) {
+    return json({ error: 'not_found' }, 404);
+  }
+  const png = await bmpToPng(
+    await renderQrPng(payment.qrPayload, paymentImageLines(access.event, payment))
+  );
+  return new Response(png, {
+    headers: { 'Content-Type': 'image/png', 'Cache-Control': 'no-store' },
+  });
 }
 
 /** Session → event exists → live chat-admin check. Returns the user and event, or the refusal. */
@@ -128,6 +234,11 @@ async function handlePost(
   fetchFn: typeof fetch
 ): Promise<Response> {
   const path = url.pathname;
+  const payerCreate = path.match(/^\/api\/pay\/([^/]+)\/payments$/);
+  if (payerCreate && REF.test(payerCreate[1]!)) {
+    if (!sameOriginJson(request, url)) return json({ error: 'forbidden' }, 403);
+    return createPayerPayment(request, env, payerCreate[1]!);
+  }
   const newPayment = path.match(/^\/api\/events\/([^/]+)\/payments$/);
   const newPayback = path.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/paybacks$/);
   const settle = path.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/(received|void)$/);

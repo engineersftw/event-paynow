@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { handleWeb, type WebEnv } from '../../src/web/handler';
+import { renderPayerPage } from '../../src/web/page';
 
 describe('event page shell', () => {
   it('serves valid inline script with the payment request and payback controls, without forms or innerHTML', async () => {
@@ -57,11 +58,25 @@ describe('event page shell', () => {
     expect(html).toContain('id="q"');
     expect(html).toContain("['voided', 'Voided']");
     expect(html).toContain("params.set('cursor', cursor)");
+    expect(html).toContain('href="/pay/EVT1"');
 
     const src = html.match(/const MONTHS = [^;]*;\nconst fmtDate = [^\n]*/)![0];
     const fmtDate = new Function(`${src}; return fmtDate;`)() as (t: unknown) => string;
     expect(fmtDate(new Date(2026, 10, 8, 12).getTime())).toBe('08-Nov-2026');
     expect(fmtDate(new Date(2027, 0, 31, 23, 59).getTime())).toBe('31-Jan-2027');
     expect(fmtDate(null)).toBe('');
+  });
+
+  it('renders the standalone payer page with conditional amount editing and inline QR flow', () => {
+    const html = renderPayerPage('EVT1', 'my_bot');
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+    for (const code of scripts) expect(() => new Function(code)).not.toThrow();
+    expect(html).toContain('/api/pay/EVT1');
+    expect(html).toContain('/api/pay/EVT1/payments');
+    expect(html).toContain('data-auth-url="/api/login?ref=EVT1&amp;next=pay"');
+    expect(html).toContain("$('amount').readOnly=defaultCents!==null");
+    expect(html).toContain("$('amount').required=defaultCents===null");
+    expect(html).toContain("alt:'Payment QR'");
+    expect(html).not.toContain('sendPhoto');
   });
 });

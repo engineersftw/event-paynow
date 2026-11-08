@@ -12,7 +12,7 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - **Chat admins act on any payment**: administrators of an event's chat can view, receive, void, pay back and mark paybacks sent/cancelled on payments they did not create (checked live with `getChatMember`), and `/payments` shows them every payment of the event; ordinary members keep owner-only access
 - **Audit**: who received/voided a payment and who created/sent/cancelled a payback is recorded (Telegram user ids) for bot and web actions
 - **Names in messages**: Captions and status lines show `Payer: <name>` / `To: <name>`, never a PayNow number
-- **Web admin**: `/web_admin` links to a Cloudflare Pages page listing every payment in an event; chat admins (Telegram sign-in) can also create payment requests (QR on the page and posted to the event's chat), mark pending payments received or void, and create paybacks with a QR image and mark them sent or cancel them
+- **Web pages**: `/web_admin` links chat admins to an event management page; each event also has a shareable `/pay/<event-ref>` page where any Telegram-signed-in user can create their own payment request and see its QR inline without a Telegram message
 - **Inline buttons**: Confirm/cancel via buttons, action buttons on QR photos, paginated lists; double taps and racing taps resolve to one winner
 - **Conversation state**: Per-chat Durable Objects with 10-minute idle expiry
 - **Automatic deploys**: GitHub Actions deploys the Worker and Pages from `main` when their files change
@@ -77,7 +77,8 @@ Message [@BotFather](https://t.me/BotFather) in Telegram:
    start - Create a payment QR
    payments - List events and payments
    payback - Pay back a received payment
-   web_admin - Open the web page for an event
+    web_admin - Open the web page for an event
+    web_payment - Open the payment page for an event
    end_event - Close an event
    cancel - Cancel current conversation
    help - Show help
@@ -107,7 +108,7 @@ Open Telegram, message your bot:
 - `/help` → should show the command list
 - `/init` → create your first event
 
-## Web admin (event page)
+## Web pages (admin and payer event pages)
 
 `/web_admin` replies with a link per event to a Cloudflare Pages page (`web/`) that lists every payment
 of the event. Admins can create a payment request (payer mobile/UEN, optional name, amount; the QR is shown as a PNG
@@ -116,6 +117,12 @@ received payment back (amount, optional other recipient, QR as a PNG) and mark a
 Visitors sign in with the
 Telegram Login Widget; only the chat's administrators/owner (or the user in a private chat) can use it, and
 every change is same-origin and re-checks admin status.
+
+The admin page header includes a shareable payer link at `/pay/<event-ref>`. Anyone with that link can sign in with
+Telegram and create a payment request for themselves without being an event-chat member or administrator. If the
+event has a default amount, the payer page displays it as read-only and uses it as the fixed payable amount. If no
+default is configured, the payer enters a required amount. The generated SGQR QR is displayed inline on the page and
+is never sent to Telegram by this flow.
 
 ```bash
 # 1. Create the Pages project, then set its secrets (D1 binding and BOT_USERNAME come from web/wrangler.toml)
@@ -230,7 +237,8 @@ openspec/
 | `/init` | Create a new event (name, PayNow payee, optional default amount that `/start` and the web page suggest) |
 | `/start` | Create a payment QR for an event (payer, optional name, amount, confirm) |
 | `/payments` | List events and payments with inline buttons |
-| `/web_admin` | Links to the web page for each event (chat admins) |
+| `/web_admin` | Links to the admin and payment pages for each event (chat admins) |
+| `/web_payment` | Links to the standalone payment page for each event |
 | `/end_event` | Close an event (no new payments) |
 | `/payback <ref>` | Pay back a received payment |
 | `/cancel` | Cancel current conversation |
