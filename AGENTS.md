@@ -69,6 +69,7 @@ This project uses OpenSpec for change management. All changes are archived:
 8. `add-qr-image-payment-details` (6 tasks) — archived 2026-11-08
 9. `add-web-admin-event-view` (7 tasks) — archived 2026-11-08
 10. `payments-net-of-paybacks` (8 tasks) — archived 2026-11-08
+11. `admin-payment-actions` (16 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
@@ -83,7 +84,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (7 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (8 capabilities)
 
 ## Key Design Decisions
 

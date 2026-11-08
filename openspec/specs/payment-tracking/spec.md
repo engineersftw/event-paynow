@@ -17,7 +17,7 @@ The system SHALL create a payment record for every generated QR, storing the own
 
 ### Requirement: User can list and inspect payments
 
-The system SHALL let a user view their payment records, including pending ones with description, amount, and age, and SHALL isolate each user's records from other users.
+The system SHALL let a user view their payment records, including pending ones with description, amount, and age, and SHALL isolate each user's records from other users, except that a chat administrator also sees every payment of their chat's events when drilling into an event.
 
 #### Scenario: Listing payments
 
