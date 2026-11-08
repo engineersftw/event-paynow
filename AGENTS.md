@@ -79,6 +79,7 @@ This project uses OpenSpec for change management. All changes are archived:
 18. `ignore-irrelevant-messages` (9 tasks) — archived 2026-11-08
 19. `event-default-amount` (13 tasks) — archived 2026-11-08
 20. `add-edit-event-command` (6 tasks) — archived 2026-11-08
+21. `payer-page-history-and-dm` (8 tasks) — archived 2026-11-08
 
 **Workflow commands:**
 
