@@ -1,4 +1,6 @@
-# event-paynow
+<p align="center"><img src="web/public/logo.png" alt="event-paynow bot logo" width="96" height="96"></p>
+
+# Event-PayNow Bot
 
 A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for collecting payments, tracks receipts, and supports paybacks.
 
@@ -17,6 +19,26 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - **Conversation state**: Per-chat Durable Objects with 10-minute idle expiry
 - **Automatic deploys**: GitHub Actions deploys the Worker and Pages from `main` when their files change
 - **Two-pool testing**: Node pool for runtime-agnostic core, Workers pool for D1/DO integration
+
+## Using the bot
+
+Add the bot to your event's Telegram group (or chat with it directly) and use these steps. Type `/help` in Telegram for the command list.
+
+**Organiser (chat admin)**
+
+1. `/init`: give the event a name, the PayNow payee (mobile number or UEN) and an optional default amount, then Confirm.
+2. Share the event's payment page: `/web_payment` gives the link to `/pay/<event-ref>`. Anyone can open it, enter their details and get their own PayNow QR (no sign-in needed).
+3. Or issue a QR yourself with `/start`: pick the event, enter the payer's PayNow number and optional name, the amount, then Confirm. The QR is posted in the chat.
+4. Tap **✓ Received** on the QR message once the money arrives (or **✖ Void** to cancel a pending request). `/payments` lists everything and shows totals.
+5. `/payback` (or the Payback button on a received payment) makes a QR to refund the payer; tap **✓ Sent** when done.
+6. `/web_admin` opens the event's web page: search payments, mark received/void, pay back, and **Check-In** attendees by scanning their QR or tapping Check-In on their row.
+7. `/edit_event` changes the name, payee or default amount; `/end_event` closes the event.
+
+**Payer / attendee**
+
+- Pay by scanning the QR in your banking app (PayNow).
+- **Keep the QR**: it is your proof of payment and is scanned at the door for check-in.
+- Commands you start (`/start`, `/payback`) only continue for you; `/cancel` abandons the current step.
 
 ## Stack
 
@@ -77,8 +99,8 @@ Message [@BotFather](https://t.me/BotFather) in Telegram:
    start - Create a payment QR
    payments - List events and payments
    payback - Pay back a received payment
-    web_admin - Open the web page for an event
-    web_payment - Open the payment page for an event
+   web_admin - Open the web page for an event
+   web_payment - Open the payment page for an event
    edit_event - Change an event's name, payee or default amount
    end_event - Close an event
    cancel - Cancel current conversation
