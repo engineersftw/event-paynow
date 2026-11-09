@@ -1,0 +1,85 @@
+{
+  "title": "Event PayNow Bot explainer",
+  "scenes": [
+    {
+      "id": "title",
+      "chapter": "Intro",
+      "start": 0,
+      "end": 5,
+      "commands": [],
+      "text": "Event PayNow Bot: collect PayNow payments for your event, right from Telegram."
+    },
+    {
+      "id": "org-init",
+      "chapter": "Event Organizer",
+      "start": 5,
+      "end": 13,
+      "commands": ["/init"],
+      "text": "Event organizer: add the bot to your group and send /init to create an event."
+    },
+    {
+      "id": "org-share",
+      "chapter": "Event Organizer",
+      "start": 13,
+      "end": 22,
+      "commands": ["/web_payment", "/start"],
+      "text": "Share the payment page with /web_payment, or issue a QR yourself with /start."
+    },
+    {
+      "id": "org-received",
+      "chapter": "Event Organizer",
+      "start": 22,
+      "end": 29,
+      "commands": [],
+      "text": "Tap Received when the money arrives, or Void to cancel a request."
+    },
+    {
+      "id": "org-checkin",
+      "chapter": "Event Organizer",
+      "start": 29,
+      "end": 38,
+      "commands": ["/web_admin"],
+      "text": "Open /web_admin to check attendees in: scan their QR, or tap Check-In on their row."
+    },
+    {
+      "id": "org-payback",
+      "chapter": "Event Organizer",
+      "start": 38,
+      "end": 45,
+      "commands": ["/payback"],
+      "text": "Need to refund someone? /payback makes a QR to pay the money back."
+    },
+    {
+      "id": "att-qr",
+      "chapter": "Attendee",
+      "start": 45,
+      "end": 52,
+      "commands": [],
+      "text": "Attendee: you get a link to the payment page, or a PayNow QR in the chat."
+    },
+    {
+      "id": "att-pay",
+      "chapter": "Attendee",
+      "start": 52,
+      "end": 60,
+      "commands": [],
+      "text": "Scan the QR with your banking app and pay."
+    },
+    {
+      "id": "att-keep",
+      "chapter": "Attendee",
+      "start": 60,
+      "end": 68,
+      "commands": [],
+      "text": "Keep the QR: it is your proof of payment and your ticket at the door."
+    },
+    {
+      "id": "outro",
+      "chapter": "Intro",
+      "start": 68,
+      "end": 76,
+      "commands": [],
+      "text": "Add the bot on Telegram: t.me/event_paynow_bot"
+    }
+  ]
+}

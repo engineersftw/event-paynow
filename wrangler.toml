@@ -24,3 +24,17 @@ SIMPLE_BOT_USERNAME = "Simple_PayNow_Bot"
 
 # Set via `wrangler secret put TELEGRAM_BOT_TOKEN`
 # Simple_PayNow_Bot: `wrangler secret put SIMPLE_BOT_TOKEN` and `SIMPLE_WEBHOOK_SECRET`
+
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = true
+persist = true
+
+[observability.traces]
+enabled = false
+head_sampling_rate = 1
+persist = true
+
+[observability.issue_detection]
+enabled = false

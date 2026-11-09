@@ -15,7 +15,7 @@ import { D1EventRepository, D1Repository } from './db/drizzle-repository';
 import type { Env } from './env';
 import type { ConversationDO, ConversationState } from './worker/conversation-do';
 
-const HELP_TEXT =
+export const HELP_TEXT =
   '🤖 *event-paynow bot*\n\n' +
   '/start — create a PayNow QR payment request\n' +
   '/payments — list your payments (with inline buttons)\n' +

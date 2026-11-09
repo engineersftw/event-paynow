@@ -146,6 +146,10 @@ curl -X POST "https://api.telegram.org/bot<SIMPLE_BOT_TOKEN>/setWebhook" \
   -d '{"url":"https://<worker>.<subdomain>.workers.dev/webhook/simple","secret_token":"<SIMPLE_WEBHOOK_SECRET>"}'
 ```
 
+## Explainer video
+
+`npm run video` renders a ~76 s, captioned, silent explainer video (Event Organizer chapter, then Attendee chapter) to `out/explainer/` (gitignored, so it is never committed): `explainer.mp4` (1920x1080 H.264), `poster.png`, `captions.srt` (upload it to YouTube for real captions) and `transcript.txt` (for the video description). It needs Playwright's Chromium and ffmpeg and takes about 80 seconds. The scenes are `scripts/explainer/scenes.html` and the caption text is `scripts/explainer/captions.json`; edit them and re-run when the bot changes. A test checks that every command named in the captions is in the bot's `/help` text. All names and the sample QR are fictional.
+
 ## Web pages (admin and payer event pages)
 
 **Check-in at the door.** The event page has a **Check-In** button: it opens the phone camera, reads the attendee's payment
@@ -288,7 +292,7 @@ docs/
 └── testing.md             # Testing strategy
 
 openspec/
-├── specs/                 # Main specs (12 capabilities)
+├── specs/                 # Main specs (13 capabilities)
 └── changes/archive/       # Archived changes
 ```
 
