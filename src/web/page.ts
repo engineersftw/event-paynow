@@ -27,6 +27,13 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTheme
 paintTheme();
 `;
 
+/** Attribution footer shared by every web page; the two links are plain anchors (no requests on load). */
+const LINKEDIN_URL = 'https://linkedin.com/in/miccheng';
+const REPO_URL = 'https://github.com/engineersftw/event-paynow';
+const FOOTER_HTML = `<footer class="site-footer">Built by <a href="${LINKEDIN_URL}" target="_blank" rel="noopener noreferrer">Michael Cheng</a> &amp; Claude Code AI. <a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">Open Source</a> with ❤️.</footer>`;
+const FOOTER_CSS =
+  '.site-footer{margin:32px 0 8px;text-align:center;font-size:13px;color:var(--muted-fg)}.site-footer a{color:inherit;text-decoration:underline}';
+
 /** Static shell; data is fetched from the API and written with textContent (names are user input). */
 export function renderPage(ref: string, botUsername: string): string {
   return `<!doctype html>
@@ -97,6 +104,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .dlg h2{margin:0;font-size:1.1rem}
 .foot{display:flex;justify-content:flex-end;gap:8px}
 img{max-width:100%;height:auto}
+${FOOTER_CSS}
 </style></head><body>
 ${TOPBAR_HTML}
 <div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div></div>
@@ -146,6 +154,7 @@ ${TOPBAR_HTML}
 <div class="inline"><input id="sc-ref" class="input" placeholder="Or type the payment reference" autocomplete="off" maxlength="40"><button id="sc-go" class="btn">Find</button></div>
 <div class="foot"><button id="sc-next" class="btn">Scan next</button><button id="sc-close" class="btn primary">Close</button></div>
 </div></dialog>
+${FOOTER_HTML}
 <script>
 const $ = (id) => document.getElementById(id);
 const sgd = (c) => 'SGD ' + (c / 100).toFixed(2);
@@ -501,6 +510,7 @@ ul,ol{padding-left:1.2rem;margin:0}li{margin:6px 0}code{background:var(--muted);
 .vframe{display:block;width:100%;aspect-ratio:16/9;border:0;border-radius:12px}
 .ylink{display:block;text-align:center;margin-top:8px;font-size:14px;color:var(--muted-fg)}
 @media(max-width:360px){.vcard{gap:6px}.vcard img{width:40px;height:40px}.vtitle{font-size:14px}}
+${FOOTER_CSS}
 </style></head><body>
 <div class="topbar"><button id="theme" class="icon" aria-label="Switch between light and dark theme"></button></div>
 <div class="brand"><img src="/logo.png" alt="" width="56" height="56"><h1>Event PayNow Bot</h1></div>
@@ -523,6 +533,7 @@ ${video}
 <li>Send <code>/web_admin</code> to manage payments and check people in.</li>
 </ol>
 <div class="end">${cta}</div>
+${FOOTER_HTML}
 <script>
 const $=id=>document.getElementById(id);
 ${THEME_JS}
@@ -544,6 +555,7 @@ ${THEME_EARLY}
 :root[data-theme="dark"]{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--danger:#f87171}
 *{box-sizing:border-box}body{max-width:32rem;margin:0 auto;padding:20px;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
 h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}.brand img{border-radius:8px}.card{border:1px solid var(--border);border-radius:8px;padding:16px;display:grid;gap:14px}.muted{color:var(--muted-fg)}.alert{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:12px}.err{color:var(--danger);margin:0}.fields{display:grid;gap:12px}label{display:grid;gap:5px;font-weight:600}.input{font:inherit;min-height:42px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}.input:read-only{background:var(--muted)}.btn{font:inherit;font-weight:600;min-height:42px;border:1px solid var(--border);border-radius:6px;padding:8px 16px;background:var(--primary);color:var(--primary-fg);cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}img{max-width:100%;height:auto}.qr{display:grid;justify-items:center;gap:8px}.qr img{width:280px}.hidden{display:none!important}${ME_CSS}${TOPBAR_CSS}.amount{font-size:1.25rem;font-weight:600}h2{font-size:1rem;margin:0 0 8px}.hist{display:grid;gap:8px}.row{border:1px solid var(--border);border-radius:6px;padding:10px;display:grid;gap:8px}.row button{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left;display:flex;gap:10px;align-items:center;flex-wrap:wrap;cursor:pointer}.row button:disabled{cursor:default}.pill{border-radius:999px;padding:1px 8px;font-size:.8rem;background:var(--muted);border:1px solid var(--border)}
+${FOOTER_CSS}
 </style></head><body>
 ${TOPBAR_HTML}
 <div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Pay event</h1></div>
@@ -562,6 +574,7 @@ ${TOPBAR_HTML}
 <script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="${bot}" data-size="large" data-auth-url="/api/login?ref=${ref}&amp;next=pay" data-request-access="write"></script></div>
 <div id="history" class="hidden"><h2>Your previous requests</h2><div id="hist-list" class="hist"></div></div>
 </div>
+${FOOTER_HTML}
 <script>
 const $=id=>document.getElementById(id), sgd=c=>'SGD '+(c/100).toFixed(2);
 const say=t=>{$('msg').textContent=t;$('msg').classList.toggle('hidden',!t)};

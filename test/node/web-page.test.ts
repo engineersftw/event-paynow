@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { handleWeb, type WebEnv } from '../../src/web/handler';
-import { renderPage, renderPayerPage, videoCard } from '../../src/web/page';
+import { renderLandingPage, renderPage, renderPayerPage, videoCard } from '../../src/web/page';
 
 describe('event page shell', () => {
   it('serves valid inline script with the payment request and payback controls, without forms or innerHTML', async () => {
@@ -226,4 +226,31 @@ describe('landing page', () => {
       expect(videoCard('ezOo1OIhl-Y')).toContain('data-video="ezOo1OIhl-Y"');
     });
   });
+});
+
+describe('attribution footer', () => {
+  const pages: Array<[string, string, string]> = [
+    ['landing page', renderLandingPage('my_bot'), 'Get started'],
+    ['event admin page', renderPage('EVT1', 'my_bot'), 'id="data"'],
+    ['payer page', renderPayerPage('EVT1', 'my_bot'), 'id="app"'],
+  ];
+
+  for (const [name, html, content] of pages) {
+    it(`appears on the ${name}, after the content, with safe links and nothing to load`, () => {
+      const footer = html.match(/<footer class="site-footer">([\s\S]*?)<\/footer>/)?.[0];
+      expect(footer).toBeDefined();
+      const text = footer!.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&');
+      expect(text).toBe('Built by Michael Cheng & Claude Code AI. Open Source with ❤️.');
+      expect(footer).toContain(
+        '<a href="https://linkedin.com/in/miccheng" target="_blank" rel="noopener noreferrer">Michael Cheng</a>'
+      );
+      expect(footer).toContain(
+        '<a href="https://github.com/engineersftw/event-paynow" target="_blank" rel="noopener noreferrer">Open Source</a>'
+      );
+      expect(footer).not.toMatch(/src=|<script|<img|<link/i);
+      expect(html.indexOf('<footer')).toBeGreaterThan(html.indexOf(content));
+      expect(html.match(/<footer/g)).toHaveLength(1);
+      expect(html).toContain('.site-footer{'); // styled on every page
+    });
+  }
 });
