@@ -131,7 +131,7 @@ every change is same-origin and re-checks admin status. Both web pages show the 
 a Sign out button (it clears the cookies in that browser; sessions are stateless, so a copied cookie stays valid until
 it expires after 12 hours).
 
-The admin page header includes a shareable payer link at `/pay/<event-ref>`. Anyone with that link can create a
+The admin page has a Pay button that opens the shareable payer link at `/pay/<event-ref>`. Anyone with that link can create a
 payment request for themselves with no sign-in, without being an event-chat member or administrator (anonymous requests
 are stored with owner `0`, shown to admins like any other, and capped at 30 per event per 10 minutes). Signing in with
 Telegram is optional. If the
