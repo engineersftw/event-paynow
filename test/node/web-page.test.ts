@@ -89,6 +89,27 @@ describe('event page shell', () => {
     }
   });
 
+  it('payment rows have a Check-In button that shares one check-in call with the scan dialog', () => {
+    const html = renderPage('EVT1', 'my_bot');
+    // Offered only for rows that are not voided and not yet checked in; not duplicated inside the dialog
+    expect(html).toContain("if (withCheckIn && p.status !== 'voided' && !p.checkedInAt)");
+    expect(html).toContain("el('button', 'Check-In', 'btn primary')");
+    expect(html).toContain('paymentCard(p, false)');
+    expect(html).toContain('rows.map((p) => paymentCard(p))'); // map must not pass its index as withCheckIn
+    // One request helper for both callers, and the row always reloads the list afterwards
+    expect(html).toContain('async function checkInRequest(paymentRef)');
+    expect(html.split('checkInRequest(').length - 1).toBe(3); // definition + dialog + row
+    expect(html).toContain('async function rowCheckIn(p, button)');
+    // Error text is set after the reload, which clears the message line (also for the existing act())
+    expect(html.split('if (problem) say(problem)').length - 1).toBe(1);
+    expect(html).toContain('if (problem) { say(problem);');
+    expect(html).toContain(' is already checked in.');
+    expect(html).toContain(' is voided: it cannot be checked in.');
+    for (const code of [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!)) {
+      expect(() => new Function(code)).not.toThrow();
+    }
+  });
+
   it('both pages share the top bar: signed-in name, Sign out and the light/dark toggle', () => {
     for (const html of [renderPage('EVT1', 'my_bot'), renderPayerPage('EVT1', 'my_bot')]) {
       expect(html).toContain('<div class="topbar">');

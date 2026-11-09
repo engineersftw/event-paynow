@@ -169,8 +169,9 @@ async function act(path, body, button) {
   if (button) button.disabled = true;
   say('');
   const res = await post(path, body);
-  if (!res.ok) say(failure(await res.json().catch(() => ({}))));
+  const problem = res.ok ? '' : failure(await res.json().catch(() => ({})));
   await load();
+  if (problem) say(problem); // after the reload, which clears the message line
 }
 function toggle(key, label, count) {
   const b = el('button', undefined, 'btn');
@@ -212,7 +213,7 @@ function paybackRow(b) {
   }
   return row;
 }
-function paymentCard(p) {
+function paymentCard(p, withCheckIn = true) {
   const card = el('div', undefined, 'card' + (p.status === 'voided' ? ' voided' : ''));
   const row = el('div', undefined, 'row');
   const left = el('div');
@@ -225,6 +226,11 @@ function paymentCard(p) {
   row.append(left, end);
   card.append(row);
   const toggles = el('div', undefined, 'toggles');
+  if (withCheckIn && p.status !== 'voided' && !p.checkedInAt) {
+    const ci = el('button', 'Check-In', 'btn primary');
+    ci.onclick = () => rowCheckIn(p, ci);
+    toggles.append(ci);
+  }
   if (p.status === 'pending') toggles.append(toggle('p:' + p.ref, 'Show QR and actions'));
   const canPayback = p.status === 'received' && p.remainingCents > 0;
   if (p.paybacks.length > 0 || canPayback) toggles.append(toggle('b:' + p.ref, p.paybacks.length > 0 ? 'Paybacks' : 'Pay back', p.paybacks.length));
@@ -269,7 +275,7 @@ async function show(res, mode) {
     rows = rows.concat(d.payments.filter((p) => !seen.has(p.ref)));
   } else rows = d.payments;
   nextCursor = d.nextCursor;
-  $('rows').replaceChildren(...rows.map(paymentCard));
+  $('rows').replaceChildren(...rows.map((p) => paymentCard(p)));
   $('more').hidden = !nextCursor;
   say(rows.length === 0 ? (statusFilter || query ? 'No payments match.' : 'No payments yet.') : '');
   $('data').hidden = false;
@@ -392,7 +398,7 @@ function renderScan() {
   const banner = p.checkedInAt
     ? el('div', 'Checked in ' + fmtDate(p.checkedInAt) + ' ' + fmtTime(p.checkedInAt), 'banner ok')
     : p.status === 'voided' ? el('div', 'Voided: cannot check in', 'banner no') : el('div', 'Not checked in', 'banner');
-  box.replaceChildren(banner, paymentCard(p));
+  box.replaceChildren(banner, paymentCard(p, false));
   if (!p.checkedInAt && p.status !== 'voided') {
     const go = el('button', 'Check in', 'btn primary big');
     go.onclick = () => checkIn(go);
@@ -400,16 +406,31 @@ function renderScan() {
   }
   box.hidden = false;
 }
+// One check-in call for the scan dialog and the rows: { ok, payment, error, checkedInAt }
+async function checkInRequest(paymentRef) {
+  const res = await post('/api/events/${ref}/payments/' + encodeURIComponent(paymentRef) + '/check-in', {});
+  const out = await res.json().catch(() => ({}));
+  return { ok: res.ok, payment: out.payment, error: out.error, checkedInAt: out.checkedInAt };
+}
 async function checkIn(button) {
   button.disabled = true;
-  const res = await post('/api/events/${ref}/payments/' + encodeURIComponent(scanned.ref) + '/check-in', {});
-  const out = await res.json().catch(() => ({}));
-  if (res.ok) scanned = out.payment;
-  else if (out.error === 'already_checked_in') await refreshScan();
-  else if (out.error === 'voided') { scanSay('This payment is voided: it cannot be checked in.'); await refreshScan(); }
-  else scanSay(failure(out));
+  const r = await checkInRequest(scanned.ref);
+  if (r.ok) scanned = r.payment;
+  else if (r.error === 'already_checked_in') await refreshScan();
+  else if (r.error === 'voided') { scanSay('This payment is voided: it cannot be checked in.'); await refreshScan(); }
+  else scanSay(failure(r));
   if (scanned) renderScan();
   await load();
+}
+// Check-In on a list row: one tap; whatever the outcome the list reloads to the payment's real state
+async function rowCheckIn(p, button) {
+  button.disabled = true;
+  say('');
+  const r = await checkInRequest(p.ref);
+  const who = p.payerName || p.ref;
+  const problem = r.ok ? '' : r.error === 'already_checked_in' ? who + ' is already checked in.' : r.error === 'voided' ? who + ' is voided: it cannot be checked in.' : failure(r);
+  await load();
+  if (problem) { say(problem); $('msg').scrollIntoView({ block: 'nearest' }); } // after the reload, which clears the message line
 }
 $('scan').onclick = () => { $('scan-dlg').showModal(); startScan(); };
 $('sc-next').onclick = startScan;
