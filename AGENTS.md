@@ -82,6 +82,7 @@ This project uses OpenSpec for change management. All changes are archived:
 21. `payer-page-history-and-dm` (8 tasks) — archived 2026-11-08
 22. `optional-payer-sign-in` (7 tasks) — archived 2026-11-09
 23. `web-signed-in-user` (7 tasks) — archived 2026-11-09
+24. `attendee-check-in` (14 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
