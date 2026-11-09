@@ -23,7 +23,7 @@ import {
  * Verifies per task text:
  * - captured photo bytes decode back to the stored payload (jsQR round-trip of
  *   the isolate-rendered QR)
- * - caption = `description / SGD amount / ref / "Forward this message to share"`
+ * - caption = `description / SGD amount / ref / <keep-the-QR reminder> / "Forward this message to share"`
  * - the payment row is persisted (status pending, payee snapshot, base32 ref)
  * Plus the 5.1 guard, 5.2 mid-flow /cancel, and the 5.4 payee-snapshot
  * immutability check on the same live path.
@@ -146,7 +146,8 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(captionParts[2]).toMatch(/^[A-Z2-7]{10}$/);
     // Payer name (never the number) sits after the ref; the hint follows
     expect(captionParts[3]).toBe('Payer: Alice');
-    expect(captionParts[4]).toBe('Forward this message to share');
+    expect(captionParts[4]).toBe('Keep this QR for event check-in and payment verification');
+    expect(captionParts[5]).toBe('Forward this message to share');
     const ref = captionParts[2]!;
 
     // --- QR bytes decode back via jsQR (2.4 path) --------------------------
@@ -235,7 +236,7 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(payment!.payerName).toBeNull();
     // No name ⇒ caption has no payer segment (identical to the pre-name format)
     expect(stub.sentPhotos[0]!.caption).toBe(
-      `Dinner split / SGD 4.00 / ${ref} / Forward this message to share`
+      `Dinner split / SGD 4.00 / ${ref} / Keep this QR for event check-in and payment verification / Forward this message to share`
     );
   });
 

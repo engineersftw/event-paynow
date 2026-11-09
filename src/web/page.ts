@@ -1,3 +1,5 @@
+import { KEEP_QR_REMINDER } from '../payments/payment-request';
+
 /** Signed-in user block shared by both pages: name from /api/me and a Sign out that reloads. */
 const ME_CSS =
   '.me{display:flex;align-items:center;gap:8px;min-width:0}.me[hidden]{display:none!important}.me-name{max-width:12em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted-fg)}';
@@ -38,6 +40,12 @@ h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
 .badge.pending{background:var(--pending-bg);color:var(--pending-fg)}
 .badge.received,.badge.sent{background:var(--received-bg);color:var(--received-fg)}
 .badge.voided,.badge.cancelled{background:var(--voided-bg);color:var(--voided-fg)}
+.badge.checked{background:transparent;border:1px solid var(--received-fg);color:var(--received-fg)}
+#sc-video{width:100%;max-height:50vh;border-radius:calc(var(--radius) - 2px);background:#000}
+.banner{border-radius:calc(var(--radius) - 2px);padding:10px 12px;font-weight:600;background:var(--muted)}
+.banner.ok{background:var(--received-bg);color:var(--received-fg)}
+.banner.no{background:var(--voided-bg);color:var(--voided-fg)}
+.big{min-height:48px;width:100%}
 .toggles{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .panel{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:grid;gap:8px}
 .btn{font:inherit;font-weight:600;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);background:var(--bg);color:var(--fg);border-radius:calc(var(--radius) - 2px);padding:8px 16px;cursor:pointer}
@@ -69,7 +77,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 img{max-width:100%;height:auto}
 </style></head><body>
 ${ME_HTML.replace('class="me"', 'class="me bar"')}
-<div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div><div class="inline"><a id="payer-link" class="btn" href="/pay/${ref}">Pay</a><button id="theme" class="btn" aria-label="Switch between light and dark theme"></button><button id="new" class="btn primary" hidden>New request</button></div></div>
+<div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div><div class="inline"><button id="scan" class="btn" hidden>Scan</button><a id="payer-link" class="btn" href="/pay/${ref}">Pay</a><button id="theme" class="btn" aria-label="Switch between light and dark theme"></button><button id="new" class="btn primary" hidden>New request</button></div></div>
 <p id="msg" class="alert" hidden></p>
 <div id="login" hidden>
 <p>Sign in with Telegram to view this event.</p>
@@ -102,6 +110,14 @@ ${ME_HTML.replace('class="me"', 'class="me bar"')}
 <div id="dlg-qr"></div>
 <div class="foot"><button id="np-again" class="btn">Create another</button><button id="np-done" class="btn primary">Done</button></div>
 </div>
+</div></dialog>
+<dialog id="scan-dlg" aria-labelledby="scan-title"><div class="dlg">
+<h2 id="scan-title">Scan attendee QR</h2>
+<div id="sc-cam" class="fields"><video id="sc-video" playsinline muted></video></div>
+<p id="sc-status" class="muted"></p>
+<div id="sc-result" class="fields" hidden></div>
+<div class="inline"><input id="sc-ref" class="input" placeholder="Or type the payment reference" autocomplete="off" maxlength="40"><button id="sc-go" class="btn">Find</button></div>
+<div class="foot"><button id="sc-next" class="btn">Scan next</button><button id="sc-close" class="btn primary">Close</button></div>
 </div></dialog>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -183,6 +199,7 @@ function paymentCard(p) {
   end.append(el('div', sgd(p.amountCents), 'amt name'));
   if (p.paidBackCents > 0) end.append(el('div', 'Net ' + sgd(p.netCents), 'muted sm'));
   end.append(el('span', p.status, 'badge ' + p.status));
+  if (p.checkedInAt) end.append(el('span', 'Checked in ' + fmtDate(p.checkedInAt), 'badge checked'));
   row.append(left, end);
   card.append(row);
   const toggles = el('div', undefined, 'toggles');
@@ -220,6 +237,7 @@ async function show(res, mode) {
   document.title = 'Event: ' + d.event.name;
   $('title').textContent = 'Event: ' + d.event.name;
   $('new').hidden = d.event.status !== 'open';
+  $('scan').hidden = false;
   defaultAmount = d.event.defaultAmountCents ? (d.event.defaultAmountCents / 100).toFixed(2) : '';
   $('collected').textContent = sgd(d.totals.collectedCents);
   $('paidback').textContent = sgd(d.totals.paidBackCents);
@@ -233,6 +251,7 @@ async function show(res, mode) {
   $('more').hidden = !nextCursor;
   say(rows.length === 0 ? (statusFilter || query ? 'No payments match.' : 'No payments yet.') : '');
   $('data').hidden = false;
+  if (scanned && $('scan-dlg').open) refreshScan();
   return true;
 }
 // Refresh what is already loaded (at least one page, up to the server cap), keeping the filter and search
@@ -277,6 +296,105 @@ async function createRequest() {
   $('dlg-qr').replaceChildren(qrImage('/api/events/${ref}/payments/' + encodeURIComponent(out.payment.ref) + '/qr', 'Payment QR'));
   await load();
 }
+// --- Scan an attendee's payment QR, show the payment, check in ---
+let scanned = null;
+let stream = null;
+let scanTimer = null;
+const scanSay = (t) => { $('sc-status').textContent = t; };
+function stopCamera() {
+  if (scanTimer) { clearInterval(scanTimer); scanTimer = null; }
+  if (stream) { stream.getTracks().forEach((t) => t.stop()); stream = null; }
+  $('sc-video').srcObject = null;
+}
+async function qrDecoder() {
+  if (window.BarcodeDetector) return null;
+  if (!window.jsQR) await new Promise((ok, fail) => { const s = document.createElement('script'); s.src = '/vendor/jsqr.js'; s.onload = ok; s.onerror = fail; document.head.append(s); });
+  return window.jsQR;
+}
+async function startScan() {
+  stopCamera();
+  scanned = null;
+  $('sc-result').hidden = true;
+  $('sc-cam').hidden = false;
+  scanSay('Starting the camera...');
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' }, audio: false });
+  } catch (e) { scanSay('Camera unavailable: allow camera access, or type the payment reference below.'); return; }
+  const video = $('sc-video');
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  let decode = null;
+  try { decode = await qrDecoder(); } catch (e) { stopCamera(); scanSay('Could not load the scanner: type the payment reference below.'); return; }
+  const detector = decode ? null : new BarcodeDetector({ formats: ['qr_code'] });
+  const canvas = document.createElement('canvas');
+  const g = canvas.getContext('2d', { willReadFrequently: true });
+  scanSay('Point the camera at the attendee payment QR.');
+  let busy = false;
+  scanTimer = setInterval(async () => {
+    if (busy || video.readyState < 2 || !video.videoWidth) return;
+    busy = true;
+    try {
+      let text = null;
+      if (detector) { const found = await detector.detect(video); text = found[0] && found[0].rawValue; }
+      else {
+        const k = Math.min(1, 640 / video.videoWidth);
+        canvas.width = Math.round(video.videoWidth * k); canvas.height = Math.round(video.videoHeight * k);
+        g.drawImage(video, 0, 0, canvas.width, canvas.height);
+        const img = g.getImageData(0, 0, canvas.width, canvas.height);
+        const found = decode(img.data, img.width, img.height);
+        text = found && found.data;
+      }
+      if (text) { stopCamera(); await resolveScan({ payload: text }); }
+    } catch (e) { /* keep scanning */ } finally { busy = false; }
+  }, 200);
+}
+async function resolveScan(body) {
+  const res = await post('/api/events/${ref}/scan', body);
+  if (res.status === 404) { scanned = null; $('sc-result').hidden = true; scanSay('That is not a payment QR of this event. Tap Scan next to try again.'); return; }
+  if (!res.ok) { scanSay('Something went wrong. Tap Scan next to try again.'); return; }
+  scanned = (await res.json()).payment;
+  renderScan();
+}
+async function refreshScan() {
+  if (!scanned) return;
+  const res = await post('/api/events/${ref}/scan', { ref: scanned.ref });
+  if (res.ok) { scanned = (await res.json()).payment; renderScan(); }
+}
+const fmtTime = (t) => new Date(t).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+function renderScan() {
+  const p = scanned;
+  const box = $('sc-result');
+  stopCamera();
+  $('sc-cam').hidden = true;
+  scanSay('');
+  const banner = p.checkedInAt
+    ? el('div', 'Checked in ' + fmtDate(p.checkedInAt) + ' ' + fmtTime(p.checkedInAt), 'banner ok')
+    : p.status === 'voided' ? el('div', 'Voided: cannot check in', 'banner no') : el('div', 'Not checked in', 'banner');
+  box.replaceChildren(banner, paymentCard(p));
+  if (!p.checkedInAt && p.status !== 'voided') {
+    const go = el('button', 'Check in', 'btn primary big');
+    go.onclick = () => checkIn(go);
+    box.append(go);
+  }
+  box.hidden = false;
+}
+async function checkIn(button) {
+  button.disabled = true;
+  const res = await post('/api/events/${ref}/payments/' + encodeURIComponent(scanned.ref) + '/check-in', {});
+  const out = await res.json().catch(() => ({}));
+  if (res.ok) scanned = out.payment;
+  else if (out.error === 'already_checked_in') await refreshScan();
+  else if (out.error === 'voided') { scanSay('This payment is voided: it cannot be checked in.'); await refreshScan(); }
+  else scanSay(failure(out));
+  if (scanned) renderScan();
+  await load();
+}
+$('scan').onclick = () => { $('scan-dlg').showModal(); startScan(); };
+$('sc-next').onclick = startScan;
+$('sc-close').onclick = () => $('scan-dlg').close();
+$('scan-dlg').addEventListener('close', () => { stopCamera(); scanned = null; });
+$('sc-go').onclick = () => { const v = $('sc-ref').value.trim(); if (v) { stopCamera(); resolveScan({ ref: v }); } };
+$('sc-ref').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sc-go').click(); });
 const root = document.documentElement;
 const isDark = () => (root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
 const paintTheme = () => { $('theme').textContent = isDark() ? '☀' : '☾'; };
@@ -318,7 +436,7 @@ ${ME_HTML}
 <div id="amount-fixed" class="hidden"><div class="muted">Amount (SGD)</div><div id="amount-text" class="amount"></div></div>
 <p id="err" class="err hidden"></p><button id="create" class="btn">Show payment QR</button>
 </div>
-<div id="result" class="hidden"><p id="note"></p><p id="dm" class="muted hidden">Open the bot in Telegram and press Start to receive a copy of this QR there.</p><div id="qr" class="qr"></div><button id="again" class="btn">Create another</button></div>
+<div id="result" class="hidden"><p id="note"></p><p id="dm" class="muted hidden">Open the bot in Telegram and press Start to receive a copy of this QR there.</p><div id="qr" class="qr"></div><p id="keep" class="muted">${KEEP_QR_REMINDER}.</p><button id="again" class="btn">Create another</button></div>
 <div id="signin" class="hidden"><p class="muted">Optional: sign in with Telegram to get a copy of your QR in Telegram and see your earlier requests.</p>
 <script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="${bot}" data-size="large" data-auth-url="/api/login?ref=${ref}&amp;next=pay" data-request-access="write"></script></div>
 <div id="history" class="hidden"><h2>Your previous requests</h2><div id="hist-list" class="hist"></div></div>
@@ -347,7 +465,7 @@ async function loadHistory(){
     const pill=document.createElement('span');pill.className='pill';pill.textContent=p.status;
     b.append(sgd(p.amountCents)+' ',pill,' '+fmtDate(p.createdAt)+' · '+p.ref);
     row.append(b);
-    if(p.status==='pending'){let img=null;b.onclick=()=>{if(img){img.remove();img=null;return}img=Object.assign(document.createElement('img'),{src:'/api/pay/${ref}/payments/'+encodeURIComponent(p.ref)+'/qr',alt:'Payment QR'});row.append(img)}}
+    if(p.status==='pending'){let box=null;b.onclick=()=>{if(box){box.remove();box=null;return}box=document.createElement('div');box.className='qr';const img=Object.assign(document.createElement('img'),{src:'/api/pay/${ref}/payments/'+encodeURIComponent(p.ref)+'/qr',alt:'Payment QR'});box.append(img,Object.assign(document.createElement('p'),{className:'muted',textContent:'${KEEP_QR_REMINDER}.'}));row.append(box)}}
     return row;
   }));
 }

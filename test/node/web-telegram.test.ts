@@ -35,7 +35,7 @@ describe('postPaymentQr', () => {
     expect(form.get('chat_id')).toBe('-100');
     expect(form.get('message_thread_id')).toBe('9');
     expect(form.get('caption')).toBe(
-      'Team Lunch / SGD 12.50 / ABC123DEFG / Payer: Alice / Forward this message to share'
+      'Team Lunch / SGD 12.50 / ABC123DEFG / Payer: Alice / Keep this QR for event check-in and payment verification / Forward this message to share'
     );
     expect(JSON.parse(form.get('reply_markup') as string).inline_keyboard[0]).toEqual([
       { text: '✓ Received', callback_data: 'mark_received:ABC123DEFG' },

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreatePaybackBoundedResult,
@@ -290,6 +290,23 @@ export class D1Repository implements Repository {
       .update(schema.payments)
       .set({ status: 'voided', ...(actorId !== undefined ? { voidedBy: actorId } : {}) })
       .where(and(eq(schema.payments.ref, ref), eq(schema.payments.status, 'pending')))
+      .returning()
+      .get();
+
+    return updated ? toPayment(updated) : null;
+  }
+
+  async checkInPayment(ref: string, actorId: number, timestamp: string): Promise<Payment | null> {
+    const updated = await this.db
+      .update(schema.payments)
+      .set({ checkedInAt: timestamp, checkedInBy: actorId })
+      .where(
+        and(
+          eq(schema.payments.ref, ref),
+          ne(schema.payments.status, 'voided'),
+          isNull(schema.payments.checkedInAt)
+        )
+      )
       .returning()
       .get();
 
@@ -718,6 +735,8 @@ function toPayment(row: typeof schema.payments.$inferSelect): Payment {
     receivedAt: row.receivedAt,
     receivedBy: row.receivedBy,
     voidedBy: row.voidedBy,
+    checkedInAt: row.checkedInAt,
+    checkedInBy: row.checkedInBy,
   };
 }
 

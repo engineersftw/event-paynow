@@ -59,7 +59,9 @@ const TEST_SCHEMA_STATEMENTS = [
     created_at TEXT NOT NULL,
     received_at TEXT,
     received_by INTEGER,
-    voided_by INTEGER
+    voided_by INTEGER,
+    checked_in_at TEXT,
+    checked_in_by INTEGER
   )`,
   `CREATE TABLE IF NOT EXISTS paybacks (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

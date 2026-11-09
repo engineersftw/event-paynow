@@ -6,6 +6,7 @@ import { detectProxyType } from '../db/proxy-validation';
 import type { Event, Payback, Payment, PaymentStatus } from '../db/repository';
 import { createPaymentRequest, paymentImageLines } from '../payments/payment-request';
 import { formatCents, parseAmount } from '../sgqr/amount';
+import { paymentReferenceFromPayload } from '../sgqr/paynow';
 import { bmpToPng } from '../sgqr/png';
 import { renderQrPng } from '../sgqr/qr-render';
 import { SESSION_MAX_AGE_SEC, signSession, verifySession, verifyTelegramLogin } from './auth';
@@ -343,7 +344,9 @@ async function handlePost(
   const newPayback = path.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/paybacks$/);
   const settle = path.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/(received|void)$/);
   const transition = path.match(/^\/api\/events\/([^/]+)\/paybacks\/([^/]+)\/(sent|cancel)$/);
-  const match = newPayment ?? newPayback ?? settle ?? transition;
+  const scan = path.match(/^\/api\/events\/([^/]+)\/scan$/);
+  const checkIn = path.match(/^\/api\/events\/([^/]+)\/payments\/([^/]+)\/check-in$/);
+  const match = newPayment ?? newPayback ?? settle ?? transition ?? scan ?? checkIn;
   if (!match || !REF.test(match[1]!) || (match[2] !== undefined && !REF.test(match[2]))) {
     return new Response('Not found', { status: 404 });
   }
@@ -352,10 +355,65 @@ async function handlePost(
   const access = await eventAccess(request, env, match[1]!, fetchFn);
   if (access instanceof Response) return access;
 
+  if (scan) return scanRoute(request, env, access);
+  if (checkIn) return checkInRoute(env, access, match[2]!);
   if (newPayment) return createPaymentRequestRoute(request, env, access, fetchFn);
   if (newPayback) return createPayback(request, env, access, match[2]!);
   if (settle) return settlePayment(env, access, match[2]!, match[3] as 'received' | 'void');
   return paybackTransition(env, access, match[2]!, match[3] === 'sent' ? 'sent' : 'cancelled');
+}
+
+/**
+ * Resolve a scanned QR (`{ payload }`, which must be exactly this event's stored payment QR) or a
+ * typed reference (`{ ref }`) to one of this event's payments, whether or not it is on a loaded page.
+ */
+async function scanRoute(
+  request: Request,
+  env: WebEnv,
+  { event }: { event: Event }
+): Promise<Response> {
+  let body: { payload?: unknown; ref?: unknown };
+  try {
+    body = (await request.json()) as typeof body;
+  } catch {
+    return json({ error: 'invalid_request' }, 400);
+  }
+  const payload = typeof body.payload === 'string' ? body.payload : null;
+  const typed = typeof body.ref === 'string' ? body.ref.trim().toUpperCase() : null;
+  if (!payload && !typed) return json({ error: 'invalid_request' }, 400);
+
+  const ref = payload !== null ? paymentReferenceFromPayload(payload) : typed;
+  const repo = new D1Repository(env.paynow_db);
+  const payment = ref && REF.test(ref) ? await repo.getPaymentByRef(ref) : null;
+  // The QR must be this payment's own: other events, payback QRs and edited codes are not found
+  if (
+    !payment ||
+    payment.eventId !== event.id ||
+    (payload !== null && payload !== payment.qrPayload)
+  ) {
+    return json({ error: 'not_found' }, 404);
+  }
+  return json({ payment: (await paymentViews(repo, [payment]))[0] });
+}
+
+/** Check a payment in at the event: one guarded write, so a repeat or a race reports who won. */
+async function checkInRoute(
+  env: WebEnv,
+  { userId, event }: { userId: number; event: Event },
+  paymentRef: string
+): Promise<Response> {
+  const repo = new D1Repository(env.paynow_db);
+  const payment = await repo.getPaymentByRef(paymentRef);
+  if (!payment || payment.eventId !== event.id) return json({ error: 'not_found' }, 404);
+
+  const updated = await repo.checkInPayment(paymentRef, userId, new Date().toISOString());
+  if (!updated) {
+    const current = await repo.getPaymentByRef(paymentRef);
+    return current?.status === 'voided'
+      ? json({ error: 'voided' }, 409)
+      : json({ error: 'already_checked_in', checkedInAt: current?.checkedInAt ?? null }, 409);
+  }
+  return json({ payment: (await paymentViews(repo, [updated]))[0] });
 }
 
 async function createPaymentRequestRoute(
@@ -595,13 +653,6 @@ async function eventData(
     limit,
     ...(cursor ? { cursor } : {}),
   });
-  // Only the paybacks of the payments on screen are read; sent totals come from the same rows.
-  const paybacksByPayment = new Map<number, Payback[]>();
-  const sent = new Map<number, number>();
-  for (const b of await repo.listPaybacksByPayments(payments.map((p) => p.id))) {
-    paybacksByPayment.set(b.paymentId, [...(paybacksByPayment.get(b.paymentId) ?? []), b]);
-    if (b.status === 'sent') sent.set(b.paymentId, (sent.get(b.paymentId) ?? 0) + b.amountCents);
-  }
   // Event-wide totals: independent of the page, search and filter
   const stats = await new D1EventRepository(env.paynow_db).getEventStats(event.id);
 
@@ -614,33 +665,48 @@ async function eventData(
       pendingCents: stats.pendingCents,
     },
     nextCursor,
-    payments: payments.map((p) => {
-      const paybacks = paybacksByPayment.get(p.id) ?? [];
-      // The payable-back room counts pending + sent (cancelled free their amount)
-      const committed = paybacks
-        .filter((b) => b.status !== 'cancelled')
-        .reduce((t, b) => t + b.amountCents, 0);
-      return {
-        ref: p.ref,
-        description: p.description,
-        payerName: p.payerName ?? null,
-        amountCents: p.amountCents,
-        paidBackCents: sent.get(p.id) ?? 0,
-        netCents: p.amountCents - (sent.get(p.id) ?? 0),
-        remainingCents: Math.max(0, p.amountCents - committed),
-        needsRecipient: !p.payerValue,
-        status: p.status,
-        createdAt: p.createdAt,
-        receivedAt: p.receivedAt,
-        paybacks: paybacks.map((b) => ({
-          ref: b.ref,
-          amountCents: b.amountCents,
-          status: b.status,
-          recipientName: recipientName(p.payerValue, p.payerName, b.payerValue),
-          createdAt: b.createdAt,
-          sentAt: b.sentAt,
-        })),
-      };
-    }),
+    payments: await paymentViews(repo, payments),
+  });
+}
+
+/**
+ * The page's JSON for payments: names only (never PayNow numbers), with the paybacks of exactly
+ * these payments (so only what is shown is read) and their sent/committed totals.
+ */
+async function paymentViews(repo: D1Repository, payments: Payment[]) {
+  const paybacksByPayment = new Map<number, Payback[]>();
+  const sent = new Map<number, number>();
+  for (const b of await repo.listPaybacksByPayments(payments.map((p) => p.id))) {
+    paybacksByPayment.set(b.paymentId, [...(paybacksByPayment.get(b.paymentId) ?? []), b]);
+    if (b.status === 'sent') sent.set(b.paymentId, (sent.get(b.paymentId) ?? 0) + b.amountCents);
+  }
+  return payments.map((p) => {
+    const paybacks = paybacksByPayment.get(p.id) ?? [];
+    // The payable-back room counts pending + sent (cancelled free their amount)
+    const committed = paybacks
+      .filter((b) => b.status !== 'cancelled')
+      .reduce((t, b) => t + b.amountCents, 0);
+    return {
+      ref: p.ref,
+      description: p.description,
+      payerName: p.payerName ?? null,
+      amountCents: p.amountCents,
+      paidBackCents: sent.get(p.id) ?? 0,
+      netCents: p.amountCents - (sent.get(p.id) ?? 0),
+      remainingCents: Math.max(0, p.amountCents - committed),
+      needsRecipient: !p.payerValue,
+      status: p.status,
+      createdAt: p.createdAt,
+      receivedAt: p.receivedAt,
+      checkedInAt: p.checkedInAt ?? null,
+      paybacks: paybacks.map((b) => ({
+        ref: b.ref,
+        amountCents: b.amountCents,
+        status: b.status,
+        recipientName: recipientName(p.payerValue, p.payerName, b.payerValue),
+        createdAt: b.createdAt,
+        sentAt: b.sentAt,
+      })),
+    };
   });
 }

@@ -243,6 +243,8 @@ Tests that tap buttons from a group chat stub `globalThis.fetch` for `getChatMem
 
 ## Web Admin (Cloudflare Pages)
 
+Attendee check-in (migration 0007: `payments.checked_in_at` / `checked_in_by`): `POST /api/events/:ref/scan` takes `{ payload }` (decoded QR text; must equal the payment's stored `qr_payload`, whose reference `paymentReferenceFromPayload` reads from tag 26.05) or `{ ref }` (typed), admin-only, and returns the payment view from `paymentViews()` (also used by the list; names only); `POST .../payments/:paymentRef/check-in` is the guarded one-time write (`checkInPayment`, 409 `already_checked_in` with the first time, 409 `voided`; allowed on closed events). The Scan dialog in `src/web/page.ts` decodes with `BarcodeDetector` or the vendored `web/public/vendor/jsqr.js` (excluded from the Pages catch-all in `web/public/_routes.json`). `KEEP_QR_REMINDER` (`src/payments/payment-request.ts`) is in every payment QR caption and beside the QR on the payer page.
+
 The payer page `/pay/<event-ref>` (no sign-in needed: `payerAccess` treats a missing/invalid session as anonymous, `userId` null, and only an unknown event is refused; `GET /api/pay/:ref` returns `signedIn`; `GET|POST /api/pay/:ref/payments`, `GET .../payments/:paymentRef/qr`) shows a fixed default amount as plain text (the server still ignores any submitted amount), creates owner-`0` payments for anonymous visitors (capped at 30 per event per 10 minutes via `countRecentAnonymousPayments`, then 429 `rate_limited`; signed-in users exempt) and returns the QR inline as `payment.qr` (PNG data URL). For signed-in users only it lists their own requests for the event (`listPaymentsByUserAndEvent`, newest first, max 50, no PayNow numbers; history and `GET .../payments/:paymentRef/qr` need a session) and, after creating one, sends them a private `sendPhoto` copy via `sendPaymentDm` in `src/web/telegram.ts` (no buttons; best-effort, `dm: false` in the response when Telegram refuses, e.g. the user never started the bot). It never posts to the event chat.
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
@@ -257,7 +259,7 @@ payments are listed but excluded from totals. Admins can also pay received payme
 `src/db/payback-service.ts`, same validation and transactional bound as the bot), `GET .../paybacks/:ref/qr`
 (PNG from `bmpToPng` in `src/sgqr/png.ts`; Telegram keeps the BMP) and `POST .../paybacks/:ref/sent|cancel`
 (pending-only CAS). Every POST must be same-origin JSON, then session → event → live admin check; the actor id
-is recorded in the audit columns (`payments.received_by` / `voided_by`, `paybacks.created_by` / `sent_by` /
+is recorded in the audit columns (`payments.received_by` / `voided_by` / `checked_in_by`, `paybacks.created_by` / `sent_by` /
 `cancelled_by`, written in the same guarded UPDATE so a lost race records nobody). Payment requests are created
 with `POST /api/events/:ref/payments` (shared `createPaymentRequest` / `paymentCaption` / `paymentImageLines` in
 `src/payments/payment-request.ts`, also used by `/start`; open events only; the signed-in admin owns the payment),

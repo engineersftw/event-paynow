@@ -50,6 +50,13 @@
       "when": 1794133296449,
       "tag": "0006_event_default_amount",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794191291844,
+      "tag": "0007_payment_check_in",
+      "breakpoints": true
     }
   ]
 }

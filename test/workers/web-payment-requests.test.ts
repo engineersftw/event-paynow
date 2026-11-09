@@ -140,7 +140,7 @@ describe('create a payment request', () => {
     expect(form.get('chat_id')).toBe('-50');
     expect(form.get('message_thread_id')).toBe('7');
     expect(form.get('caption')).toBe(
-      `Team Lunch / SGD 12.50 / ${payment.ref} / Payer: Alice / Forward this message to share`
+      `Team Lunch / SGD 12.50 / ${payment.ref} / Payer: Alice / Keep this QR for event check-in and payment verification / Forward this message to share`
     );
     expect(form.get('reply_markup') as string).toContain(`mark_received:${payment.ref}`);
   });

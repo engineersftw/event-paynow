@@ -12,7 +12,7 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - **Chat admins act on any payment**: administrators of an event's chat can view, receive, void, pay back and mark paybacks sent/cancelled on payments they did not create (checked live with `getChatMember`), and `/payments` shows them every payment of the event; ordinary members keep owner-only access
 - **Audit**: who received/voided a payment and who created/sent/cancelled a payback is recorded (Telegram user ids) for bot and web actions
 - **Names in messages**: Captions and status lines show `Payer: <name>` / `To: <name>`, never a PayNow number
-- **Web pages**: `/web_admin` links chat admins to an event management page; each event also has a shareable `/pay/<event-ref>` page where anyone (no sign-in needed) can create their own payment request and see its QR inline; signing in with Telegram adds a private Telegram copy and a history of their requests
+- **Web pages**: `/web_admin` links chat admins to an event management page; each event also has a shareable `/pay/<event-ref>` page where anyone (no sign-in needed) can create their own payment request and see its QR inline; signing in with Telegram adds a private Telegram copy and a history of their requests. Admins can scan an attendee's payment QR from the event page to check them in (and mark received or pay back from the same result)
 - **Inline buttons**: Confirm/cancel via buttons, action buttons on QR photos, paginated lists; double taps and racing taps resolve to one winner
 - **Conversation state**: Per-chat Durable Objects with 10-minute idle expiry
 - **Automatic deploys**: GitHub Actions deploys the Worker and Pages from `main` when their files change
@@ -110,6 +110,16 @@ Open Telegram, message your bot:
 - `/init` → create your first event
 
 ## Web pages (admin and payer event pages)
+
+**Check-in at the door.** The event page has a **Scan** button: it opens the phone camera, reads the attendee's payment
+QR (the one from the payer page, `/start` or the admin dialog, which carries the payment reference), shows that payment
+with a **Check in** button and the usual actions (mark received or void, pay back), and records the check-in time and
+admin once per payment. Pending and received payments can be checked in; voided ones cannot. If the camera is blocked,
+type the payment reference instead. Payment QR captions and the payer page remind payers to keep their QR for
+check-in. QR decoding uses the browser's `BarcodeDetector` when available, else the vendored
+[jsQR](https://github.com/cozmo/jsQR) 1.4.0 (Apache-2.0) at `web/public/vendor/jsqr.js`, a minified build of
+`node_modules/jsqr/dist/jsQR.js` (`npx esbuild node_modules/jsqr/dist/jsQR.js --minify --outfile=web/public/vendor/jsqr.js`,
+then restore the banner comment) loaded only when Scan is used.
 
 `/web_admin` replies with a link per event to a Cloudflare Pages page (`web/`) that lists every payment
 of the event. Admins can create a payment request (payer mobile/UEN, optional name, amount; the QR is shown as a PNG
