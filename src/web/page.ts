@@ -459,10 +459,24 @@ load();
 ${ME_JS}</script></body></html>`;
 }
 
+/** YouTube id of the explainer video on the landing page (11 characters of A-Z a-z 0-9 _ -). */
+const EXPLAINER_VIDEO_ID = 'ezOo1OIhl-Y';
+
+/**
+ * Click-to-play card for the landing page: nothing is requested from YouTube until the visitor
+ * clicks (the script on the page then swaps in the youtube-nocookie player). An id that is not a
+ * YouTube id leaves the block out, so it can never put markup into the page.
+ */
+export function videoCard(id: string): string {
+  if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return '';
+  return `<div class="video"><button id="play" class="vcard" type="button" data-video="${id}" aria-label="Play the Event PayNow Bot explainer video"><img src="/logo.png" alt="" width="64" height="64"><span class="vtitle">Watch the 75-second explainer</span><span class="tri" aria-hidden="true"></span></button><a class="ylink" href="https://youtu.be/${id}">Watch on YouTube</a></div>`;
+}
+
 /** Public home page at `/`: what the bot does and a link to add it on Telegram. No data, no session. */
 export function renderLandingPage(botUsername: string): string {
   const bot = botUsername.replace(/[^A-Za-z0-9_]/g, '');
   const cta = `<a class="cta" href="https://t.me/${bot}">Add the bot on Telegram</a>`;
+  const video = videoCard(EXPLAINER_VIDEO_ID);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Event PayNow Bot</title><link rel="icon" href="/logo.png">
@@ -480,11 +494,19 @@ h1{font-size:1.6rem;line-height:1.2;margin:0;letter-spacing:-.02em}h2{font-size:
 .cta{display:block;text-align:center;padding:14px 16px;border-radius:10px;background:var(--primary);color:var(--primary-fg);font-weight:600;text-decoration:none;overflow-wrap:anywhere}
 ul,ol{padding-left:1.2rem;margin:0}li{margin:6px 0}code{background:var(--muted);padding:1px 6px;border-radius:5px;font-size:.9em}
 .end{margin-top:28px}
+.video{margin-top:18px}
+.vcard{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;width:100%;aspect-ratio:16/9;border:1px solid var(--border);border-radius:12px;background:var(--muted);color:var(--fg);cursor:pointer;font:inherit}
+.vcard img{border-radius:12px}.vtitle{font-weight:600;padding:0 12px;text-align:center}
+.tri{width:0;height:0;border-left:22px solid var(--fg);border-top:14px solid transparent;border-bottom:14px solid transparent}
+.vframe{display:block;width:100%;aspect-ratio:16/9;border:0;border-radius:12px}
+.ylink{display:block;text-align:center;margin-top:8px;font-size:14px;color:var(--muted-fg)}
+@media(max-width:360px){.vcard{gap:6px}.vcard img{width:40px;height:40px}.vtitle{font-size:14px}}
 </style></head><body>
 <div class="topbar"><button id="theme" class="icon" aria-label="Switch between light and dark theme"></button></div>
 <div class="brand"><img src="/logo.png" alt="" width="56" height="56"><h1>Event PayNow Bot</h1></div>
 <p class="lead">Collect PayNow payments for your event from a Telegram group: a QR code for every request, and a clear record of who has paid.</p>
 ${cta}
+${video}
 <h2>What it does</h2>
 <ul>
 <li><b>Events with a PayNow payee</b>: set a name, a payee (mobile or UEN) and an optional default amount.</li>
@@ -504,6 +526,8 @@ ${cta}
 <script>
 const $=id=>document.getElementById(id);
 ${THEME_JS}
+const play=$('play');
+if(play)play.onclick=()=>{const f=document.createElement('iframe');f.className='vframe';f.src='https://www.youtube-nocookie.com/embed/'+encodeURIComponent(play.dataset.video)+'?autoplay=1&rel=0';f.title='Event PayNow Bot explainer video';f.allow='autoplay; encrypted-media; picture-in-picture; fullscreen';f.allowFullscreen=true;f.referrerPolicy='strict-origin-when-cross-origin';play.replaceWith(f)};
 </script></body></html>`;
 }
 

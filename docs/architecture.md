@@ -195,7 +195,7 @@ A second, independent bot in the same Worker on `POST /webhook/simple` (own toke
 **Role**: Page listing every payment of an event and letting admins handle paybacks, on Cloudflare Pages
 
 - `web/functions/[[path]].ts` is a catch-all Pages Function that delegates to `handleWeb()` (`src/web/handler.ts`)
-- `GET /` serves the public landing page (`renderLandingPage`: what the bot does and a `t.me/<BOT_USERNAME>` button; no session, no database); `GET /events/:ref` serves an HTML shell (data is written with `textContent`); `GET /api/events/:ref` returns JSON; `GET /api/login` is the Telegram Login Widget redirect target
+- `GET /` serves the public landing page (`renderLandingPage`: what the bot does, a `t.me/<BOT_USERNAME>` button and a click-to-play YouTube card that loads the `youtube-nocookie.com` player only after a click; no session, no database); `GET /events/:ref` serves an HTML shell (data is written with `textContent`); `GET /api/events/:ref` returns JSON; `GET /api/login` is the Telegram Login Widget redirect target
 - Sign-in: HMAC-SHA256 over the widget data keyed with SHA256(bot token), rejected after 24 h; success sets a 12 h signed HttpOnly cookie (`src/web/auth.ts`)
 - Authorisation: the user must be a chat administrator/creator, checked live with `getChatMember`, or the owner of a private chat; any failure denies (`src/web/access.ts`)
 - The API returns payer names only (never PayNow numbers); per-payment `paidBackCents` / `netCents` and totals (`collectedCents` net of sent paybacks, `paidBackCents`, `pendingCents`); voided payments are listed but excluded from totals
