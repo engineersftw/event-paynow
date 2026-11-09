@@ -6,3 +6,6 @@ dist/
 *.db
 *.db-journal
 .drizzle/
+
+# Generated explainer video (npm run video)
+out/
