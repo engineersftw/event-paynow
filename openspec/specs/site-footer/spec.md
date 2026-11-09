@@ -8,7 +8,7 @@ A short attribution footer shown at the bottom of every web page, crediting the 
 
 ### Requirement: Every web page shows the attribution footer
 
-The system SHALL show a footer at the bottom of the landing page, the event admin page and the payer page that reads "Built by Michael Cheng & Claude Code AI. Open Source with ❤️." The name "Michael Cheng" SHALL link to https://linkedin.com/in/miccheng and the words "Open Source" SHALL link to the source repository at https://github.com/engineersftw/event-paynow.
+The system SHALL show a footer at the bottom of the landing page, the event admin page and the payer page that reads "Built by Michael Cheng & Claude Code AI." on the first line and "Open Source with ❤️." on the second. The name "Michael Cheng" SHALL link to https://linkedin.com/in/miccheng and the words "Open Source" SHALL link to the source repository at https://github.com/engineersftw/event-paynow.
 
 #### Scenario: Landing page
 
@@ -51,4 +51,4 @@ The footer SHALL be small, muted and centred, SHALL follow the light and dark th
 #### Scenario: Narrow screen
 
 - **WHEN** a page is shown at 320 px width
-- **THEN** the footer wraps onto two lines if needed and nothing overflows
+- **THEN** the two footer lines each fit or wrap, and nothing overflows
