@@ -77,7 +77,7 @@ function telegram(refuse = false) {
 
 async function payerPost(
   path: string,
-  userId: number,
+  userId: number | null,
   body: unknown,
   origin = 'https://x.test',
   fetchFn: typeof fetch = telegram().fetchFn
@@ -86,7 +86,7 @@ async function payerPost(
     new Request(`https://x.test${path}`, {
       method: 'POST',
       headers: {
-        Cookie: `session=${await signSession(userId, 'sess')}`,
+        ...(userId === null ? {} : { Cookie: `session=${await signSession(userId, 'sess')}` }),
         Origin: origin,
         'Content-Type': 'application/json',
       },
@@ -319,6 +319,100 @@ describe('web admin list paging', () => {
   });
 });
 
+describe('anonymous payer requests', () => {
+  const anon = { payer: '91234567', amount: '2.00' };
+
+  it('serves event data without a session, and treats a bad session as anonymous', async () => {
+    const e = await seedEvent('EVTANON001', -60);
+    const none = await get(`/api/pay/${e.ref}`);
+    expect(none.status).toBe(200);
+    expect(await none.json()).toMatchObject({ signedIn: false, event: { name: 'Dinner <b>' } });
+    const bad = await handleWeb(
+      new Request(`https://x.test/api/pay/${e.ref}`, { headers: { Cookie: 'session=1.2.3' } }),
+      webEnv,
+      admin
+    );
+    expect(((await bad.json()) as { signedIn: boolean }).signedIn).toBe(false);
+    expect(
+      ((await (await get(`/api/pay/${e.ref}`, 900)).json()) as { signedIn: boolean }).signedIn
+    ).toBe(true);
+    expect((await get('/api/pay/NOPENOPE01')).status).toBe(404);
+  });
+
+  it('history and the owner-only QR route still need a session', async () => {
+    const e = await seedEvent('EVTANON002', -61);
+    await seedPayment(e.id, 'ANONP00001', 901, 100);
+    expect((await get(`/api/pay/${e.ref}/payments`)).status).toBe(401);
+    expect((await get(`/api/pay/${e.ref}/payments/ANONP00001/qr`)).status).toBe(401);
+  });
+
+  it('creates an owner-0 payment, returns the QR inline and sends no Telegram message', async () => {
+    const e = await seedEvent('EVTANON003', -62);
+    const tg = telegram();
+    const res = await payerPost(
+      `/api/pay/${e.ref}/payments`,
+      null,
+      anon,
+      'https://x.test',
+      tg.fetchFn
+    );
+    expect(res.status).toBe(201);
+    const body = (await res.json()) as { payment: { ref: string; qr: string; dm?: boolean } };
+    expect(body.payment.qr.startsWith('data:image/png;base64,')).toBe(true);
+    const png = Uint8Array.from(atob(body.payment.qr.split(',')[1]!), (c) => c.charCodeAt(0));
+    expect([...png.slice(1, 4)]).toEqual([80, 78, 71]); // "PNG"
+    expect('dm' in body.payment).toBe(false);
+    expect(tg.chats).toEqual([]);
+    expect(await repo.getPaymentByRef(body.payment.ref)).toMatchObject({
+      userId: 0,
+      status: 'pending',
+    });
+    // Admins list it like any other request
+    const list = (await (await get(`/api/events/${e.ref}`, 1)).json()) as {
+      payments: Array<{ ref: string }>;
+    };
+    expect(list.payments.map((p) => p.ref)).toContain(body.payment.ref);
+  });
+
+  it('still rejects cross-origin anonymous writes', async () => {
+    const e = await seedEvent('EVTANON004', -63);
+    expect(
+      (await payerPost(`/api/pay/${e.ref}/payments`, null, anon, 'https://evil.test')).status
+    ).toBe(403);
+  });
+
+  it('caps anonymous creation at 30 per 10 minutes per event; signed-in users are exempt', async () => {
+    const e = await seedEvent('EVTANON005', -64);
+    const old = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    const now = new Date().toISOString();
+    for (let i = 0; i < 5; i++) await seedPayment(e.id, `ANONOLD${i}00`, 0, 100, { at: old });
+    for (let i = 0; i < 30; i++)
+      await seedPayment(e.id, `ANONNEW${String(i).padStart(3, '0')}`, 0, 100, { at: now });
+
+    const blocked = await payerPost(`/api/pay/${e.ref}/payments`, null, anon);
+    expect(blocked.status).toBe(429);
+    expect(await blocked.json()).toEqual({ error: 'rate_limited' });
+    expect((await repo.listPaymentsByEvent(e.id)).length).toBe(35);
+    expect((await payerPost(`/api/pay/${e.ref}/payments`, 902, anon)).status).toBe(201);
+    // Another event is unaffected
+    const other = await seedEvent('EVTANON006', -65);
+    expect((await payerPost(`/api/pay/${other.ref}/payments`, null, anon)).status).toBe(201);
+  });
+});
+
+describe('countRecentAnonymousPayments', () => {
+  it('counts only that event’s owner-0 rows inside the window', async () => {
+    const e1 = await seedEvent('EVTCNT0001', -66);
+    const e2 = await seedEvent('EVTCNT0002', -66);
+    await seedPayment(e1.id, 'CNTP000001', 0, 100, { at: '2024-01-01T00:00:00Z' });
+    await seedPayment(e1.id, 'CNTP000002', 0, 100, { at: '2024-01-01T00:05:00Z' });
+    await seedPayment(e1.id, 'CNTP000003', 5, 100, { at: '2024-01-01T00:05:00Z' });
+    await seedPayment(e2.id, 'CNTP000004', 0, 100, { at: '2024-01-01T00:05:00Z' });
+    expect(await repo.countRecentAnonymousPayments(e1.id, '2024-01-01T00:01:00Z')).toBe(1);
+    expect(await repo.countRecentAnonymousPayments(e1.id, '2023-12-31T00:00:00Z')).toBe(2);
+  });
+});
+
 describe('payer page history and private copy', () => {
   it('lists only the signed-in user’s requests for the event, newest first, without numbers', async () => {
     const e = await seedEvent('EVTHIST001', -50);
@@ -432,9 +526,8 @@ describe('web admin', () => {
     ).toBe(403);
   });
 
-  it('payer page refuses unauthenticated and closed-event creation', async () => {
+  it('payer page refuses closed-event creation', async () => {
     const e = await seedEvent('EVTPAYER003', -42);
-    expect((await get(`/api/pay/${e.ref}`)).status).toBe(401);
     await eventRepo.closeEvent(e.ref, T);
     expect(
       (await payerPost(`/api/pay/${e.ref}/payments`, 703, { payer: '91234567', amount: '1.00' }))

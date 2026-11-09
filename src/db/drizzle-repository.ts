@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray, ne, or, sql } from 'drizzle-orm';
+import { and, desc, eq, gte, inArray, ne, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreatePaybackBoundedResult,
@@ -159,6 +159,21 @@ export class D1Repository implements Repository {
       .all();
 
     return results.map(toPayment);
+  }
+
+  async countRecentAnonymousPayments(eventId: number, sinceIso: string): Promise<number> {
+    const row = await this.db
+      .select({ n: sql<number>`COUNT(*)` })
+      .from(schema.payments)
+      .where(
+        and(
+          eq(schema.payments.eventId, eventId),
+          eq(schema.payments.userId, 0),
+          gte(schema.payments.createdAt, sinceIso)
+        )
+      )
+      .get();
+    return row?.n ?? 0;
   }
 
   async listPaymentsByUserAndEvent(userId: number, eventId: number): Promise<Payment[]> {
