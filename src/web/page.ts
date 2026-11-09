@@ -30,9 +30,9 @@ paintTheme();
 /** Attribution footer shared by every web page; the two links are plain anchors (no requests on load). */
 const LINKEDIN_URL = 'https://linkedin.com/in/miccheng';
 const REPO_URL = 'https://github.com/engineersftw/event-paynow';
-const FOOTER_HTML = `<footer class="site-footer">Built by <a href="${LINKEDIN_URL}" target="_blank" rel="noopener noreferrer">Michael Cheng</a> &amp; Claude Code AI. <a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">Open Source</a> with ❤️.</footer>`;
+const FOOTER_HTML = `<footer class="site-footer"><span>Built by <a href="${LINKEDIN_URL}" target="_blank" rel="noopener noreferrer">Michael Cheng</a> &amp; Claude Code AI.</span> <span><a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">Open Source</a> with ❤️.</span></footer>`;
 const FOOTER_CSS =
-  '.site-footer{margin:32px 0 8px;text-align:center;font-size:13px;color:var(--muted-fg)}.site-footer a{color:inherit;text-decoration:underline}';
+  '.site-footer{margin:32px 0 8px;text-align:center;font-size:13px;color:var(--muted-fg)}.site-footer span{display:block}.site-footer a{color:inherit;text-decoration:underline}';
 
 /** Static shell; data is fetched from the API and written with textContent (names are user input). */
 export function renderPage(ref: string, botUsername: string): string {

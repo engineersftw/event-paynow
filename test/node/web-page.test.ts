@@ -241,6 +241,10 @@ describe('attribution footer', () => {
       expect(footer).toBeDefined();
       const text = footer!.replace(/<[^>]+>/g, '').replace(/&amp;/g, '&');
       expect(text).toBe('Built by Michael Cheng & Claude Code AI. Open Source with ❤️.');
+      // two lines: credit first, then "Open Source with ❤️."
+      expect(footer).toMatch(
+        /^<footer class="site-footer"><span>Built by .*AI\.<\/span> <span><a href=.*>Open Source<\/a> with ❤️\.<\/span><\/footer>$/
+      );
       expect(footer).toContain(
         '<a href="https://linkedin.com/in/miccheng" target="_blank" rel="noopener noreferrer">Michael Cheng</a>'
       );
