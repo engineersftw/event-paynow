@@ -13,4 +13,6 @@ export interface Env {
   SIMPLE_BOT_TOKEN?: string;
   SIMPLE_WEBHOOK_SECRET?: string;
   SIMPLE_BOT_USERNAME?: string;
+  /** Telegram user ids (comma-separated) allowed to use the hidden /stats command; none when unset. */
+  STATS_USER_IDS?: string;
 }

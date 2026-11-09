@@ -1,6 +1,7 @@
 import type { BotConfig, Context } from 'grammy';
 import { Bot, webhookCallback } from 'grammy';
 import { SIMPLE_HELP, SimpleCommandHandler } from './commands/simple-handler';
+import { D1UsageRepository } from './db/usage-repository';
 import type { Env } from './env';
 import type { ConversationDO } from './worker/conversation-do';
 
@@ -11,12 +12,13 @@ import type { ConversationDO } from './worker/conversation-do';
  */
 export function createSimpleBot(env: Env, token: string, config?: BotConfig<Context>): Bot {
   const bot = new Bot(token, config);
+  const counter = new D1UsageRepository(env.paynow_db); // anonymous daily counts only
 
   const handler = (ctx: Context): SimpleCommandHandler => {
     const id = ctx.chat?.id ?? ctx.from?.id;
     if (typeof id !== 'number') throw new Error('Update without a chat identity');
     const stub = env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`simple-${id}`));
-    return new SimpleCommandHandler(stub as unknown as ConversationDO);
+    return new SimpleCommandHandler(stub as unknown as ConversationDO, counter);
   };
 
   // Private chats only: payee numbers do not belong in a group

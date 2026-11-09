@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import jsQR from 'jsqr';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { sgDay } from '../../src/db/usage-repository';
 import { createSimpleBot } from '../../src/simple-bot';
 import worker from '../../src/worker';
 import type { ConversationDO } from '../../src/worker/conversation-do';
@@ -249,5 +250,78 @@ describe('POST /webhook/simple', () => {
     expect((await call(cfg, 'wrong')).status).toBe(403);
     // the event bot's secret does not open the simple route
     expect((await call(cfg, env.TELEGRAM_WEBHOOK_SECRET)).status).toBe(403);
+  });
+});
+
+describe('anonymous usage counters', () => {
+  const counters = async () => {
+    const { results } = await env.paynow_db
+      .prepare('SELECT metric, SUM(count) AS n FROM usage_counters GROUP BY metric')
+      .all<{ metric: string; n: number }>();
+    return Object.fromEntries(results.map((r) => [r.metric, r.n]));
+  };
+  const clear = () => env.paynow_db.prepare('DELETE FROM usage_counters').run();
+
+  async function qr(u: number, amount: 'skip' | 'fixed' | 'editable', confirm = true) {
+    const b = bot();
+    await say(b, u, '/start');
+    await say(b, u, '91234567');
+    if (amount === 'skip') await tap(b, u, 'simple_skip_amount');
+    else {
+      await say(b, u, '12.50');
+      await tap(b, u, amount === 'editable' ? 'simple_edit_yes' : 'simple_edit_no');
+    }
+    await tap(b, u, 'simple_skip_description');
+    if (confirm) await tap(b, u, 'simple_confirm');
+    return b;
+  }
+
+  it('counts one QR and exactly one amount choice, by day, with nothing personal', async () => {
+    await clear();
+    await qr(uid++, 'skip');
+    expect(await counters()).toEqual({ simple_qr: 1, simple_amount_skipped: 1 });
+    await qr(uid++, 'fixed');
+    await qr(uid++, 'editable');
+    await qr(uid++, 'editable');
+    expect(await counters()).toEqual({
+      simple_qr: 4,
+      simple_amount_skipped: 1,
+      simple_amount_fixed: 1,
+      simple_amount_editable: 2,
+    });
+    // the table can only hold a day, a metric and a number
+    const cols = await env.paynow_db
+      .prepare('PRAGMA table_info(usage_counters)')
+      .all<{ name: string }>();
+    expect(cols.results.map((c) => c.name)).toEqual(['day', 'metric', 'count']);
+    const days = await env.paynow_db
+      .prepare('SELECT DISTINCT day FROM usage_counters')
+      .all<{ day: string }>();
+    expect(days.results.map((d) => d.day)).toEqual([sgDay()]);
+  });
+
+  it('counts nothing for cancelled, abandoned or unconfirmed conversations', async () => {
+    await clear();
+    const u1 = uid++;
+    const b1 = await qr(u1, 'skip', false); // stops at the summary
+    await tap(b1, u1, 'simple_cancel');
+    const u2 = uid++;
+    await qr(u2, 'fixed', false); // never confirmed
+    const u3 = uid++;
+    const b3 = bot();
+    await say(b3, u3, '/start');
+    await say(b3, u3, '91234567');
+    await say(b3, u3, '/cancel');
+    expect(await counters()).toEqual({});
+  });
+
+  it('still sends the QR when the count cannot be written', async () => {
+    await env.paynow_db.prepare('DROP TABLE usage_counters').run();
+    try {
+      await qr(uid++, 'fixed');
+      expect(stub.sentPhotos).toHaveLength(1);
+    } finally {
+      await applyTestSchema(env.paynow_db); // recreate the table for the other tests
+    }
   });
 });

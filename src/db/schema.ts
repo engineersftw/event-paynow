@@ -1,4 +1,4 @@
-import { integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { integer, primaryKey, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
  * Data model per design §5.
@@ -70,3 +70,17 @@ export const paybacks = sqliteTable('paybacks', {
   sentBy: integer('sent_by'),
   cancelledBy: integer('cancelled_by'),
 });
+
+/**
+ * Anonymous usage counts (Simple_PayNow_Bot): one row per Singapore calendar day and metric.
+ * Holds only a day, a metric name and a number: never a payee, amount, description or identity.
+ */
+export const usageCounters = sqliteTable(
+  'usage_counters',
+  {
+    day: text('day').notNull(), // YYYY-MM-DD, Singapore time
+    metric: text('metric').notNull(),
+    count: integer('count').notNull().default(0),
+  },
+  (t) => [primaryKey({ columns: [t.day, t.metric] })]
+);

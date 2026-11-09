@@ -9,9 +9,11 @@ import { createPaymentAccess } from './commands/payment-access';
 import { PaymentCallbackHandler } from './commands/payment-callback-handler';
 import { PaymentsCommandHandler } from './commands/payments-handler';
 import { StartCommandHandler } from './commands/start-handler';
+import { formatStats, parseUserIds } from './commands/stats-handler';
 import { WebAdminCommandHandler } from './commands/web-admin-handler';
 import { WebPaymentCommandHandler } from './commands/web-payment-handler';
 import { D1EventRepository, D1Repository } from './db/drizzle-repository';
+import { D1UsageRepository } from './db/usage-repository';
 import type { Env } from './env';
 import type { ConversationDO, ConversationState } from './worker/conversation-do';
 
@@ -125,6 +127,14 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   bot.command('end_event', async (ctx) => {
     await new EndEventHandler(conversation(ctx), eventRepository).start(ctx);
     await stampOwner(ctx);
+  });
+
+  // Hidden (not in /help or the BotFather list): usage numbers for the ids in STATS_USER_IDS, private chats
+  // only. Anyone else gets no reply at all.
+  bot.command('stats', async (ctx) => {
+    if (ctx.chat.type !== 'private' || !ctx.from) return;
+    if (!parseUserIds(env.STATS_USER_IDS).has(ctx.from.id)) return;
+    await ctx.reply(formatStats(await new D1UsageRepository(env.paynow_db).snapshot()));
   });
 
   bot.command('cancel', async (ctx) => {

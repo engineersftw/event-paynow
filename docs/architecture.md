@@ -106,7 +106,11 @@
 
 ### Simple_PayNow_Bot (src/simple-bot.ts)
 
-A second, independent bot in the same Worker on `POST /webhook/simple` (own token and secret; 404 until configured). `SimpleCommandHandler` runs payee → amount → (payer may change the amount?) → description → confirmation summary (Confirm / Cancel) in the chat's Durable Object under key `simple-<id>` (flow `simple`, so it never mixes with the event bot's `chat-<id>`), then, on Confirm, claims the state (exactly once, which also wipes it), builds the payload with `buildPayNowPayload` and sends the QR. No D1 access, no logging of answers, private chats only, payee number never printed on the image or caption.
+A second, independent bot in the same Worker on `POST /webhook/simple` (own token and secret; 404 until configured). `SimpleCommandHandler` runs payee → amount → (payer may change the amount?) → description → confirmation summary (Confirm / Cancel) in the chat's Durable Object under key `simple-<id>` (flow `simple`, so it never mixes with the event bot's `chat-<id>`), then, on Confirm, claims the state (exactly once, which also wipes it), builds the payload with `buildPayNowPayload` and sends the QR. It stores no payee, amount, description or identity and logs no answers; after the QR is sent it adds anonymous daily counts to D1 (`usage_counters(day, metric, count)`: `simple_qr` plus one of `simple_amount_skipped|fixed|editable`, upserted atomically, best effort, by Singapore day) that feed `/stats`. Private chats only, payee number never printed on the image or caption.
+
+### Usage stats (`/stats`)
+
+A hidden command in Event PayNow Bot, answered only in private chats and only for Telegram ids in the `STATS_USER_IDS` secret (comma-separated, parsed by `parseUserIds`; nobody when unset). `D1UsageRepository.snapshot()` runs a few aggregate queries in one batch over `events`, `payments`, `paybacks` and `usage_counters` and `formatStats()` renders a numbers-only text report (no names, PayNow numbers or references).
 
 ### grammY Bot (src/bot.ts)
 
