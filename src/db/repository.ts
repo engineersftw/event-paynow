@@ -143,6 +143,8 @@ export interface Repository {
   ): Promise<Payment>;
   getPaymentByRef(ref: string): Promise<Payment | null>;
   listPaymentsByUser(userId: number): Promise<Payment[]>;
+  /** Anonymous (owner 0) payments of an event created at or after `sinceIso`. */
+  countRecentAnonymousPayments(eventId: number, sinceIso: string): Promise<number>;
   /** One user's payments of one event, newest first (at most 50). */
   listPaymentsByUserAndEvent(userId: number, eventId: number): Promise<Payment[]>;
   /** Every payment of an event (all users), newest first. */

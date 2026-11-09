@@ -122,12 +122,25 @@ async function payerAccess(
   request: Request,
   env: WebEnv,
   ref: string
-): Promise<{ userId: number; event: Event } | Response> {
+): Promise<{ userId: number | null; event: Event } | Response> {
+  // No, invalid or expired session = anonymous (userId null); only an unknown event is refused
   const userId = await verifySession(sessionCookie(request), env.SESSION_SECRET);
-  if (userId === null) return json({ error: 'sign_in' }, 401);
   const event = await new D1EventRepository(env.paynow_db).getEventByRef(ref);
   if (!event) return json({ error: 'not_found' }, 404);
   return { userId, event };
+}
+
+/** Anonymous creations allowed per event in the window (signed-in users are not limited). */
+const ANON_LIMIT = 30;
+const ANON_WINDOW_MS = 10 * 60 * 1000;
+
+/** PNG bytes as a data URL, so an anonymous payer needs no authenticated image route. */
+function pngDataUrl(png: Uint8Array): string {
+  let bin = '';
+  for (let i = 0; i < png.length; i += 0x8000) {
+    bin += String.fromCharCode(...png.subarray(i, i + 0x8000));
+  }
+  return `data:image/png;base64,${btoa(bin)}`;
 }
 
 async function payerData(request: Request, env: WebEnv, ref: string): Promise<Response> {
@@ -139,6 +152,7 @@ async function payerData(request: Request, env: WebEnv, ref: string): Promise<Re
       status: access.event.status,
       defaultAmountCents: access.event.defaultAmountCents,
     },
+    signedIn: access.userId !== null,
   });
 }
 
@@ -146,6 +160,7 @@ async function payerData(request: Request, env: WebEnv, ref: string): Promise<Re
 async function payerHistory(request: Request, env: WebEnv, ref: string): Promise<Response> {
   const access = await payerAccess(request, env, ref);
   if (access instanceof Response) return access;
+  if (access.userId === null) return json({ error: 'sign_in' }, 401);
   const payments = await new D1Repository(env.paynow_db).listPaymentsByUserAndEvent(
     access.userId,
     access.event.id
@@ -184,16 +199,27 @@ async function createPayerPayment(
   const amountCents = access.event.defaultAmountCents ?? parseAmount(String(body.amount ?? ''));
   if (amountCents === null) return json({ error: 'invalid_amount' }, 400);
 
-  const payment = await createPaymentRequest(new D1Repository(env.paynow_db), access.event, {
+  const repo = new D1Repository(env.paynow_db);
+  if (access.userId === null) {
+    const since = new Date(Date.now() - ANON_WINDOW_MS).toISOString();
+    if ((await repo.countRecentAnonymousPayments(access.event.id, since)) >= ANON_LIMIT) {
+      return json({ error: 'rate_limited' }, 429);
+    }
+  }
+
+  const payment = await createPaymentRequest(repo, access.event, {
     payerType: payer.type,
     payerValue: payer.normalized,
     payerName: name || null,
     amountCents,
-    userId: access.userId,
+    userId: access.userId ?? 0,
   });
-  // Private copy for the payer; best-effort (they may never have started the bot)
   const bmp = await renderQrPng(payment.qrPayload, paymentImageLines(access.event, payment));
-  const dm = await sendPaymentDm(env.TELEGRAM_BOT_TOKEN, access.userId, payment, bmp, fetchFn);
+  // Private copy only for signed-in users; best-effort (they may never have started the bot)
+  const dm =
+    access.userId === null
+      ? undefined
+      : await sendPaymentDm(env.TELEGRAM_BOT_TOKEN, access.userId, payment, bmp, fetchFn);
   return json(
     {
       payment: {
@@ -201,7 +227,8 @@ async function createPayerPayment(
         amountCents: payment.amountCents,
         status: payment.status,
         payerName: payment.payerName ?? null,
-        dm,
+        qr: pngDataUrl(await bmpToPng(bmp)),
+        ...(dm === undefined ? {} : { dm }),
       },
     },
     201
@@ -216,6 +243,7 @@ async function payerQrImage(
 ): Promise<Response> {
   const access = await payerAccess(request, env, eventRef);
   if (access instanceof Response) return access;
+  if (access.userId === null) return json({ error: 'sign_in' }, 401);
   const payment = await new D1Repository(env.paynow_db).getPaymentByRef(paymentRef);
   if (!payment || payment.eventId !== access.event.id || payment.userId !== access.userId) {
     return json({ error: 'not_found' }, 404);

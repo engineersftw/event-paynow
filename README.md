@@ -12,7 +12,7 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - **Chat admins act on any payment**: administrators of an event's chat can view, receive, void, pay back and mark paybacks sent/cancelled on payments they did not create (checked live with `getChatMember`), and `/payments` shows them every payment of the event; ordinary members keep owner-only access
 - **Audit**: who received/voided a payment and who created/sent/cancelled a payback is recorded (Telegram user ids) for bot and web actions
 - **Names in messages**: Captions and status lines show `Payer: <name>` / `To: <name>`, never a PayNow number
-- **Web pages**: `/web_admin` links chat admins to an event management page; each event also has a shareable `/pay/<event-ref>` page where any Telegram-signed-in user can create their own payment request and see its QR inline with a private Telegram copy and a history of their requests
+- **Web pages**: `/web_admin` links chat admins to an event management page; each event also has a shareable `/pay/<event-ref>` page where anyone (no sign-in needed) can create their own payment request and see its QR inline; signing in with Telegram adds a private Telegram copy and a history of their requests
 - **Inline buttons**: Confirm/cancel via buttons, action buttons on QR photos, paginated lists; double taps and racing taps resolve to one winner
 - **Conversation state**: Per-chat Durable Objects with 10-minute idle expiry
 - **Automatic deploys**: GitHub Actions deploys the Worker and Pages from `main` when their files change
@@ -119,13 +119,15 @@ Visitors sign in with the
 Telegram Login Widget; only the chat's administrators/owner (or the user in a private chat) can use it, and
 every change is same-origin and re-checks admin status.
 
-The admin page header includes a shareable payer link at `/pay/<event-ref>`. Anyone with that link can sign in with
-Telegram and create a payment request for themselves without being an event-chat member or administrator. If the
+The admin page header includes a shareable payer link at `/pay/<event-ref>`. Anyone with that link can create a
+payment request for themselves with no sign-in, without being an event-chat member or administrator (anonymous requests
+are stored with owner `0`, shown to admins like any other, and capped at 30 per event per 10 minutes). Signing in with
+Telegram is optional. If the
 event has a default amount, the payer page shows it as plain text and uses it as the fixed payable amount. If no
-default is configured, the payer enters a required amount. The generated SGQR QR is displayed inline on the page, the
-page lists the signed-in user's earlier requests for the event (tap a pending one to see its QR again), and the bot
-also sends the payer a private copy of the QR (no buttons; it needs the payer to have started the bot, otherwise the
-page says so). Nothing is posted to the event chat from this flow.
+default is configured, the payer enters a required amount. The generated SGQR QR is displayed inline on the page. For signed-in users the
+page also lists their earlier requests for the event (tap a pending one to see its QR again), and the bot sends them a
+private copy of the QR (no buttons; it needs them to have started the bot, otherwise the page says so). Anonymous
+visitors get the QR on the page only. Nothing is posted to the event chat from this flow.
 
 ```bash
 # 1. Create the Pages project, then set its secrets (D1 binding and BOT_USERNAME come from web/wrangler.toml)

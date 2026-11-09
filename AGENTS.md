@@ -80,6 +80,7 @@ This project uses OpenSpec for change management. All changes are archived:
 19. `event-default-amount` (13 tasks) — archived 2026-11-08
 20. `add-edit-event-command` (6 tasks) — archived 2026-11-08
 21. `payer-page-history-and-dm` (8 tasks) — archived 2026-11-08
+22. `optional-payer-sign-in` (7 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
@@ -241,7 +242,7 @@ Tests that tap buttons from a group chat stub `globalThis.fetch` for `getChatMem
 
 ## Web Admin (Cloudflare Pages)
 
-The payer page `/pay/<event-ref>` (any Telegram-signed-in user; `GET /api/pay/:ref`, `GET|POST /api/pay/:ref/payments`, `GET .../payments/:paymentRef/qr`) shows a fixed default amount as plain text (the server still ignores any submitted amount), lists the user's own requests for the event (`listPaymentsByUserAndEvent`, newest first, max 50, no PayNow numbers) and, after creating one, sends the payer a private `sendPhoto` copy via `sendPaymentDm` in `src/web/telegram.ts` (no buttons; best-effort, `dm: false` in the response when Telegram refuses, e.g. the user never started the bot). It never posts to the event chat.
+The payer page `/pay/<event-ref>` (no sign-in needed: `payerAccess` treats a missing/invalid session as anonymous, `userId` null, and only an unknown event is refused; `GET /api/pay/:ref` returns `signedIn`; `GET|POST /api/pay/:ref/payments`, `GET .../payments/:paymentRef/qr`) shows a fixed default amount as plain text (the server still ignores any submitted amount), creates owner-`0` payments for anonymous visitors (capped at 30 per event per 10 minutes via `countRecentAnonymousPayments`, then 429 `rate_limited`; signed-in users exempt) and returns the QR inline as `payment.qr` (PNG data URL). For signed-in users only it lists their own requests for the event (`listPaymentsByUserAndEvent`, newest first, max 50, no PayNow numbers; history and `GET .../payments/:paymentRef/qr` need a session) and, after creating one, sends them a private `sendPhoto` copy via `sendPaymentDm` in `src/web/telegram.ts` (no buttons; best-effort, `dm: false` in the response when Telegram refuses, e.g. the user never started the bot). It never posts to the event chat.
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to

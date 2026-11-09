@@ -294,9 +294,6 @@ h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:cen
 </style></head><body>
 <div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Pay event</h1></div>
 <p id="msg" class="alert hidden"></p>
-<div id="login" class="card hidden"><p>Sign in with Telegram to make a payment.</p>
-<script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="${bot}" data-size="large" data-auth-url="/api/login?ref=${ref}&amp;next=pay" data-request-access="write"></script>
-</div>
 <div id="app" class="card hidden">
 <p id="event-status" class="muted"></p>
 <div id="form" class="fields">
@@ -307,13 +304,15 @@ h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:cen
 <p id="err" class="err hidden"></p><button id="create" class="btn">Show payment QR</button>
 </div>
 <div id="result" class="hidden"><p id="note"></p><p id="dm" class="muted hidden">Open the bot in Telegram and press Start to receive a copy of this QR there.</p><div id="qr" class="qr"></div><button id="again" class="btn">Create another</button></div>
+<div id="signin" class="hidden"><p class="muted">Optional: sign in with Telegram to get a copy of your QR in Telegram and see your earlier requests.</p>
+<script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="${bot}" data-size="large" data-auth-url="/api/login?ref=${ref}&amp;next=pay" data-request-access="write"></script></div>
 <div id="history" class="hidden"><h2>Your previous requests</h2><div id="hist-list" class="hist"></div></div>
 </div>
 <script>
 const $=id=>document.getElementById(id), sgd=c=>'SGD '+(c/100).toFixed(2);
 const say=t=>{$('msg').textContent=t;$('msg').classList.toggle('hidden',!t)};
-const errorText={invalid_payer:'Enter a valid mobile number or UEN.',invalid_amount:'Enter a positive amount with up to 2 decimals.',event_closed:'This event is closed.',forbidden:'Not allowed.',not_found:'Event not found.'};
-let defaultCents=null;
+const errorText={invalid_payer:'Enter a valid mobile number or UEN.',invalid_amount:'Enter a positive amount with up to 2 decimals.',event_closed:'This event is closed.',forbidden:'Not allowed.',not_found:'Event not found.',rate_limited:'This page is busy. Please try again in a few minutes.'};
+let defaultCents=null,signedIn=false;
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const fmtDate=iso=>{const d=new Date(iso);return String(d.getUTCDate()).padStart(2,'0')+'-'+MONTHS[d.getUTCMonth()]+'-'+d.getUTCFullYear()};
 function setAmount(){
@@ -341,20 +340,20 @@ function showError(t){$('err').textContent=t;$('err').classList.toggle('hidden',
 function reset(){showError('');$('result').classList.add('hidden');$('form').classList.remove('hidden');$('payer').value='';$('name').value='';setAmount()}
 async function load(){
   const res=await fetch('/api/pay/${ref}',{credentials:'same-origin'});
-  if(res.status===401){$('login').classList.remove('hidden');return}
   if(res.status===404){say('Event not found.');return}
   if(!res.ok){say('Something went wrong.');return}
   const d=await res.json(); document.title='Pay: '+d.event.name; $('title').textContent='Pay: '+d.event.name;
   defaultCents=d.event.defaultAmountCents; $('event-status').textContent=d.event.status==='open'?'Create your payment request.':'This event is closed.';
   if(d.event.status!=='open'){$('form').classList.add('hidden');$('app').classList.remove('hidden');return}
-  setAmount(); $('app').classList.remove('hidden'); loadHistory();
+  setAmount(); $('app').classList.remove('hidden');
+  signedIn=d.signedIn; if(signedIn)loadHistory();else $('signin').classList.remove('hidden');
 }
 async function create(){
   const b=$('create');b.disabled=true;showError('');
   const res=await fetch('/api/pay/${ref}/payments',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({payer:$('payer').value,name:$('name').value,amount:$('amount').value})});
   const d=await res.json().catch(()=>({}));b.disabled=false;
   if(!res.ok){showError(errorText[d.error]||'Something went wrong.');return}
-  $('form').classList.add('hidden');$('result').classList.remove('hidden');$('dm').classList.toggle('hidden',d.payment.dm!==false);$('note').textContent='Payment '+d.payment.ref+' · '+sgd(d.payment.amountCents);$('qr').replaceChildren(Object.assign(document.createElement('img'),{src:'/api/pay/${ref}/payments/'+encodeURIComponent(d.payment.ref)+'/qr',alt:'Payment QR'}));loadHistory();
+  $('form').classList.add('hidden');$('result').classList.remove('hidden');$('dm').classList.toggle('hidden',d.payment.dm!==false);$('note').textContent='Payment '+d.payment.ref+' · '+sgd(d.payment.amountCents);$('qr').replaceChildren(Object.assign(document.createElement('img'),{src:d.payment.qr,alt:'Payment QR'}));if(signedIn)loadHistory();
 }
 $('create').onclick=create;$('again').onclick=reset;load();
 </script></body></html>`;

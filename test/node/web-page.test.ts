@@ -84,5 +84,12 @@ describe('event page shell', () => {
     expect(html).toContain("$('dm').classList.toggle('hidden',d.payment.dm!==false)");
     expect(html).toContain("alt:'Payment QR'");
     expect(html).not.toContain('sendPhoto');
+    // Sign-in is optional: the form shows without it, the widget sits in an optional block,
+    // the QR comes from the create response, and history is only for signed-in users
+    expect(html).not.toContain("$('login')");
+    expect(html).toContain('id="signin"');
+    expect(html).toContain("if(signedIn)loadHistory();else $('signin').classList.remove('hidden')");
+    expect(html).toContain('src:d.payment.qr');
+    expect(html).toContain('rate_limited');
   });
 });
