@@ -173,3 +173,27 @@ describe('event page shell', () => {
     expect(html).toContain('rate_limited');
   });
 });
+
+describe('landing page', () => {
+  const get = (bot: string) =>
+    handleWeb(new Request('https://x.test/'), { BOT_USERNAME: bot } as unknown as WebEnv);
+
+  it('is public at / with the Telegram link, getting-started steps and theme toggle', async () => {
+    const res = await get('my_bot');
+    expect(res.status).toBe(200);
+    expect(res.headers.get('Content-Type')).toContain('text/html');
+    const html = await res.text();
+    expect(html).toContain('href="https://t.me/my_bot"');
+    expect(html.match(/t\.me\/my_bot/g)).toHaveLength(2); // top and bottom
+    expect(html).toContain('/init');
+    expect(html).toContain('id="theme"');
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+    for (const code of scripts) expect(() => new Function(code)).not.toThrow();
+  });
+
+  it('sanitises the bot username in the link', async () => {
+    const html = await (await get('a"><script>x</script>')).text();
+    expect(html).toContain('https://t.me/ascriptxscript"');
+    expect(html).not.toContain('<script>x');
+  });
+});

@@ -10,7 +10,7 @@ import { paymentReferenceFromPayload } from '../sgqr/paynow';
 import { bmpToPng } from '../sgqr/png';
 import { renderQrPng } from '../sgqr/qr-render';
 import { SESSION_MAX_AGE_SEC, signSession, verifySession, verifyTelegramLogin } from './auth';
-import { renderPage, renderPayerPage } from './page';
+import { renderLandingPage, renderPage, renderPayerPage } from './page';
 import { postPaymentQr, sendPaymentDm } from './telegram';
 
 /** Bindings of the Pages project (see web/wrangler.toml). */
@@ -135,6 +135,12 @@ export async function handleWeb(
   const payerQr = url.pathname.match(/^\/api\/pay\/([^/]+)\/payments\/([^/]+)\/qr$/);
   if (payerQr && REF.test(payerQr[1]!) && REF.test(payerQr[2]!)) {
     return payerQrImage(request, env, payerQr[1]!, payerQr[2]!);
+  }
+
+  if (url.pathname === '/') {
+    return new Response(renderLandingPage(env.BOT_USERNAME), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
   }
 
   const page = url.pathname.match(/^\/events\/([^/]+)$/);

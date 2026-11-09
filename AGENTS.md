@@ -84,6 +84,7 @@ This project uses OpenSpec for change management. All changes are archived:
 23. `web-signed-in-user` (7 tasks) — archived 2026-11-09
 24. `attendee-check-in` (14 tasks) — archived 2026-11-09
 25. `row-check-in` (5 tasks) — archived 2026-11-09
+26. `add-landing-page` (6 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
@@ -98,7 +99,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (9 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (11 capabilities)
 
 ## Key Design Decisions
 
@@ -250,6 +251,7 @@ Attendee check-in (migration 0007: `payments.checked_in_at` / `checked_in_by`): 
 The payer page `/pay/<event-ref>` (same top bar and light/dark toggle as the admin page; no sign-in needed: `payerAccess` treats a missing/invalid session as anonymous, `userId` null, and only an unknown event is refused; `GET /api/pay/:ref` returns `signedIn`; `GET|POST /api/pay/:ref/payments`, `GET .../payments/:paymentRef/qr`) shows a fixed default amount as plain text (the server still ignores any submitted amount), creates owner-`0` payments for anonymous visitors (capped at 30 per event per 10 minutes via `countRecentAnonymousPayments`, then 429 `rate_limited`; signed-in users exempt) and returns the QR inline as `payment.qr` (PNG data URL). For signed-in users only it lists their own requests for the event (`listPaymentsByUserAndEvent`, newest first, max 50, no PayNow numbers; history and `GET .../payments/:paymentRef/qr` need a session) and, after creating one, sends them a private `sendPhoto` copy via `sendPaymentDm` in `src/web/telegram.ts` (no buttons; best-effort, `dm: false` in the response when Telegram refuses, e.g. the user never started the bot). It never posts to the event chat.
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
+The site root `/` is a public landing page (`renderLandingPage` in `src/web/page.ts`, linking to `https://t.me/${BOT_USERNAME}`; no static `index.html`).
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
 `handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell from `src/web/page.ts`: shadcn-style CSS tokens, compact payment cards, a native `<dialog>` for new requests, paybacks and pending QR/actions behind tap-to-expand buttons so no QR loads with the page; a top bar (`TOPBAR_HTML`, shared with the payer page) with the signed-in name, Sign out and the light/dark toggle (`data-theme`, saved in `localStorage` under one key for both pages; the toggle stays when signed out), then the logo (`web/public/logo.png`) with `Event: <name>`, then one row of Check-In, Pay and New request buttons (mobile layout checked down to 320 px), status-coloured pills and `dd-MMM-YYYY` dates; data
 written with `textContent`), `GET /api/events/:ref?status=&q=&limit=&cursor=` (JSON; pages of 20 via `searchPaymentsByEvent` with a `created_at|id` keyset cursor and `nextCursor`, literal case-insensitive search on payer name or reference, status filter, event-wide totals from `getEventStats`; the page has a search box, status buttons and "Load more", and refreshes the rows already loaded after an action), `GET /api/login` (Telegram Login Widget
