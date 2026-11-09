@@ -1,359 +1,159 @@
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
-describe('Migration 0000_initial_schema.sql', () => {
-  it('creates all tables with correct schema', () => {
-    const db = new Database(':memory:');
+const DIR = join(__dirname, '../../drizzle');
+const files = () =>
+  readdirSync(DIR)
+    .filter((f) => f.endsWith('.sql'))
+    .sort();
 
-    // Read and execute the migrations
-    const migration0000 = readFileSync(
-      join(__dirname, '../../drizzle/0000_initial_schema.sql'),
-      'utf-8'
-    );
-    const migration0001 = readFileSync(
-      join(__dirname, '../../drizzle/0001_certain_albert_cleary.sql'),
-      'utf-8'
-    );
-
-    // Split by statement-breakpoint and execute each statement
-    for (const migration of [migration0000, migration0001]) {
-      const statements = migration.split('--> statement-breakpoint');
-      for (const stmt of statements) {
-        const trimmed = stmt.trim();
-        if (trimmed) {
-          db.exec(trimmed);
-        }
-      }
+/** Applies every migration in drizzle/ in name order to an empty in-memory database. */
+function migrate(): Database.Database {
+  const db = new Database(':memory:');
+  for (const f of files()) {
+    for (const stmt of readFileSync(join(DIR, f), 'utf-8').split('--> statement-breakpoint')) {
+      if (stmt.trim()) db.exec(stmt);
     }
+  }
+  return db;
+}
 
-    // Verify users table
-    const usersInfo = db.prepare('PRAGMA table_info(users)').all();
-    expect(usersInfo).toHaveLength(6);
-    expect(usersInfo.map((c: any) => c.name)).toContain('telegram_id');
-    expect(usersInfo.map((c: any) => c.name)).toContain('payee_type');
-    expect(usersInfo.map((c: any) => c.name)).toContain('payee_value');
+const columns = (db: Database.Database, table: string) =>
+  (db.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map((c) => c.name);
 
-    // Verify payments table
-    const paymentsInfo = db.prepare('PRAGMA table_info(payments)').all();
-    expect(paymentsInfo).toHaveLength(13);
-    expect(paymentsInfo.map((c: any) => c.name)).toContain('ref');
-    expect(paymentsInfo.map((c: any) => c.name)).toContain('amount_cents');
-    expect(paymentsInfo.map((c: any) => c.name)).toContain('status');
-    expect(paymentsInfo.map((c: any) => c.name)).toContain('source');
-    expect(paymentsInfo.map((c: any) => c.name)).toContain('event_id');
+const rejectedByCheck = (db: Database.Database, sql: string) => {
+  try {
+    db.exec(sql);
+    return false;
+  } catch (e) {
+    return /CHECK/i.test((e as Error).message);
+  }
+};
 
-    // Verify events table
-    const eventsInfo = db.prepare('PRAGMA table_info(events)').all();
-    expect(eventsInfo).toHaveLength(10);
-    expect(eventsInfo.map((c: any) => c.name)).toContain('ref');
-    expect(eventsInfo.map((c: any) => c.name)).toContain('chat_id');
-    expect(eventsInfo.map((c: any) => c.name)).toContain('topic_id');
-    expect(eventsInfo.map((c: any) => c.name)).toContain('name');
-    expect(eventsInfo.map((c: any) => c.name)).toContain('payee_type');
-    expect(eventsInfo.map((c: any) => c.name)).toContain('payee_value');
-    expect(eventsInfo.map((c: any) => c.name)).toContain('status');
-    expect(eventsInfo.map((c: any) => c.name)).toContain('created_at');
-    expect(eventsInfo.map((c: any) => c.name)).toContain('closed_at');
-    const paybacksInfo = db.prepare('PRAGMA table_info(paybacks)').all();
-    expect(paybacksInfo).toHaveLength(10);
-    expect(paybacksInfo.map((c: any) => c.name)).toContain('ref');
-    expect(paybacksInfo.map((c: any) => c.name)).toContain('payment_id');
-    expect(paybacksInfo.map((c: any) => c.name)).toContain('payer_type');
-
-    db.close();
+describe('migrations (whole history, applied in order)', () => {
+  it('starts with the baseline, whose name must never change (deployed databases recorded it)', () => {
+    expect(files()[0]).toBe('0000_initial_schema.sql');
   });
 
-  it('enforces CHECK constraints on payments.status', () => {
-    const db = new Database(':memory:');
-    const migration = readFileSync(
-      join(__dirname, '../../drizzle/0000_initial_schema.sql'),
-      'utf-8'
-    );
+  it('creates every table with the expected columns', () => {
+    const db = migrate();
+    const tables = (
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+        )
+        .all() as Array<{
+        name: string;
+      }>
+    ).map((t) => t.name);
+    expect(tables).toEqual(['events', 'paybacks', 'payments', 'usage_counters', 'users']);
 
-    const statements = migration.split('--> statement-breakpoint');
-    for (const stmt of statements) {
-      const trimmed = stmt.trim();
-      if (trimmed) {
-        db.exec(trimmed);
-      }
-    }
-
-    // Valid status should work
-    db.prepare(`
-      INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at)
-      VALUES ('test-ref-1', 123, 'test', 1000, 'mobile', '+6512345678', 'pending', 'manual', 'payload', '2024-01-01')
-    `).run();
-
-    // Invalid status should fail
-    expect(() => {
-      db.prepare(`
-        INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at)
-        VALUES ('test-ref-2', 123, 'test', 1000, 'mobile', '+6512345678', 'invalid', 'manual', 'payload', '2024-01-01')
-      `).run();
-    }).toThrow(/CHECK constraint failed/i);
-
-    db.close();
-  });
-
-  it('enforces CHECK constraints on paybacks.status', () => {
-    const db = new Database(':memory:');
-    const migration = readFileSync(
-      join(__dirname, '../../drizzle/0000_initial_schema.sql'),
-      'utf-8'
-    );
-
-    const statements = migration.split('--> statement-breakpoint');
-    for (const stmt of statements) {
-      const trimmed = stmt.trim();
-      if (trimmed) {
-        db.exec(trimmed);
-      }
-    }
-
-    // Create a payment first
-    db.prepare(`
-      INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at)
-      VALUES ('test-ref-1', 123, 'test', 1000, 'mobile', '+6512345678', 'received', 'manual', 'payload', '2024-01-01')
-    `).run();
-
-    // Valid payback status should work
-    db.prepare(`
-      INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at)
-      VALUES ('payback-ref-1', 1, 'mobile', '+6587654321', 500, 'pending', 'payload', '2024-01-01')
-    `).run();
-
-    // Invalid status should fail
-    expect(() => {
-      db.prepare(`
-        INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at)
-        VALUES ('payback-ref-2', 1, 'mobile', '+6587654321', 500, 'invalid', 'payload', '2024-01-01')
-      `).run();
-    }).toThrow(/CHECK constraint failed/i);
-
-    db.close();
-  });
-
-  it('is idempotent (can be applied twice)', () => {
-    const db = new Database(':memory:');
-    const migration = readFileSync(
-      join(__dirname, '../../drizzle/0000_initial_schema.sql'),
-      'utf-8'
-    );
-
-    const statements = migration.split('--> statement-breakpoint');
-
-    // Apply once
-    for (const stmt of statements) {
-      const trimmed = stmt.trim();
-      if (trimmed) {
-        db.exec(trimmed);
-      }
-    }
-
-    // Apply again should fail (tables already exist)
-    expect(() => {
-      for (const stmt of statements) {
-        const trimmed = stmt.trim();
-        if (trimmed) {
-          db.exec(trimmed);
-        }
-      }
-    }).toThrow();
-
-    db.close();
-  });
-
-  it('0004 widens payments.status to allow voided and keeps every column of existing rows', () => {
-    const db = new Database(':memory:');
-    const run = (file: string) => {
-      for (const stmt of readFileSync(join(__dirname, `../../drizzle/${file}`), 'utf-8').split(
-        '--> statement-breakpoint'
-      )) {
-        if (stmt.trim()) db.exec(stmt.trim());
-      }
-    };
-    for (const f of [
-      '0000_initial_schema.sql',
-      '0001_certain_albert_cleary.sql',
-      '0002_empty_rocket_racer.sql',
-      '0003_paybacks_cancelled_status.sql',
-    ]) {
-      run(f);
-    }
-    const insert = db.prepare(
-      `INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at, received_at, event_id, payer_type, payer_value, payer_name)
-       VALUES (?, 7, 'Dinner', 1250, 'mobile', '+6591234567', ?, 'manual', 'payload', '2024-01-01', ?, ?, ?, ?, ?)`
-    );
-    insert.run('p1', 'pending', null, 3, 'mobile', '+6591234568', 'Alice');
-    insert.run('p2', 'received', '2024-01-02', null, null, null, null); // legacy row
-    const before = db.prepare('SELECT * FROM payments ORDER BY id').all();
-
-    run('0004_payments_voided_status.sql');
-
-    expect(db.prepare('SELECT * FROM payments ORDER BY id').all()).toEqual(before);
-    insert.run('p3', 'voided', null, 3, 'mobile', '+6591234568', 'Alice');
-    expect(() => insert.run('p4', 'bogus', null, 3, null, null, null)).toThrow(
-      /CHECK constraint failed/i
-    );
-    expect(() => insert.run('p1', 'pending', null, 3, null, null, null)).toThrow(/UNIQUE/i);
-    db.close();
-  });
-
-  it('0005 adds nullable audit columns and leaves existing rows with no actor', () => {
-    const db = new Database(':memory:');
-    const run = (file: string) => {
-      for (const stmt of readFileSync(join(__dirname, `../../drizzle/${file}`), 'utf-8').split(
-        '--> statement-breakpoint'
-      )) {
-        if (stmt.trim()) db.exec(stmt.trim());
-      }
-    };
-    for (const f of [
-      '0000_initial_schema.sql',
-      '0001_certain_albert_cleary.sql',
-      '0002_empty_rocket_racer.sql',
-      '0003_paybacks_cancelled_status.sql',
-      '0004_payments_voided_status.sql',
-    ]) {
-      run(f);
-    }
-    db.exec(
-      `INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at)
-       VALUES ('p1', 7, 'Dinner', 1250, 'mobile', '+6591234567', 'received', 'manual', 'payload', '2024-01-01')`
-    );
-    db.exec(
-      `INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at)
-       VALUES ('b1', 1, 'mobile', '+6598765432', 500, 'sent', 'payload', '2024-01-02')`
-    );
-
-    run('0005_admin_audit_columns.sql');
-
-    expect(db.prepare('SELECT received_by, voided_by FROM payments').get()).toEqual({
-      received_by: null,
-      voided_by: null,
-    });
-    expect(db.prepare('SELECT created_by, sent_by, cancelled_by FROM paybacks').get()).toEqual({
-      created_by: null,
-      sent_by: null,
-      cancelled_by: null,
-    });
-    db.close();
-  });
-
-  it('0006 adds a nullable default amount and leaves existing events with none', () => {
-    const db = new Database(':memory:');
-    const run = (file: string) => {
-      for (const stmt of readFileSync(join(__dirname, `../../drizzle/${file}`), 'utf-8').split(
-        '--> statement-breakpoint'
-      )) {
-        if (stmt.trim()) db.exec(stmt.trim());
-      }
-    };
-    for (const f of [
-      '0000_initial_schema.sql',
-      '0001_certain_albert_cleary.sql',
-      '0002_empty_rocket_racer.sql',
-      '0003_paybacks_cancelled_status.sql',
-      '0004_payments_voided_status.sql',
-      '0005_admin_audit_columns.sql',
-    ]) {
-      run(f);
-    }
-    db.exec(
-      `INSERT INTO events (ref, chat_id, topic_id, name, payee_type, payee_value, status, created_at)
-       VALUES ('e1', -1, 0, 'Old event', 'mobile', '+6591234567', 'open', '2024-01-01')`
-    );
-
-    run('0006_event_default_amount.sql');
-
-    expect(db.prepare('SELECT default_amount_cents FROM events').get()).toEqual({
-      default_amount_cents: null,
-    });
-    db.exec(`UPDATE events SET default_amount_cents = 2100 WHERE ref = 'e1'`);
-    expect(db.prepare('SELECT default_amount_cents FROM events').get()).toEqual({
-      default_amount_cents: 2100,
-    });
-    db.close();
-  });
-
-  it('0007 adds nullable check-in columns and leaves existing payments not checked in', () => {
-    const db = new Database(':memory:');
-    const run = (file: string) => {
-      for (const stmt of readFileSync(join(__dirname, `../../drizzle/${file}`), 'utf-8').split(
-        '--> statement-breakpoint'
-      )) {
-        if (stmt.trim()) db.exec(stmt.trim());
-      }
-    };
-    for (const f of [
-      '0000_initial_schema.sql',
-      '0001_certain_albert_cleary.sql',
-      '0002_empty_rocket_racer.sql',
-      '0003_paybacks_cancelled_status.sql',
-      '0004_payments_voided_status.sql',
-      '0005_admin_audit_columns.sql',
-      '0006_event_default_amount.sql',
-    ]) {
-      run(f);
-    }
-    db.exec(
-      `INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at)
-       VALUES ('p1', 7, 'Dinner', 1250, 'mobile', '+6591234567', 'received', 'manual', 'payload', '2024-01-01')`
-    );
-
-    run('0007_payment_check_in.sql');
-
-    expect(db.prepare('SELECT checked_in_at, checked_in_by FROM payments').get()).toEqual({
-      checked_in_at: null,
-      checked_in_by: null,
-    });
-    db.exec(`UPDATE payments SET checked_in_at = '2024-01-02', checked_in_by = 9 WHERE ref = 'p1'`);
-    expect(db.prepare('SELECT checked_in_at, checked_in_by FROM payments').get()).toEqual({
-      checked_in_at: '2024-01-02',
-      checked_in_by: 9,
-    });
-    db.close();
-  });
-
-  it('0003 widens paybacks.status to allow cancelled and keeps existing rows', () => {
-    const db = new Database(':memory:');
-    const run = (file: string) => {
-      for (const stmt of readFileSync(join(__dirname, `../../drizzle/${file}`), 'utf-8').split(
-        '--> statement-breakpoint'
-      )) {
-        if (stmt.trim()) db.exec(stmt.trim());
-      }
-    };
-    for (const f of [
-      '0000_initial_schema.sql',
-      '0001_certain_albert_cleary.sql',
-      '0002_empty_rocket_racer.sql',
-    ]) {
-      run(f);
-    }
-    db.prepare(
-      `INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at)
-       VALUES ('p1', 1, 'd', 1000, 'mobile', '+6512345678', 'received', 'manual', 'x', '2024-01-01')`
-    ).run();
-    const insert = db.prepare(
-      `INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at, sent_at)
-       VALUES (?, 1, 'mobile', '+6587654321', 500, ?, 'x', '2024-01-01', ?)`
-    );
-    insert.run('pb1', 'pending', null);
-    insert.run('pb2', 'sent', '2024-01-02');
-
-    run('0003_paybacks_cancelled_status.sql');
-
-    const rows = db.prepare('SELECT ref, status, sent_at FROM paybacks ORDER BY id').all();
-    expect(rows).toEqual([
-      { ref: 'pb1', status: 'pending', sent_at: null },
-      { ref: 'pb2', status: 'sent', sent_at: '2024-01-02' },
+    expect(columns(db, 'users')).toEqual([
+      'telegram_id',
+      'payee_type',
+      'payee_value',
+      'display_name',
+      'created_at',
+      'updated_at',
     ]);
-    insert.run('pb3', 'cancelled', null);
-    expect(() => insert.run('pb4', 'bogus', null)).toThrow(/CHECK constraint failed/i);
-    expect(() => insert.run('pb1', 'pending', null)).toThrow(/UNIQUE/i); // index recreated
-    db.close();
+    expect(columns(db, 'events')).toEqual([
+      'id',
+      'ref',
+      'chat_id',
+      'topic_id',
+      'name',
+      'payee_type',
+      'payee_value',
+      'status',
+      'created_at',
+      'closed_at',
+      'default_amount_cents',
+    ]);
+    expect(columns(db, 'payments')).toEqual([
+      'id',
+      'ref',
+      'user_id',
+      'description',
+      'amount_cents',
+      'payee_type',
+      'payee_value',
+      'status',
+      'source',
+      'qr_payload',
+      'created_at',
+      'received_at',
+      'event_id',
+      'payer_type',
+      'payer_value',
+      'payer_name',
+      'received_by',
+      'voided_by',
+      'checked_in_at',
+      'checked_in_by',
+    ]);
+    expect(columns(db, 'paybacks')).toEqual([
+      'id',
+      'ref',
+      'payment_id',
+      'payer_type',
+      'payer_value',
+      'amount_cents',
+      'status',
+      'qr_payload',
+      'created_at',
+      'sent_at',
+      'created_by',
+      'sent_by',
+      'cancelled_by',
+    ]);
+    expect(columns(db, 'usage_counters')).toEqual(['day', 'metric', 'count']);
+  });
+
+  it('has unique references and a (day, metric) key for the counters', () => {
+    const db = migrate();
+    const unique = (
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE '%_ref_unique' ORDER BY name"
+        )
+        .all() as Array<{
+        name: string;
+      }>
+    ).map((i) => i.name);
+    expect(unique).toEqual(['events_ref_unique', 'paybacks_ref_unique', 'payments_ref_unique']);
+
+    const pk = (
+      db.prepare('PRAGMA table_info(usage_counters)').all() as Array<{ name: string; pk: number }>
+    )
+      .filter((c) => c.pk > 0)
+      .sort((a, b) => a.pk - b.pk)
+      .map((c) => c.name);
+    expect(pk).toEqual(['day', 'metric']);
+  });
+
+  it('enforces the status CHECK constraints (they exist only in the SQL, not in the Drizzle schema)', () => {
+    const db = migrate();
+    const event = (status: string) =>
+      `INSERT INTO events (ref, chat_id, name, payee_type, payee_value, status, created_at) VALUES ('E${status}', 1, 'n', 'mobile', 'p', '${status}', 't')`;
+    const payment = (status: string) =>
+      `INSERT INTO payments (ref, user_id, description, amount_cents, payee_type, payee_value, status, source, qr_payload, created_at) VALUES ('P${status}', 1, 'd', 1, 'mobile', 'p', '${status}', 'manual', 'q', 't')`;
+    const payback = (status: string) =>
+      `INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at) VALUES ('B${status}', 1, 'mobile', 'p', 1, '${status}', 'q', 't')`;
+
+    for (const ok of ['open', 'closed']) expect(rejectedByCheck(db, event(ok))).toBe(false);
+    for (const ok of ['pending', 'received', 'voided'])
+      expect(rejectedByCheck(db, payment(ok))).toBe(false);
+    for (const ok of ['pending', 'sent', 'cancelled'])
+      expect(rejectedByCheck(db, payback(ok))).toBe(false);
+
+    expect(rejectedByCheck(db, event('bogus'))).toBe(true);
+    expect(rejectedByCheck(db, payment('bogus'))).toBe(true);
+    expect(rejectedByCheck(db, payback('bogus'))).toBe(true);
+  });
+
+  it('applies cleanly twice into separate databases (no leftover state)', () => {
+    expect(columns(migrate(), 'payments')).toEqual(columns(migrate(), 'payments'));
   });
 });

@@ -1,1 +1,0 @@
-ALTER TABLE `events` ADD `default_amount_cents` integer;

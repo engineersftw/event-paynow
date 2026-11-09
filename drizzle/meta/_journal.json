@@ -6,63 +6,7 @@
       "idx": 0,
       "version": "6",
       "when": 1794029109955,
-      "tag": "0000_sticky_wendell_rand",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "6",
-      "when": 1794061714971,
-      "tag": "0001_certain_albert_cleary",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "6",
-      "when": 1794065604844,
-      "tag": "0002_empty_rocket_racer",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "6",
-      "when": 1794067138115,
-      "tag": "0003_paybacks_cancelled_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "6",
-      "when": 1794071641940,
-      "tag": "0004_payments_voided_status",
-      "breakpoints": true
-    },
-    {
-      "idx": 5,
-      "version": "6",
-      "when": 1794107284432,
-      "tag": "0005_admin_audit_columns",
-      "breakpoints": true
-    },
-    {
-      "idx": 6,
-      "version": "6",
-      "when": 1794133296449,
-      "tag": "0006_event_default_amount",
-      "breakpoints": true
-    },
-    {
-      "idx": 7,
-      "version": "6",
-      "when": 1794191291844,
-      "tag": "0007_payment_check_in",
-      "breakpoints": true
-    },
-    {
-      "idx": 8,
-      "version": "6",
-      "when": 1794236560992,
-      "tag": "0008_usage_counters",
+      "tag": "0000_initial_schema",
       "breakpoints": true
     }
   ]

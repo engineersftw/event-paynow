@@ -250,6 +250,8 @@ npm run db:migrate:local  # Apply migrations locally
 npx wrangler d1 migrations apply paynow-db --remote  # Apply to production
 ```
 
+The migration history is one baseline, `drizzle/0000_initial_schema.sql`, plus any later migrations numbered from `0001`. Never rename the baseline: D1 records applied migrations by file name, so a renamed file would be run again on the live database. The status CHECK constraints exist only in the SQL (not in `src/db/schema.ts`), so a hand-written table rebuild must repeat them.
+
 ## Project Structure
 
 ```
@@ -294,7 +296,7 @@ src/
 
 web/                       # Cloudflare Pages project (functions/ delegates to src/web)
 
-drizzle/                   # SQL migrations (generated + hand-written table rebuilds)
+drizzle/                   # SQL migrations: one baseline (0000_initial_schema.sql, never rename it) + later ones from 0001
 
 .github/workflows/         # ci.yml (checks + tests), deploy.yml (deploys from main)
 
@@ -307,7 +309,7 @@ docs/
 └── testing.md             # Testing strategy
 
 openspec/
-├── specs/                 # Main specs (15 capabilities)
+├── specs/                 # Main specs (16 capabilities)
 └── changes/archive/       # Archived changes
 ```
 
