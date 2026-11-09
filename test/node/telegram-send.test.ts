@@ -20,6 +20,9 @@ describe('Telegram senders', () => {
     const form = formOf(f);
     expect(form.get('chat_id')).toBe('42');
     expect(form.get('caption')).toContain('Payer: Alice');
+    expect(form.get('caption')).toContain(
+      'Keep this QR for event check-in and payment verification'
+    );
     expect(form.get('reply_markup')).toBeNull();
     expect((f.mock.calls[0] as any)[0]).toContain('/sendPhoto');
   });

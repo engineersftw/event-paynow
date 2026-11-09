@@ -6,6 +6,9 @@ import { buildPayNowPayload } from '../sgqr/paynow';
 
 export const SHARE_HINT = 'Forward this message to share';
 
+/** Shown with every payment QR (captions and the payer page): the QR is the attendee's ticket. */
+export const KEEP_QR_REMINDER = 'Keep this QR for event check-in and payment verification';
+
 export interface PaymentRequestInput {
   payerType: PayeeType;
   payerValue: string;
@@ -60,6 +63,7 @@ export function paymentCaption(payment: Payment): string {
     `SGD ${formatCents(payment.amountCents)}`,
     payment.ref,
     ...captionPart('Payer', payment.payerName),
+    KEEP_QR_REMINDER,
     SHARE_HINT,
   ].join(' / ');
 }

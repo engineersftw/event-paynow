@@ -36,6 +36,29 @@ export function truncateAnsi(value: string, maxLen: number): string {
   return cleaned.slice(0, maxLen);
 }
 
+/** Split a TLV string into [tag, value] pairs; null if the lengths do not add up. */
+function readTlv(s: string): Array<[string, string]> | null {
+  const fields: Array<[string, string]> = [];
+  let i = 0;
+  while (i < s.length) {
+    const len = /^\d\d$/.test(s.slice(i + 2, i + 4)) ? Number(s.slice(i + 2, i + 4)) : -1;
+    if (len < 0 || i + 4 + len > s.length) return null;
+    fields.push([s.slice(i, i + 2), s.slice(i + 4, i + 4 + len)]);
+    i += 4 + len;
+  }
+  return fields;
+}
+
+/**
+ * The payment reference in a PayNow payload (tag 26, sub-tag 05, as `buildPayNowPayload` writes
+ * it), or null when the payload has none or is malformed. Does not check the CRC.
+ */
+export function paymentReferenceFromPayload(payload: string): string | null {
+  const merchant = readTlv(payload)?.find(([tag]) => tag === '26');
+  const reference = merchant && readTlv(merchant[1])?.find(([tag]) => tag === '05');
+  return reference?.[1] || null;
+}
+
 /**
  * Build an EMVCo-compliant PayNow (SGQR) payload string with CRC16.
  *

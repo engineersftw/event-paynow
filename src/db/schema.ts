@@ -49,6 +49,9 @@ export const payments = sqliteTable('payments', {
   // Audit: Telegram user ids of whoever performed the action (null for older rows)
   receivedBy: integer('received_by'),
   voidedBy: integer('voided_by'),
+  // Door check-in (once per payment): when, and the Telegram user id of the admin
+  checkedInAt: text('checked_in_at'),
+  checkedInBy: integer('checked_in_by'),
 });
 
 export const paybacks = sqliteTable('paybacks', {

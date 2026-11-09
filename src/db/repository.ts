@@ -67,6 +67,9 @@ export interface Payment {
   /** Telegram user id of who marked it received / voided it; null for rows from before auditing. */
   receivedBy?: number | null;
   voidedBy?: number | null;
+  /** When the payment was checked in at the event, and by whom; null when not checked in. */
+  checkedInAt?: string | null;
+  checkedInBy?: number | null;
 }
 
 export interface Payback {
@@ -169,6 +172,11 @@ export interface Repository {
   ): Promise<Payment | null>;
   /** Pending → voided compare-and-set. Returns null if missing or no longer pending. */
   voidPayment(ref: string, actorId?: number): Promise<Payment | null>;
+  /**
+   * Check a payment in at the event: one compare-and-set on "not voided and not yet checked in".
+   * Returns null if missing, voided or already checked in (the caller re-reads to tell which).
+   */
+  checkInPayment(ref: string, actorId: number, timestamp: string): Promise<Payment | null>;
 
   // Paybacks
   createPayback(

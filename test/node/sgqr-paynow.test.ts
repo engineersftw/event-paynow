@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { buildPayNowPayload, truncateAnsi } from '../../src/sgqr/paynow';
+import {
+  buildPayNowPayload,
+  paymentReferenceFromPayload,
+  truncateAnsi,
+} from '../../src/sgqr/paynow';
 
 describe('truncateAnsi', () => {
   it('keeps printable ASCII unchanged', () => {
@@ -154,5 +158,35 @@ describe('buildPayNowPayload — known golden payload', () => {
     expect(payload).toContain('0211+6591234567');
     expect(payload).toContain('03011'); // editable
     expect(payload).toMatch(/6304[0-9A-F]{4}$/);
+  });
+});
+
+describe('paymentReferenceFromPayload', () => {
+  const base = { proxyType: 'mobile' as const, proxyValue: '+6591234567', amountCents: 2300 };
+
+  it('reads back the reference buildPayNowPayload wrote', () => {
+    const payload = buildPayNowPayload({ ...base, reference: 'ABCDE12345', description: 'Dinner' });
+    expect(paymentReferenceFromPayload(payload)).toBe('ABCDE12345');
+    const uen = buildPayNowPayload({
+      ...base,
+      proxyType: 'uen',
+      proxyValue: '201234567A',
+      reference: 'ZZZZZ99999',
+    });
+    expect(paymentReferenceFromPayload(uen)).toBe('ZZZZZ99999');
+  });
+
+  it('gives the stored (truncated) reference when it was longer than 25 characters', () => {
+    const payload = buildPayNowPayload({ ...base, reference: 'R'.repeat(30) });
+    expect(paymentReferenceFromPayload(payload)).toBe('R'.repeat(25));
+  });
+
+  it('is null without a reference, for garbage and for broken lengths', () => {
+    expect(paymentReferenceFromPayload(buildPayNowPayload(base))).toBeNull();
+    for (const bad of ['', 'hello', '0002', '2699abc', '0201', '26049999']) {
+      expect(paymentReferenceFromPayload(bad)).toBeNull();
+    }
+    // A bank-style QR whose tag 26 has no sub-tag 05
+    expect(paymentReferenceFromPayload('00020101021226180009SG.PAYNOW010100')).toBeNull();
   });
 });

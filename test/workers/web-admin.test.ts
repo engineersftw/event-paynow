@@ -497,6 +497,50 @@ describe('anonymous payer requests', () => {
   });
 });
 
+describe('checkInPayment', () => {
+  it('checks in a pending or received payment once and keeps the first time and actor', async () => {
+    const e = await seedEvent('EVTCHECK01', -70);
+    await seedPayment(e.id, 'CHKP000001', 1, 100);
+    await seedPayment(e.id, 'CHKP000002', 1, 100);
+    await repo.updatePaymentStatus('CHKP000002', 'received', 'manual', T);
+
+    const a = await repo.checkInPayment('CHKP000001', 11, '2024-02-01T00:00:00Z');
+    expect(a).toMatchObject({
+      status: 'pending',
+      checkedInAt: '2024-02-01T00:00:00Z',
+      checkedInBy: 11,
+    });
+    expect(await repo.checkInPayment('CHKP000001', 12, '2024-02-02T00:00:00Z')).toBeNull();
+    expect(await repo.getPaymentByRef('CHKP000001')).toMatchObject({
+      checkedInAt: '2024-02-01T00:00:00Z',
+      checkedInBy: 11,
+    });
+    const b = await repo.checkInPayment('CHKP000002', 11, '2024-02-01T00:00:00Z');
+    expect(b).toMatchObject({ status: 'received', amountCents: 100 });
+  });
+
+  it('refuses voided and unknown payments and records nothing', async () => {
+    const e = await seedEvent('EVTCHECK02', -71);
+    await seedPayment(e.id, 'CHKP000003', 1, 100);
+    await repo.voidPayment('CHKP000003');
+    expect(await repo.checkInPayment('CHKP000003', 11, T)).toBeNull();
+    expect((await repo.getPaymentByRef('CHKP000003'))!.checkedInAt).toBeNull();
+    expect(await repo.checkInPayment('NOSUCHPAY1', 11, T)).toBeNull();
+  });
+
+  it('has one winner when two admins check in at once', async () => {
+    const e = await seedEvent('EVTCHECK03', -72);
+    await seedPayment(e.id, 'CHKP000004', 1, 100);
+    const results = await Promise.all([
+      repo.checkInPayment('CHKP000004', 21, T),
+      repo.checkInPayment('CHKP000004', 22, T),
+    ]);
+    expect(results.filter(Boolean)).toHaveLength(1);
+    const winner = results.find(Boolean)!;
+    expect((await repo.getPaymentByRef('CHKP000004'))!.checkedInBy).toBe(winner.checkedInBy);
+  });
+});
+
 describe('countRecentAnonymousPayments', () => {
   it('counts only that event’s owner-0 rows inside the window', async () => {
     const e1 = await seedEvent('EVTCNT0001', -66);

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { Event, Payment, Repository } from '../../src/db/repository';
 import {
   createPaymentRequest,
+  KEEP_QR_REMINDER,
   paymentCaption,
   paymentImageLines,
   SHARE_HINT,
@@ -64,7 +65,7 @@ describe('caption and image lines', () => {
   it('carry the name and never the payer number', () => {
     const p = payment('Alice');
     expect(paymentCaption(p)).toBe(
-      `Team Lunch / SGD 12.50 / ABC123DEFG / Payer: Alice / ${SHARE_HINT}`
+      `Team Lunch / SGD 12.50 / ABC123DEFG / Payer: Alice / ${KEEP_QR_REMINDER} / ${SHARE_HINT}`
     );
     expect(paymentImageLines(event, p)).toEqual([
       'Team Lunch',
@@ -77,7 +78,7 @@ describe('caption and image lines', () => {
 
   it('omit the payer segment without a name, and repeat the description only when it differs', () => {
     expect(paymentCaption(payment(null))).toBe(
-      `Team Lunch / SGD 12.50 / ABC123DEFG / ${SHARE_HINT}`
+      `Team Lunch / SGD 12.50 / ABC123DEFG / ${KEEP_QR_REMINDER} / ${SHARE_HINT}`
     );
     expect(paymentImageLines(event, payment(null))).toEqual([
       'Team Lunch',

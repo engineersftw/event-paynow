@@ -60,6 +60,8 @@ beforeAll(async () => {
       received_at TEXT,
       received_by INTEGER,
       voided_by INTEGER,
+      checked_in_at TEXT,
+      checked_in_by INTEGER,
       FOREIGN KEY (user_id) REFERENCES users(telegram_id),
       FOREIGN KEY (event_id) REFERENCES events(id)
     )`,

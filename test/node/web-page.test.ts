@@ -67,6 +67,28 @@ describe('event page shell', () => {
     expect(fmtDate(null)).toBe('');
   });
 
+  it('the event page has a Scan dialog that decodes in the browser and checks attendees in', () => {
+    const html = renderPage('EVT1', 'my_bot');
+    expect(html).toContain('id="scan"');
+    expect(html).toContain('id="scan-dlg"');
+    expect(html).toContain('id="sc-video"');
+    expect(html).toContain("facingMode: 'environment'");
+    // BarcodeDetector when present, otherwise the vendored jsQR, loaded only on demand
+    expect(html).toContain('BarcodeDetector');
+    expect(html).toContain("s.src = '/vendor/jsqr.js'");
+    expect(html).not.toContain('<script src="/vendor/jsqr.js"');
+    // The decoded text goes to the server, which matches it; typed references are the fallback
+    expect(html).toContain("post('/api/events/EVT1/scan', body)");
+    expect(html).toContain('resolveScan({ payload: text })');
+    expect(html).toContain('resolveScan({ ref: v })');
+    expect(html).toContain("'/check-in'");
+    expect(html).toContain('Checked in ');
+    expect(html).toContain("'badge checked'");
+    for (const code of [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!)) {
+      expect(() => new Function(code)).not.toThrow();
+    }
+  });
+
   it('both pages show the signed-in user with Sign out, hidden until /api/me reports one', () => {
     for (const html of [renderPage('EVT1', 'my_bot'), renderPayerPage('EVT1', 'my_bot')]) {
       expect(html).toContain('id="me"');
@@ -105,6 +127,11 @@ describe('event page shell', () => {
     expect(html).toContain('id="signin"');
     expect(html).toContain("if(signedIn)loadHistory();else $('signin').classList.remove('hidden')");
     expect(html).toContain('src:d.payment.qr');
+    // The keep-the-QR reminder sits by both QRs the page shows (after creating, and a reopened pending request)
+    expect(html.split('Keep this QR for event check-in and payment verification.').length - 1).toBe(
+      2
+    );
+    expect(html).toContain('id="keep"');
     expect(html).toContain('rate_limited');
   });
 });

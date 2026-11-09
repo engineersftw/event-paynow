@@ -285,6 +285,8 @@ payments (
   received_at TEXT,
   received_by INTEGER,      -- audit: Telegram user ids, null for older rows
   voided_by INTEGER,
+  checked_in_at TEXT,       -- door check-in: once per payment, by an admin (migration 0007)
+  checked_in_by INTEGER,
   FOREIGN KEY (user_id) REFERENCES users(telegram_id),
   FOREIGN KEY (event_id) REFERENCES events(id)
 )
@@ -582,7 +584,8 @@ npm run test:watch
 
 - Per-chat DO ensures conversation state isolation
 - Payment actions (view, receive, void, pay back, sent, cancel) are limited to the payment's owner and to administrators of the event's chat, checked live with `getChatMember` (denied when the check fails; payments without an event stay owner-only); event actions require the event to belong to the chat the tap came from
-- Every such action records who performed it (audit columns `received_by`, `voided_by`, `created_by`, `sent_by`, `cancelled_by`)
+- Check-in at the event: the admin page scans a payment QR (decoded in the browser, matched exactly against the stored payload on the server) and records `checked_in_at` / `checked_in_by` once per payment.
+- Every such action records who performed it (audit columns `received_by`, `voided_by`, `checked_in_by`, `created_by`, `sent_by`, `cancelled_by`)
 - No cross-user data leakage possible
 - Captions, status lines and QR images carry display names only, never PayNow numbers
 - Web admin: Telegram Login data is HMAC-verified and expires after a day, sessions are signed HttpOnly cookies, and viewing requires chat-admin status checked live
