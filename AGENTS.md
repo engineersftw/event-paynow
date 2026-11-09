@@ -94,6 +94,7 @@ This project uses OpenSpec for change management. All changes are archived:
 30. `add-explainer-soundtrack` (7 tasks) — archived 2026-11-09
 31. `add-landing-video` (5 tasks) — archived 2026-11-09
 32. `add-site-footer` (5 tasks) — archived 2026-11-09
+33. `add-usage-stats` (10 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
@@ -108,7 +109,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (14 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (15 capabilities)
 
 ## Key Design Decisions
 
