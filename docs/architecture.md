@@ -247,7 +247,7 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 
 - Serverless SQLite database on Cloudflare
 - Four tables: `users`, `events`, `payments`, `paybacks`
-- CHECK constraints enforce valid states; widening one means rebuilding the table (migrations 0003 and 0004 do this for `paybacks` and `payments`)
+- CHECK constraints enforce valid states; widening one means rebuilding the table (the original migrations 0003 and 0004 did this for `paybacks` and `payments`; the history is now one baseline, `0000_initial_schema.sql`, which must never be renamed)
 
 **Schema**:
 
@@ -293,7 +293,7 @@ payments (
   received_at TEXT,
   received_by INTEGER,      -- audit: Telegram user ids, null for older rows
   voided_by INTEGER,
-  checked_in_at TEXT,       -- door check-in: once per payment, by an admin (migration 0007)
+  checked_in_at TEXT,       -- door check-in: once per payment, by an admin (added by an early migration, now in the baseline)
   checked_in_by INTEGER,
   FOREIGN KEY (user_id) REFERENCES users(telegram_id),
   FOREIGN KEY (event_id) REFERENCES events(id)
