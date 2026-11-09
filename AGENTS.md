@@ -95,6 +95,7 @@ This project uses OpenSpec for change management. All changes are archived:
 31. `add-landing-video` (5 tasks) — archived 2026-11-09
 32. `add-site-footer` (5 tasks) — archived 2026-11-09
 33. `add-usage-stats` (10 tasks) — archived 2026-11-09
+34. `squash-migrations` (8 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
@@ -109,7 +110,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (15 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (16 capabilities)
 
 ## Key Design Decisions
 
