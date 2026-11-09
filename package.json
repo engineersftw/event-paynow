@@ -36,6 +36,7 @@
     "better-sqlite3": "^13.0.3",
     "drizzle-kit": "^0.31.11",
     "jsqr": "^1.4.0",
+    "playwright": "^1.65.0",
     "typescript": "^5.7.2",
     "vitest": "^5.1.0",
     "wrangler": "^4.158.0"
