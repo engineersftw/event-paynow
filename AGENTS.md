@@ -83,6 +83,7 @@ This project uses OpenSpec for change management. All changes are archived:
 22. `optional-payer-sign-in` (7 tasks) — archived 2026-11-09
 23. `web-signed-in-user` (7 tasks) — archived 2026-11-09
 24. `attendee-check-in` (14 tasks) — archived 2026-11-09
+25. `row-check-in` (5 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
