@@ -54,6 +54,10 @@ describe('event page shell', () => {
     expect(html).toContain("$('np-amount').value = defaultAmount;");
     // list controls: paging, search and status filter
     expect(html).toContain('id="more"');
+    expect(html).toContain('Checked in');
+    expect(html).toContain('Not checked in (paid)');
+    expect(html).toContain('Not checked in (pending)');
+    expect(html).toContain("$('checked-in').textContent = String(d.checkInStats.checkedInCount)");
     expect(html).toContain('>Load more<');
     expect(html).toContain('id="q"');
     expect(html).toContain("['voided', 'Voided']");

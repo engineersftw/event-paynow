@@ -664,6 +664,11 @@ async function eventData(
       paidBackCents: stats.paidBackCents,
       pendingCents: stats.pendingCents,
     },
+    checkInStats: {
+      checkedInCount: stats.checkedInCount,
+      notCheckedInPaidCount: stats.notCheckedInPaidCount,
+      notCheckedInPendingCount: stats.notCheckedInPendingCount,
+    },
     nextCursor,
     payments: await paymentViews(repo, payments),
   });

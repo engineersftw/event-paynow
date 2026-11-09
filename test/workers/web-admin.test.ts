@@ -243,6 +243,11 @@ describe('web admin list paging', () => {
     payments: { ref: string }[];
     nextCursor: string | null;
     totals: { collectedCents: number; paidBackCents: number; pendingCents: number };
+    checkInStats: {
+      checkedInCount: number;
+      notCheckedInPaidCount: number;
+      notCheckedInPendingCount: number;
+    };
   };
   const page = async (ref: string, query = '') => {
     const res = await get(`/api/events/${ref}${query}`, 99);
@@ -259,6 +264,11 @@ describe('web admin list paging', () => {
     expect(p1.body.payments).toHaveLength(20);
     expect(p1.body.payments[0]!.ref).toBe('PGB00045');
     expect(p1.body.totals).toEqual({ collectedCents: 100, paidBackCents: 0, pendingCents: 4300 });
+    expect(p1.body.checkInStats).toEqual({
+      checkedInCount: 0,
+      notCheckedInPaidCount: 1,
+      notCheckedInPendingCount: 43,
+    });
     const p2 = await page(e.ref, `?cursor=${encodeURIComponent(p1.body.nextCursor!)}`);
     expect(p2.body.payments).toHaveLength(20);
     // a payment created meanwhile does not shift the next page
@@ -294,8 +304,14 @@ describe('web admin list paging', () => {
       paidBackCents: 0,
       pendingCents: 2300,
     });
+    expect(voided.body.checkInStats).toEqual({
+      checkedInCount: 0,
+      notCheckedInPaidCount: 1,
+      notCheckedInPendingCount: 23,
+    });
     const zed = await page(e.ref, '?q=zed');
     expect(zed.body.payments.map((p) => p.ref)).toEqual(['PGC00003']);
+    expect(zed.body.checkInStats).toEqual(voided.body.checkInStats);
     expect(zed.body.nextCursor).toBeNull();
     const none = await page(e.ref, '?q=nobody');
     expect(none.body.payments).toEqual([]);

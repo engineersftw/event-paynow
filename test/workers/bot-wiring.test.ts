@@ -829,6 +829,9 @@ describe('bot wiring (src/bot.ts), misc', () => {
       collectedCents: 0,
       paidBackCents: 0,
       pendingCents: 0,
+      checkedInCount: 0,
+      notCheckedInPaidCount: 0,
+      notCheckedInPendingCount: 0,
     });
 
     await bot.handleUpdate(callbackUpdate(userId, 'mark_received:WIRE-050', 600, 41, true));

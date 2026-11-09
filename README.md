@@ -122,6 +122,10 @@ check-in. QR decoding uses the browser's `BarcodeDetector` when available, else 
 `node_modules/jsqr/dist/jsQR.js` (`npx esbuild node_modules/jsqr/dist/jsQR.js --minify --outfile=web/public/vendor/jsqr.js`,
 then restore the banner comment) loaded only when Check-In is used.
 
+The event page also shows event-wide check-in statistics: **Checked in**, **Not checked in (paid)**, and
+**Not checked in (pending)**. Voided payments are omitted from all three counts, regardless of the active search,
+filter, or pagination state.
+
 `/web_admin` replies with a link per event to a Cloudflare Pages page (`web/`) that lists every payment
 of the event. Admins can create a payment request (payer mobile/UEN, optional name, amount; the QR is shown as a PNG
 and posted to the event's chat with Received/Void buttons), mark a pending payment received or void it, pay a

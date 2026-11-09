@@ -184,10 +184,22 @@ describe('POST /api/events/:ref/payments/:paymentRef/check-in', () => {
         webEnv,
         admin
       )
-    ).json()) as { payments: Array<{ ref: string; checkedInAt: string | null }> };
+    ).json()) as {
+      payments: Array<{ ref: string; checkedInAt: string | null }>;
+      checkInStats: {
+        checkedInCount: number;
+        notCheckedInPaidCount: number;
+        notCheckedInPendingCount: number;
+      };
+    };
     expect(list.payments.find((p) => p.ref === pending.ref)!.checkedInAt).toBe(
       body.payment.checkedInAt
     );
+    expect(list.checkInStats).toEqual({
+      checkedInCount: 2,
+      notCheckedInPaidCount: 0,
+      notCheckedInPendingCount: 0,
+    });
   });
 
   it('reports a repeat as already checked in with the first time, keeping the first admin', async () => {

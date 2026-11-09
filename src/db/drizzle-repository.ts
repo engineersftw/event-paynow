@@ -667,6 +667,9 @@ export class D1EventRepository implements EventRepository {
         paymentCount: sql<number>`COUNT(CASE WHEN status != 'voided' THEN 1 END)`,
         collectedCents: sql<number>`COALESCE(SUM(CASE WHEN status = 'received' THEN amount_cents ELSE 0 END), 0)`,
         pendingCents: sql<number>`COALESCE(SUM(CASE WHEN status = 'pending' THEN amount_cents ELSE 0 END), 0)`,
+        checkedInCount: sql<number>`COUNT(CASE WHEN status != 'voided' AND checked_in_at IS NOT NULL THEN 1 END)`,
+        notCheckedInPaidCount: sql<number>`COUNT(CASE WHEN status = 'received' AND checked_in_at IS NULL THEN 1 END)`,
+        notCheckedInPendingCount: sql<number>`COUNT(CASE WHEN status = 'pending' AND checked_in_at IS NULL THEN 1 END)`,
         // Paybacks only exist for received payments; only SENT ones count (the bound counts pending too)
         paidBackCents: sql<number>`COALESCE((SELECT SUM(pb.amount_cents) FROM paybacks pb JOIN payments p ON p.id = pb.payment_id WHERE p.event_id = ${eventId} AND p.status = 'received' AND pb.status = 'sent'), 0)`,
       })
@@ -680,6 +683,9 @@ export class D1EventRepository implements EventRepository {
       collectedCents: (result?.collectedCents ?? 0) - paidBackCents,
       paidBackCents,
       pendingCents: result?.pendingCents ?? 0,
+      checkedInCount: result?.checkedInCount ?? 0,
+      notCheckedInPaidCount: result?.notCheckedInPaidCount ?? 0,
+      notCheckedInPendingCount: result?.notCheckedInPendingCount ?? 0,
     };
   }
 }

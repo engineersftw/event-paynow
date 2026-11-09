@@ -36,6 +36,9 @@ export interface EventStats {
   collectedCents: number; // received payments minus their SENT paybacks
   paidBackCents: number; // sum of sent paybacks (pending and cancelled never count)
   pendingCents: number; // sum of pending payments
+  checkedInCount: number;
+  notCheckedInPaidCount: number;
+  notCheckedInPendingCount: number;
 }
 
 export interface User {
