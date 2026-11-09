@@ -27,6 +27,7 @@ export const events = sqliteTable('events', {
   closedAt: text('closed_at'),
   // Amount suggested for each payment request, in cents (null = none); set in /init
   defaultAmountCents: integer('default_amount_cents'),
+  websiteUrl: text('website_url'), // optional link to the event's own page (http/https only)
 });
 
 export const payments = sqliteTable('payments', {

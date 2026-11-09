@@ -399,3 +399,76 @@ describe('social preview tags', () => {
     expect(size).toEqual([1280, 720]);
   });
 });
+
+describe('event website line', () => {
+  /** Runs the page's own showSite() against a minimal fake DOM and reports what it built. */
+  function run(html: string, value: unknown) {
+    const code = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)]
+      .map((m) => m[1]!)
+      .find((c) => c.includes('function showSite'))!;
+    const fn = code.slice(
+      code.indexOf('function showSite'),
+      code.indexOf('\n}\n', code.indexOf('function showSite')) + 3
+    );
+    const classes = new Set<string>(['hidden']);
+    const children: Array<
+      string | { textContent: string; href: string; target: string; rel: string }
+    > = [];
+    const p = {
+      textContent: 'stale',
+      hidden: true,
+      classList: { add: (c: string) => classes.add(c), remove: (c: string) => classes.delete(c) },
+      append: (...c: any[]) => children.push(...c),
+    };
+    const document = {
+      getElementById: (id: string) => (id === 'site' ? p : null),
+      createElement: () => ({ textContent: '', href: '', target: '', rel: '' }),
+    };
+    new Function('document', `${fn}; showSite(${JSON.stringify(value)});`)(document);
+    return { p, classes, children };
+  }
+
+  const pages: Array<[string, string]> = [
+    ['admin page', renderPage('EVT1', 'b')],
+    ['payment page', renderPayerPage('EVT1', 'b', 'https://x.test')],
+  ];
+
+  for (const [name, html] of pages) {
+    it(`${name}: has a hidden website line and no innerHTML around it`, () => {
+      expect(html).toMatch(/<p id="site" class="muted sm(?: hidden)?"(?: hidden)?><\/p>/);
+      expect(html).toContain("rel = 'noopener noreferrer nofollow'");
+      expect(html).not.toMatch(/innerHTML/);
+    });
+
+    it(`${name}: shows the host as a safe new-tab link for an http(s) address`, () => {
+      const { p, classes, children } = run(html, 'https://www.example.com/dinner?x=1');
+      expect(p.hidden).toBe(false);
+      expect(classes.has('hidden')).toBe(false);
+      expect(children[0]).toBe('Event website: ');
+      expect(children[1]).toEqual({
+        textContent: 'www.example.com',
+        href: 'https://www.example.com/dinner?x=1',
+        target: '_blank',
+        rel: 'noopener noreferrer nofollow',
+      });
+    });
+
+    it(`${name}: does not turn anything but http(s) into a link`, () => {
+      for (const bad of [
+        'javascript:alert(1)',
+        'data:text/html,x',
+        'ftp://example.com',
+        'example.com',
+        '',
+        null,
+        undefined,
+        42,
+      ]) {
+        const { p, classes, children } = run(html, bad);
+        expect(p.hidden, String(bad)).toBe(true);
+        expect(classes.has('hidden')).toBe(true);
+        expect(children).toHaveLength(0);
+      }
+    });
+  }
+});

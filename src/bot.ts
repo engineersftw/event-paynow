@@ -166,7 +166,8 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     if (
       data.startsWith('init_confirm:') ||
       data.startsWith('init_cancel:') ||
-      data.startsWith('init_skip_amount:')
+      data.startsWith('init_skip_amount:') ||
+      data.startsWith('init_skip_website:')
     ) {
       await new InitCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(
         ctx

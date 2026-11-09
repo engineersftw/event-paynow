@@ -4,6 +4,8 @@ import { detectProxyType, generateRef } from '../db/proxy-validation.js';
 import type { EventRepository, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
+import { escapeMarkdown } from './payer-label.js';
+import { normalizeWebsiteUrl } from './website-url.js';
 
 /**
  * /init command handler — creates an Event.
@@ -13,11 +15,15 @@ import type { ConversationDO, ConversationState } from '../worker/conversation-d
  * 2. Step 1: collect event name (non-empty, ≤ 50 chars)
  * 3. Step 2: collect mobile number or UEN (payee for this event)
  * 4. Step 3: optional default amount to collect (text, or a Skip button)
- * 5. Step 4: echo name + payee (+ amount) for confirmation via inline Confirm/Cancel buttons
- * 6. On Confirm: create events row, reply with ref + summary
- * 7. On Cancel: reset state without creating the event
+ * 5. Step 4: optional event website (text, or a Skip button); only http/https addresses are accepted
+ *    (see normalizeWebsiteUrl) and the stored form is the normalised URL
+ * 6. Step 5: echo name + payee (+ amount, website) for confirmation via inline Confirm/Cancel buttons
+ * 7. On Confirm: create events row, reply with ref + summary
+ * 8. On Cancel: reset state without creating the event
  *
- * The event name becomes the fixed description for every payment in the event.
+ * The event name becomes the fixed description for every payment in the event. Each optional step
+ * (amount, website) has its own Skip button (`init_skip_amount:` / `init_skip_website:`); every
+ * button and text input is checked against the current step, so a stale tap reads as expired.
  */
 
 export class InitCommandHandler {
@@ -76,7 +82,10 @@ export class InitCommandHandler {
         await this.handleDefaultAmountInput(ctx, text, state);
         break;
       case 4:
-        // Step 4 is button-driven; text input gets a nudge
+        await this.handleWebsiteInput(ctx, text, state);
+        break;
+      case 5:
+        // Step 5 is button-driven; text input gets a nudge
         await ctx.reply('⏳ Waiting for confirmation. Please tap a button above.');
         break;
     }
@@ -167,10 +176,38 @@ export class InitCommandHandler {
       return;
     }
 
-    const context = { ...state.context, defaultAmountCents: cents };
     await this.setState({
       flow: 'init',
-      step: 4,
+      step: 4, // waiting for the optional website
+      context: { ...state.context, defaultAmountCents: cents },
+      lastActivity: new Date().toISOString(),
+    });
+
+    await ctx.reply(WEBSITE_PROMPT, {
+      reply_markup: skipWebsiteKeyboard(state.context.userId as number),
+    });
+  }
+
+  /**
+   * Step 4: optional event website typed as text (http/https only, see normalizeWebsiteUrl).
+   */
+  private async handleWebsiteInput(
+    ctx: Context,
+    input: string,
+    state: ConversationState
+  ): Promise<void> {
+    const url = normalizeWebsiteUrl(input);
+    if (url === null) {
+      await ctx.reply(
+        '❌ That is not a valid web address. Send a link starting with http:// or https:// (or just example.com/page), up to 200 characters, or tap Skip.'
+      );
+      return;
+    }
+
+    const context = { ...state.context, websiteUrl: url };
+    await this.setState({
+      flow: 'init',
+      step: 5,
       context,
       lastActivity: new Date().toISOString(),
     });
@@ -189,7 +226,8 @@ export class InitCommandHandler {
       !data ||
       (!data.startsWith('init_confirm:') &&
         !data.startsWith('init_cancel:') &&
-        !data.startsWith('init_skip_amount:'))
+        !data.startsWith('init_skip_amount:') &&
+        !data.startsWith('init_skip_website:'))
     ) {
       return false;
     }
@@ -209,13 +247,32 @@ export class InitCommandHandler {
         context: state.context,
         lastActivity: new Date().toISOString(),
       });
+      await ctx.editMessageText(WEBSITE_PROMPT, {
+        reply_markup: skipWebsiteKeyboard(state.context.userId as number),
+      });
+      return true;
+    }
+
+    if (data.startsWith('init_skip_website:')) {
+      if (state?.flow !== 'init' || state.step !== 4) {
+        await ctx.editMessageText('❌ Session expired. Run /init again.', {
+          reply_markup: { inline_keyboard: [] },
+        });
+        return true;
+      }
+      await this.setState({
+        flow: 'init',
+        step: 5,
+        context: state.context,
+        lastActivity: new Date().toISOString(),
+      });
       await ctx.editMessageText(`${summary(state.context)}\n\nTap a button to confirm or cancel:`, {
         reply_markup: confirmKeyboard(state.context.userId as number),
       });
       return true;
     }
 
-    if (state?.flow !== 'init' || state.step !== 4) {
+    if (state?.flow !== 'init' || state.step !== 5) {
       await ctx.editMessageText('❌ Session expired. Run /init again.', {
         reply_markup: { inline_keyboard: [] },
       });
@@ -268,6 +325,7 @@ export class InitCommandHandler {
         payeeValue: proxy.normalized,
         status: 'open',
         defaultAmountCents: (state.context.defaultAmountCents as number | undefined) ?? null,
+        websiteUrl: (state.context.websiteUrl as string | undefined) ?? null,
         timestamp: new Date().toISOString(),
       });
 
@@ -285,6 +343,7 @@ export class InitCommandHandler {
           (event.defaultAmountCents === null
             ? ''
             : `💰 Default amount: SGD ${formatCents(event.defaultAmountCents)}\n`) +
+          (event.websiteUrl ? `🌐 Website: ${escapeMarkdown(event.websiteUrl)}\n` : '') +
           `🔗 Ref: \`${event.ref}\`\n\n` +
           'Use /start to create payments for this event.',
         { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }
@@ -322,18 +381,28 @@ export class InitCommandHandler {
   }
 }
 
+const WEBSITE_PROMPT =
+  '🌐 Event website (optional).\n\n' +
+  "Send the link to the event's own page (e.g. https://example.com/dinner) and it will be shown on " +
+  'the web pages, or skip:';
+
+const skipWebsiteKeyboard = (userId: number) =>
+  new InlineKeyboard().text('Skip', `init_skip_website:${userId}`);
+
 const confirmKeyboard = (userId: number) =>
   new InlineKeyboard()
     .text('✅ Confirm', `init_confirm:${userId}`)
     .text('❌ Cancel', `init_cancel:${userId}`);
 
-/** Event / payee / optional default amount lines shown on the confirmation and cancel messages. */
+/** Event / payee / optional default amount / optional website lines shown on the confirmation and cancel messages. */
 function summary(context: Record<string, unknown>): string {
   const proxy = context.pendingProxy as { type: string; normalized: string };
   const cents = context.defaultAmountCents as number | undefined;
+  const website = context.websiteUrl as string | undefined;
   return (
     `📋 Event: ${context.eventName}\n` +
     `📱 ${proxy.type === 'mobile' ? 'Mobile number' : 'UEN'}: ${proxy.normalized}` +
-    (cents === undefined ? '' : `\n💰 Default amount: SGD ${formatCents(cents)}`)
+    (cents === undefined ? '' : `\n💰 Default amount: SGD ${formatCents(cents)}`) +
+    (website === undefined ? '' : `\n🌐 Website: ${website}`)
   );
 }

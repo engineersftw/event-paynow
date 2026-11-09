@@ -302,9 +302,10 @@ Pages secrets: `TELEGRAM_BOT_TOKEN`, `SESSION_SECRET`; the Login Widget needs Bo
 2. Step 1: event name (≤ 50 chars)
 3. Step 2: payee mobile number or UEN (mobile → +65XXXXXXXX, UEN format check)
 4. Step 3: optional default amount to collect (`parseAmount`, or a Skip button `init_skip_amount:<userId>`); stored as `events.default_amount_cents`, offered by `/start` ("Use SGD x.xx", `start_use_default`) and pre-filled in the web admin dialog; typing another amount always works
-5. Step 4: echoes name + payee (+ amount) with Confirm/Cancel buttons
-6. On "confirm", creates the `events` row; on "cancel", resets state without saving
-7. On conversation expiry (alarm), state resets
+5. Step 4: optional event website (typed address or a Skip button `init_skip_website:<userId>`); `normalizeWebsiteUrl()` in `src/commands/website-url.ts` accepts only http/https addresses (host with a dot, no credentials or spaces, at most 200 characters, `https://` added when missing) and the stored form is the parsed URL; stored as `events.website_url` and shown as "Event website: <host>" under the title on the admin and payment pages (the link is rebuilt client-side only for http/https values, `rel="noopener noreferrer nofollow"`); the success message escapes it for Markdown
+6. Step 5: echoes name + payee (+ amount, website) with Confirm/Cancel buttons (the Confirm/Cancel step guards check step 5; `bot.ts` routes `init_skip_website:` taps to the handler)
+7. On "confirm", creates the `events` row; on "cancel", resets state without saving
+8. On conversation expiry (alarm), state resets
 
 **Testing:**
 

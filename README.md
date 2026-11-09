@@ -26,13 +26,13 @@ Add the bot to your event's Telegram group (or chat with it directly) and use th
 
 **Organiser (chat admin)**
 
-1. `/init`: give the event a name, the PayNow payee (mobile number or UEN) and an optional default amount, then Confirm.
+1. `/init`: give the event a name, the PayNow payee (mobile number or UEN), an optional default amount and an optional event website link, then Confirm. The link is shown on the admin and payment pages.
 2. Share the event's payment page: `/web_payment` gives the link to `/pay/<event-ref>`. Anyone can open it, enter their details and get their own PayNow QR (no sign-in needed).
 3. Or issue a QR yourself with `/start`: pick the event, enter the payer's PayNow number and optional name, the amount, then Confirm. The QR is posted in the chat.
 4. Tap **✓ Received** on the QR message once the money arrives (or **✖ Void** to cancel a pending request). `/payments` lists everything and shows totals.
 5. `/payback` (or the Payback button on a received payment) makes a QR to refund the payer; tap **✓ Sent** when done.
 6. `/web_admin` opens the event's web page: search payments, mark received/void, pay back, and **Check-In** attendees by scanning their QR or tapping Check-In on their row.
-7. `/edit_event` changes the name, payee or default amount; `/end_event` closes the event.
+7. `/edit_event` changes the name, payee, default amount or website link; `/end_event` closes the event.
 
 **Payer / attendee**
 
@@ -101,7 +101,7 @@ Message [@BotFather](https://t.me/BotFather) in Telegram:
    payback - Pay back a received payment
    web_admin - Open the web page for an event
    web_payment - Open the payment page for an event
-   edit_event - Change an event's name, payee or default amount
+   edit_event - Change an event's name, payee, amount or website
    end_event - Close an event
    cancel - Cancel current conversation
    help - Show help
@@ -327,12 +327,12 @@ openspec/
 
 | Command | Description |
 |---|---|
-| `/init` | Create a new event (name, PayNow payee, optional default amount that `/start` and the web page suggest) |
+| `/init` | Create a new event (name, PayNow payee, optional default amount that `/start` and the web page suggest, optional website link shown on the web pages) |
 | `/start` | Create a payment QR for an event (payer, optional name, amount, confirm) |
 | `/payments` | List events and payments with inline buttons |
 | `/web_admin` | Links to the admin and payment pages for each event (chat admins) |
 | `/web_payment` | Links to the standalone payment page for each event |
-| `/edit_event` | Change an open event's name, payee or default amount (chat admins) |
+| `/edit_event` | Change an open event's name, payee, default amount or website link (chat admins) |
 | `/end_event` | Close an event (no new payments) |
 | `/payback <ref>` | Pay back a received payment |
 | `/cancel` | Cancel current conversation |

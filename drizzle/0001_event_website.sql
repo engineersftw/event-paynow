@@ -1,0 +1,1 @@
+ALTER TABLE `events` ADD `website_url` text;

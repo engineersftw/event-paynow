@@ -43,6 +43,7 @@ describe('init handler (Workers pool)', () => {
 
     await bot.handleUpdate(textUpdate(userId, '91234567'));
     await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
+    await bot.handleUpdate(textUpdate(userId, 'https://example.com/e2e')); // website step
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     expect(confirmMsg.text).toContain('+6591234567');
 
@@ -66,6 +67,7 @@ describe('init handler (Workers pool)', () => {
     await bot.handleUpdate(textUpdate(userId, 'Company Event'));
     await bot.handleUpdate(textUpdate(userId, '201234567A'));
     await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
+    await bot.handleUpdate(textUpdate(userId, 'https://example.com/e2e')); // website step
 
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     expect(confirmMsg.text).toContain('UEN: 201234567A');
@@ -100,6 +102,7 @@ describe('init handler (Workers pool)', () => {
     await bot.handleUpdate(textUpdate(userId, 'Cancel Event'));
     await bot.handleUpdate(textUpdate(userId, '91234567'));
     await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
+    await bot.handleUpdate(textUpdate(userId, 'https://example.com/e2e')); // website step
 
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     const keyboard = confirmMsg.replyMarkup as {
@@ -147,10 +150,14 @@ describe('init handler (Workers pool)', () => {
     await bot.handleUpdate(textUpdate(userId, '91234567'));
     expect(stub.lastText()).toContain('Default amount to collect');
     await bot.handleUpdate(textUpdate(userId, '21'));
+    expect(stub.lastText()).toContain('Event website (optional)');
+    await bot.handleUpdate(textUpdate(userId, 'https://example.com/deepavali'));
     expect(stub.lastText()).toContain('Default amount: SGD 21.00');
+    expect(stub.lastText()).toContain('Website: https://example.com/deepavali');
 
     await tap(bot, userId, 'init_confirm:');
     expect(stub.editedMessages.at(-1)!.text).toContain('Default amount: SGD 21.00');
+    expect(stub.editedMessages.at(-1)!.text).toContain('Website: https://example.com/deepavali');
 
     const [event] = await new D1EventRepository(env.paynow_db).listOpenEventsByChat(userId, 0);
     expect(event!.defaultAmountCents).toBe(2100);
@@ -164,9 +171,13 @@ describe('init handler (Workers pool)', () => {
     await bot.handleUpdate(textUpdate(userId, 'No Default'));
     await bot.handleUpdate(textUpdate(userId, '91234567'));
     await tap(bot, userId, 'init_skip_amount:');
-    // the prompt turns into the confirmation (edited in place), without an amount line
+    // the prompt turns into the website question (edited in place); Skip that too
+    expect(stub.editedMessages.at(-1)!.text).toContain('Event website (optional)');
+    await bot.handleUpdate(callbackUpdate(userId, `init_skip_website:${userId}`, 500, 10));
+    // ...and then into the confirmation, without an amount or website line
     expect(stub.editedMessages.at(-1)!.text).toContain('Event: No Default');
     expect(stub.editedMessages.at(-1)!.text).not.toContain('Default amount');
+    expect(stub.editedMessages.at(-1)!.text).not.toContain('Website');
 
     const kb = stub.editedMessages.at(-1)!.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
@@ -191,6 +202,74 @@ describe('init handler (Workers pool)', () => {
       expect(stub.lastText()).toContain('Invalid amount');
     }
     await bot.handleUpdate(textUpdate(userId, '12.50'));
+    expect(stub.lastText()).toContain('Event website (optional)');
+    await bot.handleUpdate(textUpdate(userId, 'https://example.com/x'));
     expect(stub.lastText()).toContain('Default amount: SGD 12.50');
+  });
+
+  it('website: stored normalised on the event, shown in the success message, escaped for Markdown', async () => {
+    const userId = 900000013;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(textUpdate(userId, '/init'));
+    await bot.handleUpdate(textUpdate(userId, 'Site Event'));
+    await bot.handleUpdate(textUpdate(userId, '91234567'));
+    await bot.handleUpdate(textUpdate(userId, '21'));
+    await bot.handleUpdate(textUpdate(userId, 'Example.com/my_event'));
+    expect(stub.lastText()).toContain('Website: https://example.com/my_event');
+
+    await tap(bot, userId, 'init_confirm:');
+    expect(stub.editedMessages.at(-1)!.text).toContain('Event created');
+    expect(stub.editedMessages.at(-1)!.text).toContain('Website: https://example.com/my\\_event');
+
+    const [event] = await new D1EventRepository(env.paynow_db).listOpenEventsByChat(userId, 0);
+    expect(event!.websiteUrl).toBe('https://example.com/my_event');
+  });
+
+  it('website: unsafe or malformed input re-asks and does not advance; Skip stores none', async () => {
+    const userId = 900000014;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(textUpdate(userId, '/init'));
+    await bot.handleUpdate(textUpdate(userId, 'Skip Site'));
+    await bot.handleUpdate(textUpdate(userId, '91234567'));
+    await bot.handleUpdate(textUpdate(userId, '21'));
+    for (const bad of [
+      'javascript:alert(1)',
+      'data:text/html,x',
+      'https://u:p@example.com',
+      'not a url',
+    ]) {
+      await bot.handleUpdate(textUpdate(userId, bad));
+      expect(stub.lastText()).toContain('not a valid web address');
+    }
+    // the last message is the error reply, so tap the Skip button of the original prompt directly
+    await bot.handleUpdate(callbackUpdate(userId, `init_skip_website:${userId}`, 503, 13));
+    expect(stub.editedMessages.at(-1)!.text).toContain('Event: Skip Site');
+    expect(stub.editedMessages.at(-1)!.text).not.toContain('Website');
+
+    const kb = stub.editedMessages.at(-1)!.replyMarkup as {
+      inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
+    };
+    const confirm = kb.inline_keyboard.flat().find((b) => b.text.startsWith('✅'))!.callback_data;
+    await bot.handleUpdate(callbackUpdate(userId, confirm, 502, 12));
+    const [event] = await new D1EventRepository(env.paynow_db).listOpenEventsByChat(userId, 0);
+    expect(event!.websiteUrl).toBeNull();
+  });
+
+  it('website: cancelling at the confirmation stores nothing', async () => {
+    const userId = 900000015;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(textUpdate(userId, '/init'));
+    await bot.handleUpdate(textUpdate(userId, 'Cancelled Site'));
+    await bot.handleUpdate(textUpdate(userId, '91234567'));
+    await bot.handleUpdate(textUpdate(userId, '21'));
+    await bot.handleUpdate(textUpdate(userId, 'https://example.com/never'));
+    await tap(bot, userId, 'init_cancel:');
+
+    expect(await new D1EventRepository(env.paynow_db).listOpenEventsByChat(userId, 0)).toHaveLength(
+      0
+    );
   });
 });

@@ -42,6 +42,7 @@ describe('end-to-end event flow (task 6.1)', () => {
 
     await bot.handleUpdate(textUpdate(userId, '91234567'));
     await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
+    await bot.handleUpdate(textUpdate(userId, 'https://example.com/e2e')); // website step
     const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
     const keyboard = confirmMsg.replyMarkup as {
       inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
@@ -110,6 +111,7 @@ describe('end-to-end event flow (task 6.1)', () => {
       await bot.handleUpdate(textUpdate(userId, name));
       await bot.handleUpdate(textUpdate(userId, '91234567'));
       await bot.handleUpdate(textUpdate(userId, '21')); // default amount step
+      await bot.handleUpdate(textUpdate(userId, 'https://example.com/e2e')); // website step
       const confirmMsg = stub.sentMessages[stub.sentMessages.length - 1]!;
       const keyboard = confirmMsg.replyMarkup as {
         inline_keyboard: Array<Array<{ text: string; callback_data: string }>>;
