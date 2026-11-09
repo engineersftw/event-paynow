@@ -1,6 +1,7 @@
 import { handleWebhook, validateSecret } from './bot';
 import type { Env } from './env';
 import { handleSimpleWebhook } from './simple-bot';
+import { handleSplitWebhook } from './split-bot';
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
@@ -29,6 +30,17 @@ export default {
         return new Response('Unauthorized', { status: 403 });
       }
       return handleSimpleWebhook(request, env);
+    }
+
+    // Split_PayNow_Bot: own secret, 404 until it is configured
+    if (url.pathname === '/webhook/split' && request.method === 'POST') {
+      if (!env.SPLIT_BOT_TOKEN || !env.SPLIT_WEBHOOK_SECRET) {
+        return new Response('Not found', { status: 404 });
+      }
+      if (!validateSecret(request, env.SPLIT_WEBHOOK_SECRET)) {
+        return new Response('Unauthorized', { status: 403 });
+      }
+      return handleSplitWebhook(request, env);
     }
 
     return new Response('Not found', { status: 404 });
