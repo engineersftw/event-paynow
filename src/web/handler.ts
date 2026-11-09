@@ -117,7 +117,15 @@ export async function handleWeb(
 
   const payerPage = url.pathname.match(/^\/pay\/([^/]+)$/);
   if (payerPage && REF.test(payerPage[1]!)) {
-    return new Response(renderPayerPage(payerPage[1]!, env.BOT_USERNAME), {
+    // The preview names the event, so crawlers (which do not run scripts) see it; any trouble falls back to generic wording
+    let eventName: string | null = null;
+    try {
+      const event = await new D1EventRepository(env.paynow_db).getEventByRef(payerPage[1]!);
+      if (event?.status === 'open') eventName = event.name;
+    } catch {
+      // generic preview
+    }
+    return new Response(renderPayerPage(payerPage[1]!, env.BOT_USERNAME, url.origin, eventName), {
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
     });
   }
@@ -138,7 +146,7 @@ export async function handleWeb(
   }
 
   if (url.pathname === '/') {
-    return new Response(renderLandingPage(env.BOT_USERNAME), {
+    return new Response(renderLandingPage(env.BOT_USERNAME, url.origin), {
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
     });
   }

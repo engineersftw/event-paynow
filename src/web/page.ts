@@ -471,6 +471,64 @@ ${ME_JS}</script></body></html>`;
 /** YouTube id of the explainer video on the landing page (11 characters of A-Z a-z 0-9 _ -). */
 const EXPLAINER_VIDEO_ID = 'ezOo1OIhl-Y';
 
+/** Preview/poster image served from the site itself (a same-origin request, never YouTube). */
+const POSTER_PATH = '/explainer-poster.jpg';
+const SITE_NAME = 'Event PayNow Bot';
+const POSTER_ALT = 'Event PayNow Bot: collect PayNow payments for your event, from Telegram.';
+
+/** Escapes text for use in HTML text and attribute values. */
+function escapeAttr(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
+/** Shortens long text to `max` characters, ending in an ellipsis. */
+function shorten(value: string, max: number): string {
+  return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value;
+}
+
+/**
+ * Open Graph + Twitter card tags, description and canonical link for pages that get shared. They are
+ * part of the HTML the server returns (crawlers do not run scripts) and every value is escaped.
+ * `url` and `image` are absolute, built from the origin the page was requested on.
+ */
+export function socialMeta(m: {
+  title: string;
+  description: string;
+  url: string;
+  image: string;
+}): string {
+  const t = escapeAttr(m.title);
+  const d = escapeAttr(m.description);
+  const u = escapeAttr(m.url);
+  const i = escapeAttr(m.image);
+  const alt = escapeAttr(POSTER_ALT);
+  return [
+    `<meta name="description" content="${d}">`,
+    `<link rel="canonical" href="${u}">`,
+    '<meta property="og:type" content="website">',
+    `<meta property="og:site_name" content="${escapeAttr(SITE_NAME)}">`,
+    '<meta property="og:locale" content="en_SG">',
+    `<meta property="og:title" content="${t}">`,
+    `<meta property="og:description" content="${d}">`,
+    `<meta property="og:url" content="${u}">`,
+    `<meta property="og:image" content="${i}">`,
+    '<meta property="og:image:type" content="image/jpeg">',
+    '<meta property="og:image:width" content="1280">',
+    '<meta property="og:image:height" content="720">',
+    `<meta property="og:image:alt" content="${alt}">`,
+    '<meta name="twitter:card" content="summary_large_image">',
+    `<meta name="twitter:title" content="${t}">`,
+    `<meta name="twitter:description" content="${d}">`,
+    `<meta name="twitter:image" content="${i}">`,
+    `<meta name="twitter:image:alt" content="${alt}">`,
+  ].join('\n');
+}
+
 /**
  * Click-to-play card for the landing page: nothing is requested from YouTube until the visitor
  * clicks (the script on the page then swaps in the youtube-nocookie player). An id that is not a
@@ -478,17 +536,25 @@ const EXPLAINER_VIDEO_ID = 'ezOo1OIhl-Y';
  */
 export function videoCard(id: string): string {
   if (!/^[A-Za-z0-9_-]{11}$/.test(id)) return '';
-  return `<div class="video"><button id="play" class="vcard" type="button" data-video="${id}" aria-label="Play the Event PayNow Bot explainer video"><img src="/logo.png" alt="" width="64" height="64"><span class="vtitle">Watch the 75-second explainer</span><span class="tri" aria-hidden="true"></span></button><a class="ylink" href="https://youtu.be/${id}">Watch on YouTube</a></div>`;
+  return `<div class="video"><button id="play" class="vcard" type="button" data-video="${id}" aria-label="Play the Event PayNow Bot explainer video"><img class="vposter" src="${POSTER_PATH}" width="1280" height="720" alt="" loading="lazy"><span class="vplay" aria-hidden="true"></span></button><a class="ylink" href="https://youtu.be/${id}">Watch on YouTube</a></div>`;
 }
 
 /** Public home page at `/`: what the bot does and a link to add it on Telegram. No data, no session. */
-export function renderLandingPage(botUsername: string): string {
+export function renderLandingPage(botUsername: string, origin: string): string {
   const bot = botUsername.replace(/[^A-Za-z0-9_]/g, '');
+  const meta = socialMeta({
+    title: SITE_NAME,
+    description:
+      'Collect PayNow payments for your event from a Telegram group: a QR code for every request, and a clear record of who has paid.',
+    url: `${origin}/`,
+    image: `${origin}${POSTER_PATH}`,
+  });
   const cta = `<a class="cta" href="https://t.me/${bot}">Add the bot on Telegram</a>`;
   const video = videoCard(EXPLAINER_VIDEO_ID);
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Event PayNow Bot</title><link rel="icon" href="/logo.png">
+${meta}
 ${THEME_EARLY}
 <style>
 :root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa}
@@ -504,12 +570,14 @@ h1{font-size:1.6rem;line-height:1.2;margin:0;letter-spacing:-.02em}h2{font-size:
 ul,ol{padding-left:1.2rem;margin:0}li{margin:6px 0}code{background:var(--muted);padding:1px 6px;border-radius:5px;font-size:.9em}
 .end{margin-top:28px}
 .video{margin-top:18px}
-.vcard{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;width:100%;aspect-ratio:16/9;border:1px solid var(--border);border-radius:12px;background:var(--muted);color:var(--fg);cursor:pointer;font:inherit}
-.vcard img{border-radius:12px}.vtitle{font-weight:600;padding:0 12px;text-align:center}
-.tri{width:0;height:0;border-left:22px solid var(--fg);border-top:14px solid transparent;border-bottom:14px solid transparent}
+.vcard{position:relative;display:block;width:100%;aspect-ratio:16/9;padding:0;overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--muted);cursor:pointer}
+.vposter{display:block;width:100%;height:100%;object-fit:cover}
+.vplay{position:absolute;right:12px;top:12px;width:56px;height:56px;border-radius:50%;background:rgba(15,23,42,.85);box-shadow:0 2px 8px rgba(0,0,0,.25)}
+.vplay::after{content:'';position:absolute;left:22px;top:16px;border-left:20px solid #fff;border-top:12px solid transparent;border-bottom:12px solid transparent}
+.vcard:hover .vplay{background:#dc2626}.vcard:focus-visible{outline:2px solid var(--fg);outline-offset:2px}
 .vframe{display:block;width:100%;aspect-ratio:16/9;border:0;border-radius:12px}
 .ylink{display:block;text-align:center;margin-top:8px;font-size:14px;color:var(--muted-fg)}
-@media(max-width:360px){.vcard{gap:6px}.vcard img{width:40px;height:40px}.vtitle{font-size:14px}}
+@media(max-width:360px){.vplay{right:8px;top:8px;width:44px;height:44px}.vplay::after{left:17px;top:12px;border-left-width:16px;border-top-width:10px;border-bottom-width:10px}}
 ${FOOTER_CSS}
 </style></head><body>
 <div class="topbar"><button id="theme" class="icon" aria-label="Switch between light and dark theme"></button></div>
@@ -543,11 +611,27 @@ if(play)play.onclick=()=>{const f=document.createElement('iframe');f.className='
 }
 
 /** Standalone payer page: no event history or administrator actions are exposed here. */
-export function renderPayerPage(ref: string, botUsername: string): string {
+export function renderPayerPage(
+  ref: string,
+  botUsername: string,
+  origin: string,
+  eventName: string | null = null
+): string {
   const bot = botUsername.replace(/[^A-Za-z0-9_]/g, '');
+  const name = eventName ? shorten(eventName, 60) : null;
+  const title = name ? `Pay for ${name}` : 'Make a PayNow payment';
+  const meta = socialMeta({
+    title,
+    description: name
+      ? `Make a PayNow payment for ${name}. Get your own PayNow QR code in seconds, no sign-in needed.`
+      : 'Get your own PayNow QR code for this event in seconds, no sign-in needed.',
+    url: `${origin}/pay/${ref}`,
+    image: `${origin}${POSTER_PATH}`,
+  });
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pay event</title><link rel="icon" href="/logo.png">
+<title>${escapeAttr(title)}</title><link rel="icon" href="/logo.png">
+${meta}
 ${THEME_EARLY}
 <style>
 :root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa;--danger:#dc2626}
