@@ -81,6 +81,7 @@ This project uses OpenSpec for change management. All changes are archived:
 20. `add-edit-event-command` (6 tasks) — archived 2026-11-08
 21. `payer-page-history-and-dm` (8 tasks) — archived 2026-11-08
 22. `optional-payer-sign-in` (7 tasks) — archived 2026-11-09
+23. `web-signed-in-user` (7 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
@@ -248,7 +249,7 @@ The payer page `/pay/<event-ref>` (no sign-in needed: `payerAccess` treats a mis
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
 `handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell from `src/web/page.ts`: shadcn-style CSS tokens, compact payment cards, a native `<dialog>` for new requests, paybacks and pending QR/actions behind tap-to-expand buttons so no QR loads with the page; header `Event: <name>` with the logo (`web/public/logo.png`), a light/dark toggle (`data-theme`, saved in `localStorage`), status-coloured pills and `dd-MMM-YYYY` dates; data
 written with `textContent`), `GET /api/events/:ref?status=&q=&limit=&cursor=` (JSON; pages of 20 via `searchPaymentsByEvent` with a `created_at|id` keyset cursor and `nextCursor`, literal case-insensitive search on payer name or reference, status filter, event-wide totals from `getEventStats`; the page has a search box, status buttons and "Load more", and refreshes the rows already loaded after an action), `GET /api/login` (Telegram Login Widget
-redirect target; HMAC check in `src/web/auth.ts`, then a 12 h signed HttpOnly cookie). Access =
+redirect target; HMAC check in `src/web/auth.ts`, then a 12 h signed HttpOnly `session` cookie plus a display-only `tg_name` cookie holding the Telegram name, never used for access). `GET /api/me` returns `{ user: { name } | null }` and same-origin `POST /api/logout` clears both cookies; both pages show the name with a Sign out button (`ME_HTML`/`ME_JS` in `src/web/page.ts`), also on the admin page's 403. Sessions are stateless, so sign out does not revoke a copied cookie. Access =
 signed-in user is chat admin/creator via live `getChatMember` (`src/web/access.ts`), or the private-chat
 owner; any failure denies. The API returns payer names only, never PayNow numbers, and voided
 payments are listed but excluded from totals. Admins can also pay received payments back from the page:

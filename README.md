@@ -117,7 +117,9 @@ and posted to the event's chat with Received/Void buttons), mark a pending payme
 received payment back (amount, optional other recipient, QR as a PNG) and mark a payback sent or cancel it.
 Visitors sign in with the
 Telegram Login Widget; only the chat's administrators/owner (or the user in a private chat) can use it, and
-every change is same-origin and re-checks admin status.
+every change is same-origin and re-checks admin status. Both web pages show the signed-in user's Telegram name with
+a Sign out button (it clears the cookies in that browser; sessions are stateless, so a copied cookie stays valid until
+it expires after 12 hours).
 
 The admin page header includes a shareable payer link at `/pay/<event-ref>`. Anyone with that link can create a
 payment request for themselves with no sign-in, without being an event-chat member or administrator (anonymous requests

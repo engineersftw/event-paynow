@@ -319,6 +319,103 @@ describe('web admin list paging', () => {
   });
 });
 
+/** Telegram Login Widget query signed with the test bot token ("tok"). */
+async function loginQuery(extra: Record<string, string>, ref = 'EVTME00001') {
+  const enc = new TextEncoder();
+  const fields: Record<string, string> = {
+    id: '42',
+    auth_date: String(Math.floor(Date.now() / 1000)),
+    ...extra,
+  };
+  const check = Object.keys(fields)
+    .sort()
+    .map((k) => `${k}=${fields[k]}`)
+    .join('\n');
+  const key = await crypto.subtle.importKey(
+    'raw',
+    await crypto.subtle.digest('SHA-256', enc.encode('tok')),
+    { name: 'HMAC', hash: 'SHA-256' },
+    false,
+    ['sign']
+  );
+  const sig = await crypto.subtle.sign('HMAC', key, enc.encode(check));
+  const hash = [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return new URLSearchParams({ ...fields, hash, ref });
+}
+
+const cookiesOf = (res: Response) => res.headers.getSetCookie();
+const meWith = (cookie?: string) =>
+  handleWeb(
+    new Request('https://x.test/api/me', { headers: cookie ? { Cookie: cookie } : {} }),
+    webEnv,
+    admin
+  );
+
+describe('signed-in user name and sign out', () => {
+  it('login remembers the name (first + last, else @username), URL-encoded and capped', async () => {
+    const full = await get(
+      `/api/login?${await loginQuery({ first_name: 'Zoë', last_name: 'Tan' })}`
+    );
+    const name = cookiesOf(full).find((c) => c.startsWith('tg_name='))!;
+    expect(name).toContain('HttpOnly');
+    expect(decodeURIComponent(name.split(';')[0]!.slice('tg_name='.length))).toBe('Zoë Tan');
+    expect(cookiesOf(full).some((c) => c.startsWith('session='))).toBe(true);
+
+    const handle = cookiesOf(
+      await get(`/api/login?${await loginQuery({ first_name: '', username: 'zed' })}`)
+    );
+    expect(
+      decodeURIComponent(
+        handle
+          .find((c) => c.startsWith('tg_name='))!
+          .split(';')[0]!
+          .slice(8)
+      )
+    ).toBe('@zed');
+
+    const long = cookiesOf(
+      await get(`/api/login?${await loginQuery({ first_name: 'x'.repeat(200) })}`)
+    );
+    expect(
+      decodeURIComponent(
+        long
+          .find((c) => c.startsWith('tg_name='))!
+          .split(';')[0]!
+          .slice(8)
+      ).length
+    ).toBe(64);
+  });
+
+  it('GET /api/me returns the name, null name for old sessions, and no user without a session', async () => {
+    const session = `session=${await signSession(42, 'sess')}`;
+    const named = await meWith(`${session}; tg_name=${encodeURIComponent('Zoë Tan')}`);
+    expect(await named.json()).toEqual({ user: { name: 'Zoë Tan' } });
+    expect(named.headers.get('Cache-Control')).toBe('no-store');
+    expect(await (await meWith(session)).json()).toEqual({ user: { name: null } });
+    expect(await (await meWith(`${session}; tg_name=%E0%A4%A`)).json()).toEqual({
+      user: { name: null },
+    });
+    expect(await (await meWith()).json()).toEqual({ user: null });
+    // A forged name cookie without a session, or with a bad one, never counts as signed in
+    expect(await (await meWith('tg_name=Admin')).json()).toEqual({ user: null });
+    expect(await (await meWith('session=1.2.3; tg_name=Admin')).json()).toEqual({ user: null });
+  });
+
+  it('POST /api/logout clears both cookies; cross-origin is refused and clears nothing', async () => {
+    const out = await payerPost('/api/logout', 42, {});
+    expect(out.status).toBe(204);
+    const cleared = cookiesOf(out);
+    expect(cleared.map((c) => c.split('=')[0]).sort()).toEqual(['session', 'tg_name']);
+    for (const c of cleared) expect(c).toContain('Max-Age=0');
+    // Works without a session too
+    expect((await payerPost('/api/logout', null, {})).status).toBe(204);
+
+    const evil = await payerPost('/api/logout', 42, {}, 'https://evil.test');
+    expect(evil.status).toBe(403);
+    expect(cookiesOf(evil)).toEqual([]);
+  });
+});
+
 describe('anonymous payer requests', () => {
   const anon = { payer: '91234567', amount: '2.00' };
 

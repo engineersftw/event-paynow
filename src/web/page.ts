@@ -1,3 +1,14 @@
+/** Signed-in user block shared by both pages: name from /api/me and a Sign out that reloads. */
+const ME_CSS =
+  '.me{display:flex;align-items:center;gap:8px;min-width:0}.me[hidden]{display:none!important}.me-name{max-width:12em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted-fg)}';
+const ME_JS = `
+async function loadMe(){try{const r=await fetch('/api/me',{credentials:'same-origin'});if(!r.ok)return;const u=(await r.json()).user;$('me').hidden=!u;if(u)$('me-name').textContent=u.name||'Signed in'}catch(e){}}
+$('signout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'})}catch(e){}location.reload()};
+loadMe();
+`;
+const ME_HTML =
+  '<div id="me" class="me" hidden><span id="me-name" class="me-name"></span><button id="signout" class="btn">Sign out</button></div>';
+
 /** Static shell; data is fetched from the API and written with textContent (names are user input). */
 export function renderPage(ref: string, botUsername: string): string {
   return `<!doctype html>
@@ -40,6 +51,8 @@ h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
 .seg{display:flex;flex-wrap:wrap;gap:6px}
 .more{width:100%;margin-top:8px}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
+${ME_CSS}
+.me.bar{justify-content:flex-end;margin-bottom:8px}
 .brand img{flex:none;border-radius:8px}
 :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
 .input{font:inherit;min-height:40px;width:100%;border:1px solid var(--border);border-radius:calc(var(--radius) - 2px);padding:6px 10px;background:var(--bg);color:var(--fg)}
@@ -55,6 +68,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .foot{display:flex;justify-content:flex-end;gap:8px}
 img{max-width:100%;height:auto}
 </style></head><body>
+${ME_HTML.replace('class="me"', 'class="me bar"')}
 <div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div><div class="inline"><a id="payer-link" class="btn" href="/pay/${ref}">Pay</a><button id="theme" class="btn" aria-label="Switch between light and dark theme"></button><button id="new" class="btn primary" hidden>New request</button></div></div>
 <p id="msg" class="alert" hidden></p>
 <div id="login" hidden>
@@ -277,7 +291,7 @@ $('dlg').addEventListener('click', (e) => { if (e.target === $('dlg')) $('dlg').
 $('dlg-form').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRequest(); });
 $('np-go').onclick = createRequest;
 load();
-</script></body></html>`;
+${ME_JS}</script></body></html>`;
 }
 
 /** Standalone payer page: no event history or administrator actions are exposed here. */
@@ -290,9 +304,10 @@ export function renderPayerPage(ref: string, botUsername: string): string {
 :root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa;--danger:#dc2626}
 @media(prefers-color-scheme:dark){:root{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--danger:#f87171}}
 *{box-sizing:border-box}body{max-width:32rem;margin:0 auto;padding:20px;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
-h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}.brand img{border-radius:8px}.card{border:1px solid var(--border);border-radius:8px;padding:16px;display:grid;gap:14px}.muted{color:var(--muted-fg)}.alert{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:12px}.err{color:var(--danger);margin:0}.fields{display:grid;gap:12px}label{display:grid;gap:5px;font-weight:600}.input{font:inherit;min-height:42px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}.input:read-only{background:var(--muted)}.btn{font:inherit;font-weight:600;min-height:42px;border:1px solid var(--border);border-radius:6px;padding:8px 16px;background:var(--primary);color:var(--primary-fg);cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}img{max-width:100%;height:auto}.qr{display:grid;justify-items:center;gap:8px}.qr img{width:280px}.hidden{display:none!important}.amount{font-size:1.25rem;font-weight:600}h2{font-size:1rem;margin:0 0 8px}.hist{display:grid;gap:8px}.row{border:1px solid var(--border);border-radius:6px;padding:10px;display:grid;gap:8px}.row button{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left;display:flex;gap:10px;align-items:center;flex-wrap:wrap;cursor:pointer}.row button:disabled{cursor:default}.pill{border-radius:999px;padding:1px 8px;font-size:.8rem;background:var(--muted);border:1px solid var(--border)}
+h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}.brand img{border-radius:8px}.card{border:1px solid var(--border);border-radius:8px;padding:16px;display:grid;gap:14px}.muted{color:var(--muted-fg)}.alert{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:12px}.err{color:var(--danger);margin:0}.fields{display:grid;gap:12px}label{display:grid;gap:5px;font-weight:600}.input{font:inherit;min-height:42px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}.input:read-only{background:var(--muted)}.btn{font:inherit;font-weight:600;min-height:42px;border:1px solid var(--border);border-radius:6px;padding:8px 16px;background:var(--primary);color:var(--primary-fg);cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}img{max-width:100%;height:auto}.qr{display:grid;justify-items:center;gap:8px}.qr img{width:280px}.hidden{display:none!important}${ME_CSS}.brand+.me{margin-bottom:16px}.amount{font-size:1.25rem;font-weight:600}h2{font-size:1rem;margin:0 0 8px}.hist{display:grid;gap:8px}.row{border:1px solid var(--border);border-radius:6px;padding:10px;display:grid;gap:8px}.row button{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left;display:flex;gap:10px;align-items:center;flex-wrap:wrap;cursor:pointer}.row button:disabled{cursor:default}.pill{border-radius:999px;padding:1px 8px;font-size:.8rem;background:var(--muted);border:1px solid var(--border)}
 </style></head><body>
 <div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Pay event</h1></div>
+${ME_HTML}
 <p id="msg" class="alert hidden"></p>
 <div id="app" class="card hidden">
 <p id="event-status" class="muted"></p>
@@ -355,6 +370,6 @@ async function create(){
   if(!res.ok){showError(errorText[d.error]||'Something went wrong.');return}
   $('form').classList.add('hidden');$('result').classList.remove('hidden');$('dm').classList.toggle('hidden',d.payment.dm!==false);$('note').textContent='Payment '+d.payment.ref+' · '+sgd(d.payment.amountCents);$('qr').replaceChildren(Object.assign(document.createElement('img'),{src:d.payment.qr,alt:'Payment QR'}));if(signedIn)loadHistory();
 }
-$('create').onclick=create;$('again').onclick=reset;load();
+$('create').onclick=create;$('again').onclick=reset;load();${ME_JS}
 </script></body></html>`;
 }
