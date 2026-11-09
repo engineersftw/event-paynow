@@ -428,6 +428,9 @@ describe('D1EventRepository', () => {
       expect(stats.paymentCount).toBe(0);
       expect(stats.collectedCents).toBe(0);
       expect(stats.pendingCents).toBe(0);
+      expect(stats.checkedInCount).toBe(0);
+      expect(stats.notCheckedInPaidCount).toBe(0);
+      expect(stats.notCheckedInPendingCount).toBe(0);
     });
 
     it('excludes voided payments from the count and both totals', async () => {
@@ -458,16 +461,21 @@ describe('D1EventRepository', () => {
           timestamp: testTimestamp,
         });
       await make('STAT-R1', 1000, 'received');
+      await make('STAT-R2', 200, 'received');
       await make('STAT-P1', 500, 'pending');
       await make('STAT-V1', 700, 'voided');
+      await new D1Repository(env.paynow_db).checkInPayment('STAT-R1', chatId, testTimestamp);
 
       const stats = await repo.getEventStats(event.id);
 
       expect(stats).toEqual({
-        paymentCount: 2,
-        collectedCents: 1000,
+        paymentCount: 3,
+        collectedCents: 1200,
         paidBackCents: 0,
         pendingCents: 500,
+        checkedInCount: 1,
+        notCheckedInPaidCount: 1,
+        notCheckedInPendingCount: 1,
       });
     });
   });

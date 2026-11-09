@@ -68,6 +68,9 @@ describe('event stats net of paybacks', () => {
       collectedCents: 1000,
       paidBackCents: 0,
       pendingCents: 0,
+      checkedInCount: 0,
+      notCheckedInPaidCount: 1,
+      notCheckedInPendingCount: 0,
     });
   });
 
@@ -84,6 +87,9 @@ describe('event stats net of paybacks', () => {
       collectedCents: 700,
       paidBackCents: 300,
       pendingCents: 500,
+      checkedInCount: 0,
+      notCheckedInPaidCount: 1,
+      notCheckedInPendingCount: 1,
     });
   });
 
