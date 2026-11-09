@@ -133,7 +133,7 @@ Open Telegram, message your bot:
 
 ## Simple_PayNow_Bot (optional second bot)
 
-A QR-only bot served by the same Worker at `POST /webhook/simple`: in a private chat, `/start` asks for the payee (mobile or UEN), an optional amount (Skip leaves it to the payer; if given, it asks whether the payer may change it) and an optional description (up to 25 characters), then sends the PayNow QR. It stores nothing (answers sit in the chat's Durable Object under `simple-<id>` for at most 10 minutes) and never prints the payee number on the QR or caption. Until configured, the route answers 404.
+A QR-only bot served by the same Worker at `POST /webhook/simple`: in a private chat, `/start` asks for the payee (mobile or UEN), an optional amount (Skip leaves it to the payer; if given, it asks whether the payer may change it) and an optional description (up to 25 characters), then shows a summary of everything entered with Confirm / Cancel; the PayNow QR is made only after Confirm. It stores nothing (answers sit in the chat's Durable Object under `simple-<id>` for at most 10 minutes) and never prints the payee number on the QR or caption. Until configured, the route answers 404.
 
 ```bash
 # 1. BotFather: /newbot -> Simple_PayNow_Bot; commands: start - Make a PayNow QR, cancel - Stop, help - How it works
@@ -241,7 +241,7 @@ src/
 ├── env.ts                 # Cloudflare Workers environment bindings
 ├── index.ts               # Worker entry + ChatSessionDO export
 ├── commands/
-│   ├── simple-handler.ts  # Simple_PayNow_Bot conversation (payee → amount → payer-may-change → description)
+│   ├── simple-handler.ts  # Simple_PayNow_Bot conversation (payee → amount → payer-may-change → description → confirm)
 │   ├── init-handler.ts    # /init — create event (name + payee)
 │   ├── start-handler.ts   # /start — create payment QR (event picker → amount → QR)
 │   ├── payments-handler.ts # /payments — list events, drill into payments

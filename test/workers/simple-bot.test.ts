@@ -76,6 +76,21 @@ describe('Simple_PayNow_Bot conversation', () => {
     expect(stub.lastText()).toContain('short description');
     await say(b, u, 'Lunch');
 
+    // the summary shows every answer (payee number included) and no QR exists yet
+    expect(stub.sentPhotos).toHaveLength(0);
+    const summary = stub.lastText();
+    expect(summary).toContain('Payee: Mobile +6591234567');
+    expect(summary).toContain('Amount: SGD 12.50');
+    expect(summary).toContain('Payer can change the amount: No');
+    expect(summary).toContain('Description: Lunch');
+    expect(
+      stub.sentMessages
+        .at(-1)
+        ?.replyMarkup?.inline_keyboard.flat()
+        .map((k) => k.callback_data)
+    ).toEqual(['simple_confirm', 'simple_cancel']);
+    await tap(b, u, 'simple_confirm');
+
     const { payload, caption } = decode();
     expect(payload).toContain('+6591234567');
     expect(payload).toContain('540512.50');
@@ -99,6 +114,9 @@ describe('Simple_PayNow_Bot conversation', () => {
     await say(b, u, '5');
     await tap(b, u, 'simple_edit_yes');
     await tap(b, u, 'simple_skip_description');
+    expect(stub.lastText()).toContain('Payer can change the amount: Yes');
+    expect(stub.lastText()).toContain('Description: none');
+    await tap(b, u, 'simple_confirm');
     const { payload, caption } = decode();
     expect(payload).toContain('03011');
     expect(payload).toContain('54045.00');
@@ -115,6 +133,9 @@ describe('Simple_PayNow_Bot conversation', () => {
     expect(stub.lastText()).toContain('short description');
     expect(stub.lastText()).not.toContain('change the amount');
     await tap(b, u, 'simple_skip_description');
+    expect(stub.lastText()).toContain('Amount: set by payer');
+    expect(stub.lastText()).not.toContain('Payer can change');
+    await tap(b, u, 'simple_confirm');
     const { payload, caption } = decode();
     expect(payload).toContain('03011');
     expect(payload).not.toContain('Lunch');
@@ -138,6 +159,8 @@ describe('Simple_PayNow_Bot conversation', () => {
     expect(stub.lastText()).toContain('25 characters');
     expect(stub.sentPhotos).toHaveLength(0);
     await say(b, u, 'x'.repeat(25));
+    expect(stub.sentPhotos).toHaveLength(0); // confirmation first
+    await tap(b, u, 'simple_confirm');
     expect(stub.sentPhotos).toHaveLength(1);
   });
 
@@ -149,8 +172,32 @@ describe('Simple_PayNow_Bot conversation', () => {
     expect(stub.callbackAnswers).toContain('That step is over.');
     await say(b, u, '91234567');
     await tap(b, u, 'simple_skip_amount');
-    await Promise.all([tap(b, u, 'simple_skip_description'), tap(b, u, 'simple_skip_description')]);
+    await tap(b, u, 'simple_skip_description');
+    await tap(b, u, 'simple_skip_description'); // the step is over now
+    expect(stub.callbackAnswers.filter((a) => a === 'That step is over.')).toHaveLength(2);
+    await Promise.all([tap(b, u, 'simple_confirm'), tap(b, u, 'simple_confirm')]);
     expect(stub.sentPhotos).toHaveLength(1);
+  });
+
+  it('Cancel on the summary generates nothing and clears the state; text there changes nothing', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/start');
+    await say(b, u, '91234567');
+    await tap(b, u, 'simple_skip_amount');
+    await tap(b, u, 'simple_skip_description');
+    await say(b, u, 'hello');
+    expect(stub.lastText()).toContain('tap Confirm or Cancel');
+    expect((await peek(`simple-${u}`)).step).toBe(5);
+    await tap(b, u, 'simple_cancel');
+    expect(stub.lastText()).toContain('Nothing was created');
+    expect(stub.sentPhotos).toHaveLength(0);
+    const after = await peek(`simple-${u}`);
+    expect(after.flow).toBe('idle');
+    expect(after.context).toEqual({});
+    await tap(b, u, 'simple_confirm'); // stale button after cancel
+    expect(stub.callbackAnswers).toContain('That step is over.');
+    expect(stub.sentPhotos).toHaveLength(0);
   });
 
   it('/cancel clears the conversation', async () => {
@@ -193,7 +240,10 @@ describe('POST /webhook/simple', () => {
     );
 
   it('is 404 until configured, and 403 without the right secret', async () => {
-    expect((await call({})).status).toBe(404);
+    // .dev.vars may hold real values: blank them to test the unconfigured case
+    expect(
+      (await call({ SIMPLE_BOT_TOKEN: undefined, SIMPLE_WEBHOOK_SECRET: undefined })).status
+    ).toBe(404);
     const cfg = { SIMPLE_BOT_TOKEN: 't', SIMPLE_WEBHOOK_SECRET: 's' };
     expect((await call(cfg)).status).toBe(403);
     expect((await call(cfg, 'wrong')).status).toBe(403);
