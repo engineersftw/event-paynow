@@ -11,13 +11,29 @@ loadMe();
 const ME_HTML =
   '<div id="me" class="me" hidden><span id="me-name" class="me-name"></span><button id="signout" class="btn">Sign out</button></div>';
 
+/** Top bar of both pages: signed-in name + Sign out (when signed in) and the light/dark toggle (always). */
+const TOPBAR_HTML = `<div class="topbar">${ME_HTML}<button id="theme" class="btn icon" aria-label="Switch between light and dark theme"></button></div>`;
+const TOPBAR_CSS =
+  '.topbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:8px;font-size:13px}.topbar .btn{min-height:32px;padding:2px 12px;font-size:13px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:6px;cursor:pointer}.topbar .btn.icon{width:32px;padding:0}';
+/** Applies the saved theme before first paint (key shared by both pages: same origin). */
+const THEME_EARLY =
+  "<script>try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>";
+const THEME_JS = `
+const root = document.documentElement;
+const isDark = () => (root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
+const paintTheme = () => { $('theme').textContent = isDark() ? '☀' : '☾'; };
+$('theme').onclick = () => { const next = isDark() ? 'light' : 'dark'; root.dataset.theme = next; try { localStorage.setItem('theme', next); } catch (e) {} paintTheme(); };
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTheme);
+paintTheme();
+`;
+
 /** Static shell; data is fetched from the API and written with textContent (names are user input). */
 export function renderPage(ref: string, botUsername: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Event</title>
 <link rel="icon" href="/logo.png">
-<script>try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>
+${THEME_EARLY}
 <style>
 :root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa;--destructive:#dc2626;--ring:#a1a1aa;--radius:.5rem;--pending-bg:#fef3c7;--pending-fg:#92400e;--received-bg:#dcfce7;--received-fg:#166534;--voided-bg:#e4e4e7;--voided-fg:#52525b}
 @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--destructive:#f87171;--ring:#52525b;--pending-bg:#451a03;--pending-fg:#fcd34d;--received-bg:#052e16;--received-fg:#86efac;--voided-bg:#3f3f46;--voided-fg:#d4d4d8}}
@@ -32,9 +48,7 @@ h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
 .actions .btn{flex:1;min-width:0;white-space:nowrap;padding-left:8px;padding-right:8px}
 @media(max-width:360px){.actions .btn{padding-left:4px;padding-right:4px;font-size:13px}}
 .actions .btn.primary{flex:1.6}
-.topbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:8px;font-size:13px}
-.topbar .btn{min-height:32px;padding:2px 12px;font-size:13px}
-.topbar .btn.icon{width:32px;padding:0}
+${TOPBAR_CSS}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
 .card{border:1px solid var(--border);border-radius:var(--radius);padding:12px}
 .stat b{display:block;font-size:1.1rem;margin-top:2px}
@@ -83,7 +97,7 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .foot{display:flex;justify-content:flex-end;gap:8px}
 img{max-width:100%;height:auto}
 </style></head><body>
-<div class="topbar">${ME_HTML}<button id="theme" class="btn icon" aria-label="Switch between light and dark theme"></button></div>
+${TOPBAR_HTML}
 <div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div></div>
 <div class="actions"><button id="scan" class="btn" hidden>Check-In</button><a id="payer-link" class="btn" href="/pay/${ref}">Pay</a><button id="new" class="btn primary" hidden>New request</button></div>
 <p id="msg" class="alert" hidden></p>
@@ -403,13 +417,7 @@ $('sc-close').onclick = () => $('scan-dlg').close();
 $('scan-dlg').addEventListener('close', () => { stopCamera(); scanned = null; });
 $('sc-go').onclick = () => { const v = $('sc-ref').value.trim(); if (v) { stopCamera(); resolveScan({ ref: v }); } };
 $('sc-ref').addEventListener('keydown', (e) => { if (e.key === 'Enter') $('sc-go').click(); });
-const root = document.documentElement;
-const isDark = () => (root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches);
-const paintTheme = () => { $('theme').textContent = isDark() ? '☀' : '☾'; };
-$('theme').onclick = () => { const next = isDark() ? 'light' : 'dark'; root.dataset.theme = next; try { localStorage.setItem('theme', next); } catch (e) {} paintTheme(); };
-matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTheme);
-paintTheme();
-$('new').onclick = () => { showForm(); $('dlg').showModal(); };
+${THEME_JS}$('new').onclick = () => { showForm(); $('dlg').showModal(); };
 $('np-cancel').onclick = () => $('dlg').close();
 $('np-done').onclick = () => $('dlg').close();
 $('np-again').onclick = showForm;
@@ -426,14 +434,16 @@ export function renderPayerPage(ref: string, botUsername: string): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Pay event</title><link rel="icon" href="/logo.png">
+${THEME_EARLY}
 <style>
 :root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa;--danger:#dc2626}
-@media(prefers-color-scheme:dark){:root{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--danger:#f87171}}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--danger:#f87171}}
+:root[data-theme="dark"]{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b;--danger:#f87171}
 *{box-sizing:border-box}body{max-width:32rem;margin:0 auto;padding:20px;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
-h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}.brand img{border-radius:8px}.card{border:1px solid var(--border);border-radius:8px;padding:16px;display:grid;gap:14px}.muted{color:var(--muted-fg)}.alert{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:12px}.err{color:var(--danger);margin:0}.fields{display:grid;gap:12px}label{display:grid;gap:5px;font-weight:600}.input{font:inherit;min-height:42px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}.input:read-only{background:var(--muted)}.btn{font:inherit;font-weight:600;min-height:42px;border:1px solid var(--border);border-radius:6px;padding:8px 16px;background:var(--primary);color:var(--primary-fg);cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}img{max-width:100%;height:auto}.qr{display:grid;justify-items:center;gap:8px}.qr img{width:280px}.hidden{display:none!important}${ME_CSS}.brand+.me{margin-bottom:16px}.amount{font-size:1.25rem;font-weight:600}h2{font-size:1rem;margin:0 0 8px}.hist{display:grid;gap:8px}.row{border:1px solid var(--border);border-radius:6px;padding:10px;display:grid;gap:8px}.row button{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left;display:flex;gap:10px;align-items:center;flex-wrap:wrap;cursor:pointer}.row button:disabled{cursor:default}.pill{border-radius:999px;padding:1px 8px;font-size:.8rem;background:var(--muted);border:1px solid var(--border)}
+h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}.brand img{border-radius:8px}.card{border:1px solid var(--border);border-radius:8px;padding:16px;display:grid;gap:14px}.muted{color:var(--muted-fg)}.alert{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:12px}.err{color:var(--danger);margin:0}.fields{display:grid;gap:12px}label{display:grid;gap:5px;font-weight:600}.input{font:inherit;min-height:42px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}.input:read-only{background:var(--muted)}.btn{font:inherit;font-weight:600;min-height:42px;border:1px solid var(--border);border-radius:6px;padding:8px 16px;background:var(--primary);color:var(--primary-fg);cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}img{max-width:100%;height:auto}.qr{display:grid;justify-items:center;gap:8px}.qr img{width:280px}.hidden{display:none!important}${ME_CSS}${TOPBAR_CSS}.amount{font-size:1.25rem;font-weight:600}h2{font-size:1rem;margin:0 0 8px}.hist{display:grid;gap:8px}.row{border:1px solid var(--border);border-radius:6px;padding:10px;display:grid;gap:8px}.row button{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left;display:flex;gap:10px;align-items:center;flex-wrap:wrap;cursor:pointer}.row button:disabled{cursor:default}.pill{border-radius:999px;padding:1px 8px;font-size:.8rem;background:var(--muted);border:1px solid var(--border)}
 </style></head><body>
+${TOPBAR_HTML}
 <div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Pay event</h1></div>
-${ME_HTML}
 <p id="msg" class="alert hidden"></p>
 <div id="app" class="card hidden">
 <p id="event-status" class="muted"></p>
@@ -496,6 +506,6 @@ async function create(){
   if(!res.ok){showError(errorText[d.error]||'Something went wrong.');return}
   $('form').classList.add('hidden');$('result').classList.remove('hidden');$('dm').classList.toggle('hidden',d.payment.dm!==false);$('note').textContent='Payment '+d.payment.ref+' · '+sgd(d.payment.amountCents);$('qr').replaceChildren(Object.assign(document.createElement('img'),{src:d.payment.qr,alt:'Payment QR'}));if(signedIn)loadHistory();
 }
-$('create').onclick=create;$('again').onclick=reset;load();${ME_JS}
+$('create').onclick=create;$('again').onclick=reset;load();${ME_JS}${THEME_JS}
 </script></body></html>`;
 }
