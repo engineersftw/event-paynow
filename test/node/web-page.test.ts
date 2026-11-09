@@ -89,6 +89,20 @@ describe('event page shell', () => {
     }
   });
 
+  it('both pages share the top bar: signed-in name, Sign out and the light/dark toggle', () => {
+    for (const html of [renderPage('EVT1', 'my_bot'), renderPayerPage('EVT1', 'my_bot')]) {
+      expect(html).toContain('<div class="topbar">');
+      expect(html).toContain('id="theme"');
+      // The saved theme is applied before first paint and toggled in the page (same key on both pages)
+      expect(html).toContain("localStorage.getItem('theme')");
+      expect(html).toContain("localStorage.setItem('theme', next)");
+      expect(html).toContain('[data-theme="dark"]');
+      for (const code of [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!)) {
+        expect(() => new Function(code)).not.toThrow();
+      }
+    }
+  });
+
   it('both pages show the signed-in user with Sign out, hidden until /api/me reports one', () => {
     for (const html of [renderPage('EVT1', 'my_bot'), renderPayerPage('EVT1', 'my_bot')]) {
       expect(html).toContain('id="me"');
