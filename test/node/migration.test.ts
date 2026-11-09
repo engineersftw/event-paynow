@@ -70,6 +70,7 @@ describe('migrations (whole history, applied in order)', () => {
       'created_at',
       'closed_at',
       'default_amount_cents',
+      'website_url',
     ]);
     expect(columns(db, 'payments')).toEqual([
       'id',

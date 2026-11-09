@@ -4,17 +4,18 @@ import { detectProxyType } from '../db/proxy-validation.js';
 import type { Event, EventPatch, EventRepository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
+import { normalizeWebsiteUrl } from './website-url.js';
 
 /**
- * /edit_event — change the name, payee or default amount of an open event.
+ * /edit_event — change the name, payee, default amount or website link of an open event.
  *
  * Flow `edit`: step 1 pick event, step 2 pick field, step 3 type the new value. One field per
  * run, saved at once; the reply lists every final value. Chat administrators only, checked at the
  * start and again right before the write. Payments already issued keep their own snapshot.
  */
 
-type Field = 'name' | 'payee' | 'amount';
-const FIELDS: Field[] = ['name', 'payee', 'amount'];
+type Field = 'name' | 'payee' | 'amount' | 'website';
+const FIELDS: Field[] = ['name', 'payee', 'amount', 'website'];
 
 export type AdminCheck = (chatId: number, userId: number) => Promise<boolean>;
 
@@ -112,6 +113,8 @@ export class EditEventHandler {
       await this.askField(ctx, event, true);
     } else if (data === 'edit_clear_amount') {
       await this.save(ctx, event, { defaultAmountCents: null }, 'amount', state);
+    } else if (data === 'edit_clear_website') {
+      await this.save(ctx, event, { websiteUrl: null }, 'website', state);
     } else if (data.startsWith('edit_field:')) {
       const field = data.slice('edit_field:'.length) as Field;
       if (FIELDS.includes(field)) await this.askValue(ctx, event, field, state);
@@ -126,6 +129,7 @@ export class EditEventHandler {
       .text('Name', 'edit_field:name')
       .text('Payee', 'edit_field:payee')
       .text('Default amount', 'edit_field:amount')
+      .text('Website', 'edit_field:website')
       .row()
       .text('❌ Cancel', 'edit_cancel');
     const text = `✏️ Editing:\n${details(event)}\n\nWhat do you want to change?`;
@@ -144,11 +148,16 @@ export class EditEventHandler {
     if (field === 'amount' && event.defaultAmountCents !== null) {
       keyboard.text('🗑 Clear', 'edit_clear_amount');
     }
+    if (field === 'website' && event.websiteUrl) {
+      keyboard.text('🗑 Clear', 'edit_clear_website');
+    }
     keyboard.text('❌ Cancel', 'edit_cancel');
     const prompt = {
       name: 'Send the new event name (1–50 characters):',
       payee: 'Send the new PayNow payee — mobile number (e.g. 91234567) or UEN (e.g. 201234567A):',
       amount: 'Send the new default amount in SGD (e.g. 21 or 12.50):',
+      website:
+        "Send the link to the event's own page (e.g. https://example.com/dinner), up to 200 characters:",
     }[field];
     await ctx.editMessageText(prompt, { reply_markup: keyboard });
   }
@@ -171,6 +180,15 @@ export class EditEventHandler {
         return;
       }
       patch = { payeeType: proxy.type, payeeValue: proxy.normalized };
+    } else if (field === 'website') {
+      const url = normalizeWebsiteUrl(input);
+      if (url === null) {
+        await ctx.reply(
+          '❌ That is not a valid web address. Send a link starting with http:// or https:// (or just example.com/page), up to 200 characters.'
+        );
+        return;
+      }
+      patch = { websiteUrl: url };
     } else {
       const cents = parseAmount(input);
       if (cents === null) {
@@ -260,12 +278,13 @@ export class EditEventHandler {
   }
 }
 
-/** Name / payee / default amount lines; the field just changed is marked. */
+/** Name / payee / default amount / website lines; the field just changed is marked. */
 function details(event: Event, changed?: Field): string {
   const mark = (f: Field) => (changed === f ? ' ✏️' : '');
   return (
     `📋 Name: ${event.name}${mark('name')}\n` +
     `📱 ${event.payeeType === 'mobile' ? 'Mobile number' : 'UEN'}: ${event.payeeValue}${mark('payee')}\n` +
-    `💰 Default amount: ${event.defaultAmountCents === null ? 'none' : `SGD ${formatCents(event.defaultAmountCents)}`}${mark('amount')}`
+    `💰 Default amount: ${event.defaultAmountCents === null ? 'none' : `SGD ${formatCents(event.defaultAmountCents)}`}${mark('amount')}\n` +
+    `🌐 Website: ${event.websiteUrl ?? 'none'}${mark('website')}`
   );
 }

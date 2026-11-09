@@ -287,7 +287,7 @@ describe('/init command handler (event creation)', () => {
       lastActivity: new Date().toISOString(),
     };
 
-    it('accepts a valid amount, stores it in cents and shows the confirmation', async () => {
+    it('accepts a valid amount, stores it in cents and asks for the website', async () => {
       const mockCtx = { message: { text: '21' }, reply: vi.fn() } as any;
       (mockConversationDO.fetch as any)
         .mockResolvedValueOnce({ status: 200, json: async () => stateAt3 })
@@ -299,7 +299,7 @@ describe('/init command handler (event creation)', () => {
       expect(written.step).toBe(4);
       expect(written.context.defaultAmountCents).toBe(2100);
       expect(mockCtx.reply).toHaveBeenCalledWith(
-        expect.stringContaining('Default amount: SGD 21.00'),
+        expect.stringContaining('Event website (optional)'),
         expect.objectContaining({ reply_markup: expect.any(Object) })
       );
     });
@@ -317,7 +317,7 @@ describe('/init command handler (event creation)', () => {
       expect(mockConversationDO.fetch).toHaveBeenCalledTimes(1); // no state write
     });
 
-    it('Skip moves to the confirmation without an amount', async () => {
+    it('Skip moves to the website step without an amount', async () => {
       const mockCtx = {
         from: { id: 789 },
         callbackQuery: { data: 'init_skip_amount:789' },
@@ -333,8 +333,7 @@ describe('/init command handler (event creation)', () => {
       expect(written.step).toBe(4);
       expect(written.context.defaultAmountCents).toBeUndefined();
       const [text] = mockCtx.editMessageText.mock.calls[0];
-      expect(text).not.toContain('Default amount');
-      expect(text).toContain('Dinner split');
+      expect(text).toContain('Event website (optional)');
     });
 
     it('Skip after the step has moved on is rejected as expired', async () => {
@@ -357,7 +356,114 @@ describe('/init command handler (event creation)', () => {
     });
   });
 
-  describe('handleInput() - Step 4: text while buttons pending', () => {
+  describe('handleInput() - Step 4: optional website', () => {
+    const stateAt4 = {
+      flow: 'init',
+      step: 4,
+      context: {
+        userId: 789,
+        chatId: 123456,
+        userName: 'John',
+        topicId: 0,
+        eventName: 'Dinner split',
+        pendingProxy: { type: 'mobile', normalized: '+6591234567' },
+        defaultAmountCents: 2100,
+      },
+      lastActivity: new Date().toISOString(),
+    };
+
+    it('stores a valid address and shows it in the confirmation', async () => {
+      const mockCtx = { message: { text: 'https://example.com/dinner' }, reply: vi.fn() } as any;
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({ status: 200, json: async () => stateAt4 })
+        .mockResolvedValueOnce({ status: 200 });
+
+      expect(await handler.handleInput(mockCtx)).toBe(true);
+
+      const written = await ((mockConversationDO.fetch as any).mock.calls[1][0] as Request).json();
+      expect(written.step).toBe(5);
+      expect(written.context.websiteUrl).toBe('https://example.com/dinner');
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('Website: https://example.com/dinner'),
+        expect.objectContaining({ reply_markup: expect.any(Object) })
+      );
+    });
+
+    it('adds https:// to an address typed without a scheme', async () => {
+      const mockCtx = { message: { text: 'example.com/dinner' }, reply: vi.fn() } as any;
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({ status: 200, json: async () => stateAt4 })
+        .mockResolvedValueOnce({ status: 200 });
+
+      await handler.handleInput(mockCtx);
+
+      const written = await ((mockConversationDO.fetch as any).mock.calls[1][0] as Request).json();
+      expect(written.context.websiteUrl).toBe('https://example.com/dinner');
+    });
+
+    it.each([
+      'javascript:alert(1)',
+      'data:text/html,x',
+      'mailto:a@b.com',
+      'https://user:pass@example.com',
+      'not a url',
+      'localhost',
+    ])('rejects %s and stays on the step', async (text) => {
+      const mockCtx = { message: { text }, reply: vi.fn() } as any;
+      (mockConversationDO.fetch as any).mockResolvedValueOnce({
+        status: 200,
+        json: async () => stateAt4,
+      });
+
+      expect(await handler.handleInput(mockCtx)).toBe(true);
+
+      expect(mockCtx.reply).toHaveBeenCalledWith(
+        expect.stringContaining('not a valid web address')
+      );
+      expect(mockConversationDO.fetch).toHaveBeenCalledTimes(1); // no state write
+    });
+
+    it('Skip moves to the confirmation without a website', async () => {
+      const mockCtx = {
+        from: { id: 789 },
+        callbackQuery: { data: 'init_skip_website:789' },
+        editMessageText: vi.fn(),
+      } as any;
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({ status: 200, json: async () => stateAt4 })
+        .mockResolvedValueOnce({ status: 200 });
+
+      expect(await handler.handleCallback(mockCtx)).toBe(true);
+
+      const written = await ((mockConversationDO.fetch as any).mock.calls[1][0] as Request).json();
+      expect(written.step).toBe(5);
+      expect(written.context.websiteUrl).toBeUndefined();
+      const [text] = mockCtx.editMessageText.mock.calls[0];
+      expect(text).not.toContain('Website');
+      expect(text).toContain('Dinner split');
+    });
+
+    it('Skip after the step has moved on is rejected as expired', async () => {
+      const mockCtx = {
+        from: { id: 789 },
+        callbackQuery: { data: 'init_skip_website:789' },
+        editMessageText: vi.fn(),
+      } as any;
+      (mockConversationDO.fetch as any).mockResolvedValueOnce({
+        status: 200,
+        json: async () => ({ ...stateAt4, step: 5 }),
+      });
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockCtx.editMessageText).toHaveBeenCalledWith(
+        '❌ Session expired. Run /init again.',
+        expect.anything()
+      );
+    });
+  });
+
+  describe('handleInput() - Step 5: text while buttons pending', () => {
     it('should nudge the user to tap a button instead of typing', async () => {
       const mockCtx = {
         message: { text: 'anything', message_id: 42 },
@@ -368,7 +474,7 @@ describe('/init command handler (event creation)', () => {
         status: 200,
         json: async () => ({
           flow: 'init',
-          step: 4,
+          step: 5,
           context: {
             userId: 789,
             chatId: 123456,
@@ -446,7 +552,7 @@ describe('/init command handler (event creation)', () => {
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 4,
+            step: 5,
             context: {
               userId: 789,
               chatId: 123456,
@@ -491,6 +597,89 @@ describe('/init command handler (event creation)', () => {
       );
     });
 
+    it('creates the event with its website and escapes it for the Markdown message', async () => {
+      const mockCtx = {
+        from: { id: 789 },
+        callbackQuery: { data: 'init_confirm:789' },
+        editMessageText: vi.fn(),
+      } as any;
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({
+          status: 200,
+          json: async () => ({
+            flow: 'init',
+            step: 5,
+            context: {
+              userId: 789,
+              chatId: 123456,
+              topicId: 0,
+              userName: 'John',
+              eventName: 'Dinner split',
+              pendingProxy: { type: 'mobile', normalized: '+6591234567' },
+              websiteUrl: 'https://example.com/a_b*c',
+            },
+            lastActivity: new Date().toISOString(),
+          }),
+        })
+        .mockResolvedValueOnce({ status: 200 });
+      (mockEventRepository.createEvent as any).mockResolvedValue({
+        id: 1,
+        ref: 'EVT-TEST1234',
+        name: 'Dinner split',
+        defaultAmountCents: null,
+        websiteUrl: 'https://example.com/a_b*c',
+      } as Event);
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockEventRepository.createEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ websiteUrl: 'https://example.com/a_b*c' })
+      );
+      const [text, opts] = mockCtx.editMessageText.mock.calls[0];
+      expect(opts.parse_mode).toBe('Markdown');
+      expect(text).toContain('Website: https://example.com/a\\_b*c'.replace('*', '\\*'));
+    });
+
+    it('creates the event without a website when it was skipped', async () => {
+      const mockCtx = {
+        from: { id: 789 },
+        callbackQuery: { data: 'init_confirm:789' },
+        editMessageText: vi.fn(),
+      } as any;
+      (mockConversationDO.fetch as any)
+        .mockResolvedValueOnce({
+          status: 200,
+          json: async () => ({
+            flow: 'init',
+            step: 5,
+            context: {
+              userId: 789,
+              chatId: 1,
+              topicId: 0,
+              userName: 'J',
+              eventName: 'E',
+              pendingProxy: { type: 'mobile', normalized: '+6591234567' },
+            },
+            lastActivity: new Date().toISOString(),
+          }),
+        })
+        .mockResolvedValueOnce({ status: 200 });
+      (mockEventRepository.createEvent as any).mockResolvedValue({
+        id: 1,
+        ref: 'R',
+        name: 'E',
+        defaultAmountCents: null,
+        websiteUrl: null,
+      } as Event);
+
+      await handler.handleCallback(mockCtx);
+
+      expect(mockEventRepository.createEvent).toHaveBeenCalledWith(
+        expect.objectContaining({ websiteUrl: null })
+      );
+      expect(mockCtx.editMessageText.mock.calls[0][0]).not.toContain('Website');
+    });
+
     it('should cancel on Cancel tap and reset state', async () => {
       const mockCtx = {
         from: { id: 789 },
@@ -503,7 +692,7 @@ describe('/init command handler (event creation)', () => {
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 4,
+            step: 5,
             context: {
               userId: 789,
               chatId: 123456,
@@ -564,7 +753,7 @@ describe('/init command handler (event creation)', () => {
           status: 200,
           json: async () => ({
             flow: 'init',
-            step: 4,
+            step: 5,
             context: {
               userId: 789,
               chatId: 123456,

@@ -152,7 +152,8 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 - Collects event name (non-empty, ≤ 50 chars)
 - Collects mobile number or UEN (payee for this event)
 - Optionally collects a default amount (text or Skip), stored as `events.default_amount_cents`; `/start` offers it as a "Use SGD x.xx" button and the web admin dialog pre-fills it
-- Echoes name + payee (+ default amount) for confirmation via inline Confirm/Cancel buttons
+- Optionally collects an event website link (text or Skip; http/https only, validated by `normalizeWebsiteUrl`), stored as `events.website_url` (migration `0001_event_website`) and shown on the admin and payment pages
+- Echoes name + payee (+ default amount, website) for confirmation via inline Confirm/Cancel buttons
 - Creates an `events` row on confirm (status: open)
 - Events are scoped by (chat_id, topic_id)
 - All outcomes update the original message in place via `editMessageText`
@@ -174,7 +175,7 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 - Payment detail view shows status (⏳ / ✅ / 🚫), payer, timestamps, source and payback history with `Paid back` (sent), `Net`, `Pending paybacks` and `Remaining` (payable-back room); event names and descriptions are Markdown-escaped
 - An event from another chat reads as not found
 
-**`/edit_event` handler** (`src/commands/edit-event-handler.ts`): flow `edit` (pick event, pick field, type value). Admin check at start and before the write; one guarded `updateEvent` (open events only); the reply lists the final name, payee and default amount. Payments keep the payee/description they were created with.
+**`/edit_event` handler** (`src/commands/edit-event-handler.ts`): flow `edit` (pick event, pick field, type value). Admin check at start and before the write; one guarded `updateEvent` (open events only); the reply lists the final name, payee, default amount and website (Website is a fourth field, with Clear). Payments keep the payee/description they were created with.
 
 **`/end_event` handler**:
 

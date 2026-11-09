@@ -15,6 +15,24 @@ const ME_HTML =
 const TOPBAR_HTML = `<div class="topbar">${ME_HTML}<button id="theme" class="btn icon" aria-label="Switch between light and dark theme"></button></div>`;
 const TOPBAR_CSS =
   '.topbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:8px;font-size:13px}.topbar .btn{min-height:32px;padding:2px 12px;font-size:13px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:6px;cursor:pointer}.topbar .btn.icon{width:32px;padding:0}';
+/**
+ * Page script shared by the admin and payment pages: shows "Event website: <host>" under the title.
+ * Only http and https values become links (checked again here, though the bot validated it), the link text
+ * is the host, and everything is built with DOM calls (textContent / attributes), never innerHTML.
+ */
+const SITE_JS = String.raw`
+function showSite(u){
+  const p = document.getElementById('site'); if (!p) return;
+  p.textContent = '';
+  let host = null;
+  try { if (/^https?:\/\//i.test(u || '')) host = new URL(u).host; } catch (e) {}
+  if (!host) { p.hidden = true; p.classList.add('hidden'); return; }
+  const a = document.createElement('a');
+  a.textContent = host; a.href = u; a.target = '_blank'; a.rel = 'noopener noreferrer nofollow';
+  p.append('Event website: ', a);
+  p.hidden = false; p.classList.remove('hidden');
+}
+`;
 /** Applies the saved theme before first paint (key shared by both pages: same origin). */
 const THEME_EARLY =
   "<script>try{var t=localStorage.getItem('theme');if(t==='light'||t==='dark')document.documentElement.dataset.theme=t}catch(e){}</script>";
@@ -26,6 +44,9 @@ $('theme').onclick = () => { const next = isDark() ? 'light' : 'dark'; root.data
 matchMedia('(prefers-color-scheme: dark)').addEventListener('change', paintTheme);
 paintTheme();
 `;
+
+/** The event website line under the title (admin and payment pages): theme text colour, underlined. */
+const SITE_CSS = '#site a{color:var(--fg);text-decoration:underline}';
 
 /** Attribution footer shared by every web page; the two links are plain anchors (no requests on load). */
 const LINKEDIN_URL = 'https://linkedin.com/in/miccheng';
@@ -105,9 +126,11 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .foot{display:flex;justify-content:flex-end;gap:8px}
 img{max-width:100%;height:auto}
 ${FOOTER_CSS}
+${SITE_CSS}
 </style></head><body>
 ${TOPBAR_HTML}
 <div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div></div>
+<p id="site" class="muted sm" hidden></p>
 <div class="actions"><button id="scan" class="btn" hidden>Check-In</button><a id="payer-link" class="btn" href="/pay/${ref}">Pay</a><button id="new" class="btn primary" hidden>New request</button></div>
 <p id="msg" class="alert" hidden></p>
 <div id="login" hidden>
@@ -157,6 +180,7 @@ ${TOPBAR_HTML}
 ${FOOTER_HTML}
 <script>
 const $ = (id) => document.getElementById(id);
+${SITE_JS}
 const sgd = (c) => 'SGD ' + (c / 100).toFixed(2);
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtDate = (t) => { if (!t) return ''; const d = new Date(t); return String(d.getDate()).padStart(2, '0') + '-' + MONTHS[d.getMonth()] + '-' + d.getFullYear(); };
@@ -278,6 +302,7 @@ async function show(res, mode) {
   const d = await res.json();
   document.title = 'Event: ' + d.event.name;
   $('title').textContent = 'Event: ' + d.event.name;
+  showSite(d.event.websiteUrl);
   $('new').hidden = d.event.status !== 'open';
   $('scan').hidden = false;
   defaultAmount = d.event.defaultAmountCents ? (d.event.defaultAmountCents / 100).toFixed(2) : '';
@@ -640,9 +665,11 @@ ${THEME_EARLY}
 *{box-sizing:border-box}body{max-width:32rem;margin:0 auto;padding:20px;font:15px/1.5 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
 h1{font-size:1.5rem;line-height:1.2;margin:0}.brand{display:flex;align-items:center;gap:10px;margin-bottom:20px}.brand img{border-radius:8px}.card{border:1px solid var(--border);border-radius:8px;padding:16px;display:grid;gap:14px}.muted{color:var(--muted-fg)}.alert{background:var(--muted);border:1px solid var(--border);border-radius:8px;padding:12px}.err{color:var(--danger);margin:0}.fields{display:grid;gap:12px}label{display:grid;gap:5px;font-weight:600}.input{font:inherit;min-height:42px;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:6px;background:var(--bg);color:var(--fg)}.input:read-only{background:var(--muted)}.btn{font:inherit;font-weight:600;min-height:42px;border:1px solid var(--border);border-radius:6px;padding:8px 16px;background:var(--primary);color:var(--primary-fg);cursor:pointer}.btn:disabled{opacity:.5;cursor:not-allowed}img{max-width:100%;height:auto}.qr{display:grid;justify-items:center;gap:8px}.qr img{width:280px}.hidden{display:none!important}${ME_CSS}${TOPBAR_CSS}.amount{font-size:1.25rem;font-weight:600}h2{font-size:1rem;margin:0 0 8px}.hist{display:grid;gap:8px}.row{border:1px solid var(--border);border-radius:6px;padding:10px;display:grid;gap:8px}.row button{font:inherit;color:inherit;background:none;border:0;padding:0;text-align:left;display:flex;gap:10px;align-items:center;flex-wrap:wrap;cursor:pointer}.row button:disabled{cursor:default}.pill{border-radius:999px;padding:1px 8px;font-size:.8rem;background:var(--muted);border:1px solid var(--border)}
 ${FOOTER_CSS}
+${SITE_CSS}
 </style></head><body>
 ${TOPBAR_HTML}
 <div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Pay event</h1></div>
+<p id="site" class="muted sm hidden"></p>
 <p id="msg" class="alert hidden"></p>
 <div id="app" class="card hidden">
 <p id="event-status" class="muted"></p>
@@ -661,6 +688,7 @@ ${TOPBAR_HTML}
 ${FOOTER_HTML}
 <script>
 const $=id=>document.getElementById(id), sgd=c=>'SGD '+(c/100).toFixed(2);
+${SITE_JS}
 const say=t=>{$('msg').textContent=t;$('msg').classList.toggle('hidden',!t)};
 const errorText={invalid_payer:'Enter a valid mobile number or UEN.',invalid_amount:'Enter a positive amount with up to 2 decimals.',event_closed:'This event is closed.',forbidden:'Not allowed.',not_found:'Event not found.',rate_limited:'This page is busy. Please try again in a few minutes.'};
 let defaultCents=null,signedIn=false;
@@ -693,7 +721,7 @@ async function load(){
   const res=await fetch('/api/pay/${ref}',{credentials:'same-origin'});
   if(res.status===404){say('Event not found.');return}
   if(!res.ok){say('Something went wrong.');return}
-  const d=await res.json(); document.title='Pay: '+d.event.name; $('title').textContent='Pay: '+d.event.name;
+  const d=await res.json(); document.title='Pay: '+d.event.name; $('title').textContent='Pay: '+d.event.name;showSite(d.event.websiteUrl);
   defaultCents=d.event.defaultAmountCents; $('event-status').textContent=d.event.status==='open'?'Make payment for event.':'This event is closed.';
   if(d.event.status!=='open'){$('form').classList.add('hidden');$('app').classList.remove('hidden');return}
   setAmount(); $('app').classList.remove('hidden');

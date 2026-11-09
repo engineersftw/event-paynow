@@ -207,6 +207,7 @@ async function payerData(request: Request, env: WebEnv, ref: string): Promise<Re
       name: access.event.name,
       status: access.event.status,
       defaultAmountCents: access.event.defaultAmountCents,
+      websiteUrl: access.event.websiteUrl ?? null,
     },
     signedIn: access.userId !== null,
   });
@@ -672,7 +673,12 @@ async function eventData(
 
   // Names only: never expose payer/payee PayNow numbers to the page.
   return json({
-    event: { name: event.name, status: event.status, defaultAmountCents: event.defaultAmountCents },
+    event: {
+      name: event.name,
+      status: event.status,
+      defaultAmountCents: event.defaultAmountCents,
+      websiteUrl: event.websiteUrl ?? null,
+    },
     totals: {
       collectedCents: stats.collectedCents,
       paidBackCents: stats.paidBackCents,

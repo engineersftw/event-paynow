@@ -26,6 +26,8 @@ export interface Event {
   closedAt: string | null;
   /** Amount suggested for each payment request, in cents; null when none was set. */
   defaultAmountCents: number | null;
+  /** The event's own web page (http or https), shown on the web pages; null when none was set. */
+  websiteUrl: string | null;
 }
 
 /**
@@ -119,12 +121,14 @@ export interface EventPatch {
   payeeType?: PayeeType;
   payeeValue?: string;
   defaultAmountCents?: number | null;
+  websiteUrl?: string | null;
 }
 
 export interface EventRepository {
   createEvent(
-    event: Omit<Event, 'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents'> & {
+    event: Omit<Event, 'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents' | 'websiteUrl'> & {
       defaultAmountCents?: number | null;
+      websiteUrl?: string | null;
       timestamp: string;
     }
   ): Promise<Event>;

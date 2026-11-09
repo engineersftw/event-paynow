@@ -566,8 +566,9 @@ export class D1EventRepository implements EventRepository {
   }
 
   async createEvent(
-    input: Omit<Event, 'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents'> & {
+    input: Omit<Event, 'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents' | 'websiteUrl'> & {
       defaultAmountCents?: number | null;
+      websiteUrl?: string | null;
       timestamp: string;
     }
   ): Promise<Event> {
@@ -590,6 +591,7 @@ export class D1EventRepository implements EventRepository {
         status,
         createdAt: timestamp,
         defaultAmountCents,
+        websiteUrl: input.websiteUrl ?? null,
       })
       .returning()
       .get();
@@ -707,6 +709,7 @@ function toEvent(row: typeof schema.events.$inferSelect): Event {
     createdAt: row.createdAt,
     closedAt: row.closedAt,
     defaultAmountCents: row.defaultAmountCents,
+    websiteUrl: row.websiteUrl ?? null,
   };
 }
 

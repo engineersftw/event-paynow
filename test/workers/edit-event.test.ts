@@ -82,4 +82,45 @@ describe('/edit_event (Workers pool)', () => {
     const payment = (await repo.getPaymentByRef('PAY-EDIT-1'))!;
     expect([payment.description, payment.payeeValue]).toEqual(['Dinner', '+6591234567']);
   });
+
+  it('sets, replaces and clears the website through the real bot pipeline', async () => {
+    const chatId = 920000002;
+    const events = new D1EventRepository(env.paynow_db);
+    await events.createEvent({
+      ref: 'EVT-EDIT-WEB',
+      chatId,
+      topicId: 0,
+      name: 'Dinner',
+      payeeType: 'mobile',
+      payeeValue: '+6591234567',
+      status: 'open',
+      timestamp: T0,
+    });
+    const b = bot();
+    const websiteOf = async () => (await events.getEventByRef('EVT-EDIT-WEB'))!.websiteUrl;
+
+    // the Website button exists, a bad address is refused, a good one is saved and shown
+    await b.handleUpdate(textUpdate(chatId, '/edit_event'));
+    expect(buttons().map((x) => x.text)).toContain('Website');
+    await b.handleUpdate(callbackUpdate(chatId, 'edit_field:website'));
+    await b.handleUpdate(textUpdate(chatId, 'javascript:alert(1)'));
+    expect(stub.lastText()).toContain('not a valid web address');
+    expect(await websiteOf()).toBeNull();
+    await b.handleUpdate(textUpdate(chatId, 'example.com/lunch'));
+    expect(stub.lastText()).toContain('Website: https://example.com/lunch ✏️');
+    expect(await websiteOf()).toBe('https://example.com/lunch');
+
+    // replace it
+    await b.handleUpdate(textUpdate(chatId, '/edit_event'));
+    await b.handleUpdate(callbackUpdate(chatId, 'edit_field:website', 500, 20));
+    await b.handleUpdate(textUpdate(chatId, 'https://example.com/other'));
+    expect(await websiteOf()).toBe('https://example.com/other');
+
+    // clear it with the Clear button (the tap is routed to the handler by its edit_ prefix)
+    await b.handleUpdate(textUpdate(chatId, '/edit_event'));
+    await b.handleUpdate(callbackUpdate(chatId, 'edit_field:website', 500, 21));
+    await b.handleUpdate(callbackUpdate(chatId, 'edit_clear_website', 500, 22));
+    expect(await websiteOf()).toBeNull();
+    expect(stub.editedMessages.at(-1)!.text).toContain('Website: none ✏️');
+  });
 });
