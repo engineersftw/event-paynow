@@ -80,6 +80,7 @@ This project uses OpenSpec for change management. All changes are archived:
 19. `event-default-amount` (13 tasks) — archived 2026-11-08
 20. `add-edit-event-command` (6 tasks) — archived 2026-11-08
 21. `payer-page-history-and-dm` (8 tasks) — archived 2026-11-08
+22. `optional-payer-sign-in` (7 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 

@@ -11,29 +11,33 @@ The system SHALL provide a distinct payer-facing page for an event reference, se
 
 #### Scenario: Open payer page
 - **WHEN** a visitor opens a valid payer-page link for an event
-- **THEN** the page shows the event identity and a Telegram sign-in control without exposing payment data before sign-in
+- **THEN** the page shows the event identity and the payment form without requiring sign-in, plus an optional Telegram sign-in control, and shows no existing payment data
 
 #### Scenario: Unknown event
 - **WHEN** a visitor opens a payer-page link for an unknown event reference
 - **THEN** the page shows a not-found result and provides no payment form
 
-### Requirement: Payer page requires Telegram authentication but not event administration
-The system SHALL require a valid, unexpired Telegram Login session before accepting a payment request, and SHALL not require the signed-in user to be an administrator or member of the event chat.
+### Requirement: Payer page does not require sign-in or event administration
+The system SHALL accept payment requests from visitors with or without a valid Telegram Login session, and SHALL not require anyone to be an administrator or member of the event chat. Telegram sign-in SHALL stay available as an option.
 
 #### Scenario: Any signed-in user can pay
-- **WHEN** a Telegram user successfully signs in and opens an event link they received from any source
-- **THEN** the payment form is available regardless of the user's event-chat membership or administrator status
+- **WHEN** a Telegram user signs in from the page
+- **THEN** the form stays available regardless of the user's event-chat membership or administrator status
 
 #### Scenario: Unauthenticated submission
 - **WHEN** a payment request is submitted without a valid session
-- **THEN** the system rejects it as unauthenticated and creates no payment
+- **THEN** the system accepts it and creates the payment without a Telegram owner
+
+#### Scenario: Expired session
+- **WHEN** a request carries an invalid or expired session
+- **THEN** it is treated as anonymous rather than rejected
 
 ### Requirement: Payer can create a request for themselves
-The system SHALL let a signed-in user enter their payer PayNow mobile number or UEN and an optional display name, then create a pending request using the event's fixed or user-entered payable amount.
+The system SHALL let any visitor, signed in or not, enter their payer PayNow mobile number or UEN and an optional display name, then create a pending request using the event's fixed or user-entered payable amount.
 
 #### Scenario: Valid request
-- **WHEN** a signed-in user submits a valid payer proxy and optional name for an open event with a default amount, or submits a valid amount when no default exists
-- **THEN** one pending payment is created using the event payee and event name, with the signed-in Telegram user as owner
+- **WHEN** a visitor submits a valid payer proxy and optional name for an open event with a default amount, or submits a valid amount when no default exists
+- **THEN** one pending payment is created using the event payee and event name
 
 #### Scenario: Invalid input
 - **WHEN** the payer proxy or amount is invalid
@@ -69,16 +73,16 @@ The system SHALL reject payer-page payment creation when the event is closed, in
 The system SHALL display the newly created payment QR inline on the payer page with the event name, amount, reference, and payer name when supplied, and SHALL never display the payer's PayNow number as text.
 
 #### Scenario: QR result
-- **WHEN** a valid payer request is created
-- **THEN** the page displays its QR image and payment details immediately without requiring a Telegram message
+- **WHEN** a valid payer request is created, signed in or not
+- **THEN** the page displays its QR image and payment details immediately, delivered in the creation response
 
 #### Scenario: QR image request
-- **WHEN** the page requests the QR for the payer's newly created payment
-- **THEN** the image is served only for that payment and event to the signed-in session
+- **WHEN** a signed-in user requests the QR of one of their earlier payments
+- **THEN** the image is served only for that payment and event to its owner's session
 
 ### Requirement: Payer can see their previous requests for the event
 
-The payer page SHALL list the signed-in user's earlier payment requests for the event, newest first, showing amount, status and creation date, and SHALL let the user view the QR of a pending request again. Only the user's own requests SHALL be returned, and no PayNow number SHALL be shown.
+The payer page SHALL list a signed-in user's earlier payment requests for the event, newest first, showing amount, status and creation date, and SHALL let the user view the QR of a pending request again. Only that user's own requests SHALL be returned, no PayNow number SHALL be shown, and visitors who are not signed in SHALL see no list.
 
 #### Scenario: Own history
 
@@ -103,11 +107,11 @@ The payer page SHALL list the signed-in user's earlier payment requests for the 
 #### Scenario: Not signed in
 
 - **WHEN** the history is requested without a valid session
-- **THEN** the system rejects it as unauthenticated and returns no payments
+- **THEN** the system rejects it as unauthenticated and returns no payments, and the page shows no history section
 
 ### Requirement: Payer flow sends a private copy and no group post
 
-After creating a payment request, the system SHALL send the payer a Telegram direct message with the QR photo and the name-only payment caption, without Received or Void buttons, and SHALL NOT post anything to the event chat. Delivery is best-effort: a refusal by Telegram, for example because the payer never started the bot, SHALL NOT fail the request, and the page SHALL show the QR and tell the payer how to receive the copy.
+After a signed-in user creates a payment request, the system SHALL send them a Telegram direct message with the QR photo and the name-only caption, without Received or Void buttons, and SHALL NOT post anything to the event chat. Visitors who are not signed in get no Telegram message. Delivery is best-effort: a refusal by Telegram SHALL NOT fail the request, and the page SHALL show the QR and tell the user how to receive the copy.
 
 #### Scenario: Privacy-preserving delivery
 
@@ -124,8 +128,13 @@ After creating a payment request, the system SHALL send the payer a Telegram dir
 - **WHEN** the private message is sent
 - **THEN** its caption carries the payer name only, never a PayNow number
 
+#### Scenario: Not signed in
+
+- **WHEN** a visitor who is not signed in creates a request
+- **THEN** no Telegram message is attempted and nothing is posted to the event chat
+
 ### Requirement: Payer page protects submitted requests from cross-site writes
-The system SHALL accept payer-page state-changing requests only as same-origin JSON requests with a valid session, and SHALL associate each request with the authenticated Telegram user.
+The system SHALL accept payer-page state-changing requests only as same-origin JSON requests, and SHALL attribute each request to the authenticated Telegram user when a valid session is present and to no user otherwise.
 
 #### Scenario: Cross-origin request
 - **WHEN** a request is sent with an origin different from the payer page
@@ -134,3 +143,26 @@ The system SHALL accept payer-page state-changing requests only as same-origin J
 #### Scenario: Ownership attribution
 - **WHEN** a signed-in user creates a request
 - **THEN** the payment owner is the authenticated Telegram user rather than a client-supplied user id
+
+#### Scenario: Anonymous ownership
+- **WHEN** a visitor who is not signed in creates a request
+- **THEN** the payment is recorded with no Telegram owner, and event administrators can view and settle it like any other request
+
+### Requirement: Anonymous request creation is rate limited
+
+The system SHALL refuse anonymous payment creation for an event once 30 anonymous requests were created for it in the last 10 minutes, answering that the page is busy, and SHALL NOT limit signed-in users by this cap.
+
+#### Scenario: Cap reached
+
+- **WHEN** 30 anonymous requests exist for the event from the last 10 minutes and another visitor submits one
+- **THEN** the system rejects it as rate limited and creates no payment
+
+#### Scenario: Signed-in users unaffected
+
+- **WHEN** the anonymous cap is reached and a signed-in user submits a valid request
+- **THEN** the request is created
+
+#### Scenario: Window passes
+
+- **WHEN** the earlier anonymous requests are older than 10 minutes
+- **THEN** a new anonymous request is accepted
