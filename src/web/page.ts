@@ -50,7 +50,7 @@ h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
 .actions .btn.primary{flex:1.6}
 ${TOPBAR_CSS}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
-.checkin-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
+.checkin-stats{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:16px}
 .card{border:1px solid var(--border);border-radius:var(--radius);padding:12px}
 .stat b{display:block;font-size:1.1rem;margin-top:2px}
 .list{display:grid;gap:8px}
@@ -107,15 +107,14 @@ ${TOPBAR_HTML}
 <script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="${botUsername.replace(/[^A-Za-z0-9_]/g, '')}" data-size="large" data-auth-url="/api/login?ref=${ref}" data-request-access="write"></script>
 </div>
 <div id="data" hidden>
+<div class="checkin-stats" aria-label="Check-in statistics">
+<div class="card stat"><span class="muted sm">Checked in</span><b id="checked-in"></b></div>
+<div class="card stat"><span class="muted sm">Not checked in</span><b id="not-checked-in"></b><span class="muted sm" id="not-checked-in-split"></span></div>
+</div>
 <div class="stats">
 <div class="card stat"><span class="muted sm">Collected</span><b id="collected"></b></div>
 <div class="card stat"><span class="muted sm">Paid back</span><b id="paidback"></b></div>
 <div class="card stat"><span class="muted sm">Pending</span><b id="pending"></b></div>
-</div>
-<div class="checkin-stats" aria-label="Check-in statistics">
-<div class="card stat"><span class="muted sm">Checked in</span><b id="checked-in"></b></div>
-<div class="card stat"><span class="muted sm">Not checked in (paid)</span><b id="not-checked-in-paid"></b></div>
-<div class="card stat"><span class="muted sm">Not checked in (pending)</span><b id="not-checked-in-pending"></b></div>
 </div>
 <div class="tools">
 <input id="q" class="input" type="search" placeholder="Search payer or reference" maxlength="40" aria-label="Search payments" autocomplete="off">
@@ -277,8 +276,10 @@ async function show(res, mode) {
   $('paidback').textContent = sgd(d.totals.paidBackCents);
   $('pending').textContent = sgd(d.totals.pendingCents);
   $('checked-in').textContent = String(d.checkInStats.checkedInCount);
-  $('not-checked-in-paid').textContent = String(d.checkInStats.notCheckedInPaidCount);
-  $('not-checked-in-pending').textContent = String(d.checkInStats.notCheckedInPendingCount);
+  const paid = d.checkInStats.notCheckedInPaidCount;
+  const unpaid = d.checkInStats.notCheckedInPendingCount;
+  $('not-checked-in').textContent = String(paid + unpaid);
+  $('not-checked-in-split').textContent = paid + ' paid · ' + unpaid + ' pending';
   if (mode === 'append') {
     const seen = new Set(rows.map((p) => p.ref));
     rows = rows.concat(d.payments.filter((p) => !seen.has(p.ref)));
