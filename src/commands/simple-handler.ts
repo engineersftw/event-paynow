@@ -11,6 +11,7 @@ const PAYEE = 1;
 const AMOUNT = 2;
 const EDITABLE = 3; // only asked when an amount was given
 const DESCRIPTION = 4;
+const CONFIRM = 5; // summary with Confirm / Cancel; the QR is made only after Confirm
 
 const MAX_DESCRIPTION = 25;
 
@@ -20,6 +21,20 @@ export const SIMPLE_HELP =
   '/cancel - stop\n\n' +
   'The QR never shows the payee number. Check the payee name in your banking app when you scan it. ' +
   'Descriptions can be up to 25 characters; symbols a QR cannot carry are dropped.';
+
+/** Everything the user entered, for the confirmation step. The payee number is shown here only. */
+function summary(c: Record<string, unknown>): string {
+  const cents = c.amountCents as number | undefined;
+  const lines = [
+    'Please check your PayNow QR details:',
+    '',
+    `Payee: ${c.payeeType === 'uen' ? 'UEN' : 'Mobile'} ${c.payeeValue as string}`,
+    cents === undefined ? 'Amount: set by payer' : `Amount: SGD ${formatCents(cents)}`,
+  ];
+  if (cents !== undefined) lines.push(`Payer can change the amount: ${c.editable ? 'Yes' : 'No'}`);
+  lines.push(`Description: ${(c.description as string | undefined) ?? 'none'}`);
+  return lines.join('\n');
+}
 
 const skip = (data: string) => new InlineKeyboard().text('Skip', data);
 
@@ -103,7 +118,12 @@ export class SimpleCommandHandler {
         await ctx.reply(`Keep the description to ${MAX_DESCRIPTION} characters or fewer.`);
         return true;
       }
-      await this.finish(ctx, description);
+      await this.askConfirm(ctx, state, description);
+      return true;
+    }
+
+    if (state.step === CONFIRM) {
+      await ctx.reply('Please tap Confirm or Cancel on the summary above.');
       return true;
     }
     return false;
@@ -121,7 +141,9 @@ export class SimpleCommandHandler {
           ? EDITABLE
           : data === 'simple_skip_description'
             ? DESCRIPTION
-            : -1;
+            : data === 'simple_confirm' || data === 'simple_cancel'
+              ? CONFIRM
+              : -1;
     if (step !== expected) {
       await ctx.answerCallbackQuery({ text: 'That step is over.' });
       return true;
@@ -133,8 +155,14 @@ export class SimpleCommandHandler {
       await this.askDescription(ctx, state, {});
     } else if (data === 'simple_edit_yes' || data === 'simple_edit_no') {
       await this.askDescription(ctx, state, { editable: data === 'simple_edit_yes' });
+    } else if (data === 'simple_skip_description') {
+      await this.askConfirm(ctx, state, undefined);
+    } else if (data === 'simple_confirm') {
+      await this.finish(ctx);
     } else {
-      await this.finish(ctx, undefined);
+      await this.setState({ flow: 'idle', step: 0, context: {} });
+      await this.dropButtons(ctx);
+      await ctx.reply('Cancelled. Nothing was created. Send /start to begin again.');
     }
     return true;
   }
@@ -167,12 +195,32 @@ export class SimpleCommandHandler {
     });
   }
 
+  /** Store the description (if any) and show everything entered, for the user to confirm. */
+  private async askConfirm(
+    ctx: Context,
+    state: ConversationState,
+    description: string | undefined
+  ) {
+    const context = { ...state.context, ...(description ? { description } : {}) };
+    await this.setState({ flow: 'simple', step: CONFIRM, context });
+    await ctx.reply(summary(context), {
+      reply_markup: new InlineKeyboard()
+        .text('✅ Confirm', 'simple_confirm')
+        .text('❌ Cancel', 'simple_cancel'),
+    });
+  }
+
+  /** Take the buttons off the summary once it has been answered (best effort). */
+  private async dropButtons(ctx: Context): Promise<void> {
+    await ctx.editMessageReplyMarkup().catch(() => undefined);
+  }
+
   /** Claim the conversation (exactly once, and the state is wiped), then build and send the QR. */
-  private async finish(ctx: Context, description: string | undefined): Promise<void> {
+  private async finish(ctx: Context): Promise<void> {
     const claimed = await this.conversationDO.fetch(
       new Request('http://localhost/claim', {
         method: 'POST',
-        body: JSON.stringify({ flow: 'simple', step: DESCRIPTION }),
+        body: JSON.stringify({ flow: 'simple', step: CONFIRM }),
       })
     );
     if (claimed.status !== 200) {
@@ -180,7 +228,9 @@ export class SimpleCommandHandler {
       return; // a double tap: the other tap is already sending the QR
     }
     const state = (await claimed.json()) as ConversationState;
+    await this.dropButtons(ctx);
     const c = state.context;
+    const description = c.description as string | undefined;
     const amountCents = c.amountCents as number | undefined;
     const editable = amountCents === undefined || c.editable === true;
 

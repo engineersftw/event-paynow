@@ -21,7 +21,7 @@ See `docs/architecture.md` for full details. Key components:
 
 - `src/worker.ts` — Fetch handler, routing
 - `src/bot.ts` — grammY bot factory, webhook handler
-- `src/simple-bot.ts` + `src/commands/simple-handler.ts` — Simple_PayNow_Bot (QR-only, no database), `POST /webhook/simple` with `SIMPLE_BOT_TOKEN` / `SIMPLE_WEBHOOK_SECRET` (secrets) and `SIMPLE_BOT_USERNAME` (var); its DO key is `simple-<id>`, flow `simple`; private chats only; the route is 404 until configured
+- `src/simple-bot.ts` + `src/commands/simple-handler.ts` — Simple_PayNow_Bot (QR-only, no database), `POST /webhook/simple` with `SIMPLE_BOT_TOKEN` / `SIMPLE_WEBHOOK_SECRET` (secrets) and `SIMPLE_BOT_USERNAME` (var); its DO key is `simple-<id>`, flow `simple`; private chats only; ends in a Confirm / Cancel summary before the QR; the route is 404 until configured
 - `src/sgqr/` — SGQR payload builder (TLV + CRC16, runtime-agnostic)
 - `src/db/schema.ts` — Drizzle table definitions
 - `src/db/repository.ts` — Repository layer (Drizzle queries)
@@ -87,6 +87,7 @@ This project uses OpenSpec for change management. All changes are archived:
 25. `row-check-in` (5 tasks) — archived 2026-11-09
 26. `add-landing-page` (6 tasks) — archived 2026-11-09
 27. `add-simple-paynow-bot` (9 tasks) — archived 2026-11-09
+28. `add-simple-bot-confirmation` (5 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
