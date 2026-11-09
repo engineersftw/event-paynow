@@ -22,7 +22,8 @@ See `docs/architecture.md` for full details. Key components:
 - `src/worker.ts` — Fetch handler, routing
 - `src/bot.ts` — grammY bot factory, webhook handler
 - `scripts/explainer/` — `npm run video` renders the explainer video into the gitignored `out/explainer/` (scenes page + `captions.json`; frames piped to ffmpeg; Playwright + ffmpeg required, run by hand, never in CI; the CC0 music slice is described in `music.json`, fetched into `out/` and mixed in, `--silent` skips it)
-- `src/simple-bot.ts` + `src/commands/simple-handler.ts` — Simple_PayNow_Bot (QR-only, no database), `POST /webhook/simple` with `SIMPLE_BOT_TOKEN` / `SIMPLE_WEBHOOK_SECRET` (secrets) and `SIMPLE_BOT_USERNAME` (var); its DO key is `simple-<id>`, flow `simple`; private chats only; ends in a Confirm / Cancel summary before the QR; the route is 404 until configured
+- `src/commands/stats-handler.ts` + `src/db/usage-repository.ts` — the hidden `/stats` command (private chats, Telegram ids listed in the `STATS_USER_IDS` secret; silent for everyone else) and its read-only usage queries
+- `src/simple-bot.ts` + `src/commands/simple-handler.ts` — Simple_PayNow_Bot (QR-only; stores no payee, amount, description or identity, only anonymous daily counts in `usage_counters` via `src/db/usage-repository.ts`), `POST /webhook/simple` with `SIMPLE_BOT_TOKEN` / `SIMPLE_WEBHOOK_SECRET` (secrets) and `SIMPLE_BOT_USERNAME` (var); its DO key is `simple-<id>`, flow `simple`; private chats only; ends in a Confirm / Cancel summary before the QR; the route is 404 until configured
 - `src/sgqr/` — SGQR payload builder (TLV + CRC16, runtime-agnostic)
 - `src/db/schema.ts` — Drizzle table definitions
 - `src/db/repository.ts` — Repository layer (Drizzle queries)

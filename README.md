@@ -133,7 +133,7 @@ Open Telegram, message your bot:
 
 ## Simple_PayNow_Bot (optional second bot)
 
-A QR-only bot served by the same Worker at `POST /webhook/simple`: in a private chat, `/start` asks for the payee (mobile or UEN), an optional amount (Skip leaves it to the payer; if given, it asks whether the payer may change it) and an optional description (up to 25 characters), then shows a summary of everything entered with Confirm / Cancel; the PayNow QR is made only after Confirm. It stores nothing (answers sit in the chat's Durable Object under `simple-<id>` for at most 10 minutes) and never prints the payee number on the QR or caption. Until configured, the route answers 404.
+A QR-only bot served by the same Worker at `POST /webhook/simple`: in a private chat, `/start` asks for the payee (mobile or UEN), an optional amount (Skip leaves it to the payer; if given, it asks whether the payer may change it) and an optional description (up to 25 characters), then shows a summary of everything entered with Confirm / Cancel; the PayNow QR is made only after Confirm. It stores no payee, amount, description or identity (answers sit in the chat's Durable Object under `simple-<id>` for at most 10 minutes) and never prints the payee number on the QR or caption; the only thing it records is an anonymous count per day (table `usage_counters`: QRs made, and whether the amount was skipped, fixed or changeable by the payer). Until configured, the route answers 404.
 
 ```bash
 # 1. BotFather: /newbot -> Simple_PayNow_Bot; commands: start - Make a PayNow QR, cancel - Stop, help - How it works
@@ -151,6 +151,19 @@ curl -X POST "https://api.telegram.org/bot<SIMPLE_BOT_TOKEN>/setWebhook" \
 `npm run video` renders a ~76 s, captioned, silent explainer video (Event Organizer chapter, then Attendee chapter) to `out/explainer/` (gitignored, so it is never committed): `explainer.mp4` (1920x1080 H.264), `poster.png`, `captions.srt` (upload it to YouTube for real captions) and `transcript.txt` (for the video description). It needs Playwright's Chromium and ffmpeg and takes about 80 seconds. The scenes are `scripts/explainer/scenes.html` and the caption text is `scripts/explainer/captions.json`; edit them and re-run when the bot changes. A test checks that every command named in the captions is in the bot's `/help` text. All names and the sample QR are fictional.
 
 The video has a quiet music bed (about -23 LUFS, 2 s fade in, 3 s fade out): a slice of "Calm Pill 1 - Still Habitat" by Alaeddin Hallak, published on the Internet Archive under the CC0 1.0 dedication. `scripts/explainer/music.json` records the title, creator, source page, file URL, licence URL and start offset; edit it to use another CC0 track. The audio is never committed: the script fetches just the needed slice into `out/explainer/.music-cache/` the first time (needs network access to archive.org). `npm run video -- --silent` builds without music; if the fetch fails the build stops with a message instead of writing a silent video. `transcript.txt` ends with a music credit line for the YouTube description.
+
+## Usage stats
+
+Authorized users can send the hidden `/stats` command to Event PayNow Bot in a **private chat** (it is not in `/help` or the BotFather list; anyone else, and any group, gets no reply). It shows events (total, open, closed, last 7 and 30 days, different chats), QR codes / payment requests (total, last 7 and 30 days, by status, how many came from the public payment page without sign-in), SGD received, check-ins, paybacks, and Simple_PayNow_Bot's QR count with the share of QRs where the amount was skipped, fixed or changeable by the payer. It is all numbers: no names, PayNow numbers or references. The event bot's figures are computed from the existing database records; the simple bot's come from the anonymous daily counters (counts start when the counters were added, and cancelled or unconfirmed conversations are not counted).
+
+Authorized users are a comma-separated list of Telegram user ids in a Worker secret (find an id by messaging a bot such as @userinfobot, or from the `from.id` in a webhook update):
+
+```bash
+npx wrangler secret put STATS_USER_IDS      # e.g. 123456789, 987654321
+npx wrangler deploy                           # the new value is picked up on the next deploy
+```
+
+Not covered by `/stats`: landing page visits (turn on Cloudflare Web Analytics for the Pages project in the Cloudflare dashboard: no code, no cookies) and explainer video views (YouTube Studio).
 
 ## Web pages (admin and payer event pages)
 

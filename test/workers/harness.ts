@@ -79,6 +79,12 @@ const TEST_SCHEMA_STATEMENTS = [
     cancelled_by INTEGER,
     FOREIGN KEY (payment_id) REFERENCES payments(id)
   )`,
+  `CREATE TABLE IF NOT EXISTS usage_counters (
+    day TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    count INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (day, metric)
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)`,
   `CREATE INDEX IF NOT EXISTS idx_paybacks_payment_id ON paybacks(payment_id)`,

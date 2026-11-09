@@ -1,6 +1,14 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
 import { detectProxyType } from '../db/proxy-validation';
+import {
+  SIMPLE_AMOUNT_EDITABLE,
+  SIMPLE_AMOUNT_FIXED,
+  SIMPLE_AMOUNT_SKIPPED,
+  SIMPLE_QR,
+  sgDay,
+  type UsageCounter,
+} from '../db/usage-repository';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
 import { renderQrPng } from '../sgqr/qr-render';
@@ -50,7 +58,11 @@ function amountLine(amountCents: number | undefined, editable: boolean): string 
  * owner tracking. Nothing is persisted: answers live in the DO state until the QR is sent.
  */
 export class SimpleCommandHandler {
-  constructor(private readonly conversationDO: ConversationDO) {}
+  /** `counter` records anonymous daily counts after a QR is sent; absent in tests that do not need it. */
+  constructor(
+    private readonly conversationDO: ConversationDO,
+    private readonly counter?: UsageCounter
+  ) {}
 
   async start(ctx: Context): Promise<void> {
     await this.setState({ flow: 'simple', step: PAYEE, context: {} });
@@ -234,6 +246,7 @@ export class SimpleCommandHandler {
     const amountCents = c.amountCents as number | undefined;
     const editable = amountCents === undefined || c.editable === true;
 
+    let sent = false;
     try {
       const payload = buildPayNowPayload({
         proxyType: c.payeeType as 'mobile' | 'uen',
@@ -247,9 +260,32 @@ export class SimpleCommandHandler {
       await ctx.replyWithPhoto(new InputFile(image, 'paynow-qr.bmp'), {
         caption: `${lines.join('\n')}\n\nScan with your banking app. Check the payee name before you pay. Send /start for another QR.`,
       });
+      sent = true;
     } catch {
       // No console logging: the answers are payee numbers
       await ctx.reply('Could not make the QR. Please send /start to try again.');
+    }
+    if (sent) await this.count(amountCents, c.editable === true);
+  }
+
+  /**
+   * Anonymous daily counts: one QR, and which amount choice was made. Best effort: a failure here
+   * must never affect the user (the QR is already sent) and nothing is logged.
+   */
+  private async count(amountCents: number | undefined, payerMayChange: boolean): Promise<void> {
+    if (!this.counter) return;
+    const day = sgDay();
+    const choice =
+      amountCents === undefined
+        ? SIMPLE_AMOUNT_SKIPPED
+        : payerMayChange
+          ? SIMPLE_AMOUNT_EDITABLE
+          : SIMPLE_AMOUNT_FIXED;
+    try {
+      await this.counter.increment(SIMPLE_QR, day);
+      await this.counter.increment(choice, day);
+    } catch {
+      // swallowed on purpose
     }
   }
 
