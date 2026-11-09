@@ -99,8 +99,8 @@ export function buildPayNowPayload(opts: PayNowPayloadOptions): string {
   const _paynowTemplate = nestedTlv('26', paynowFields);
 
   // Format amount as decimal string (e.g. 1250 → "12.50")
-  const amountStr =
-    amountCents !== undefined && !editable ? (amountCents / 100).toFixed(2) : undefined;
+  // An amount is always carried when given; `editable` (tag 26.03) only says whether the payer may change it
+  const amountStr = amountCents !== undefined ? (amountCents / 100).toFixed(2) : undefined;
 
   // Build the full payload
   const _fields: Array<[string, string]> = [

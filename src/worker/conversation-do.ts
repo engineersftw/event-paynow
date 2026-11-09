@@ -16,7 +16,7 @@ import type { Env } from '../env';
  */
 const ConversationStateSchema = z.object({
   // Current conversation flow
-  flow: z.enum(['idle', 'init', 'start', 'payback', 'end', 'edit']).default('idle'),
+  flow: z.enum(['idle', 'init', 'start', 'payback', 'end', 'edit', 'simple']).default('idle'),
 
   // Step within the current flow
   step: z.number().int().nonnegative().default(0),

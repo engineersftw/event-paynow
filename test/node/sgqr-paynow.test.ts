@@ -123,6 +123,20 @@ describe('buildPayNowPayload — editable amount', () => {
   });
 });
 
+describe('buildPayNowPayload — editable amount with a starting value', () => {
+  const payload = buildPayNowPayload({
+    proxyType: 'mobile',
+    proxyValue: '+6591234567',
+    amountCents: 500,
+    editable: true,
+  });
+
+  it('keeps the amount (tag 54) and marks it editable (26.03 = 1)', () => {
+    expect(payload).toContain('03011');
+    expect(payload).toContain('54045.00');
+  });
+});
+
 describe('buildPayNowPayload — truncation', () => {
   const longName = 'A'.repeat(30);
   const payload = buildPayNowPayload({

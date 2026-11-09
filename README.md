@@ -131,6 +131,21 @@ Open Telegram, message your bot:
 - `/help` → should show the command list
 - `/init` → create your first event
 
+## Simple_PayNow_Bot (optional second bot)
+
+A QR-only bot served by the same Worker at `POST /webhook/simple`: in a private chat, `/start` asks for the payee (mobile or UEN), an optional amount (Skip leaves it to the payer; if given, it asks whether the payer may change it) and an optional description (up to 25 characters), then sends the PayNow QR. It stores nothing (answers sit in the chat's Durable Object under `simple-<id>` for at most 10 minutes) and never prints the payee number on the QR or caption. Until configured, the route answers 404.
+
+```bash
+# 1. BotFather: /newbot -> Simple_PayNow_Bot; commands: start - Make a PayNow QR, cancel - Stop, help - How it works
+# 2. Secrets (SIMPLE_BOT_USERNAME is a var in wrangler.toml), then redeploy the Worker
+npx wrangler secret put SIMPLE_BOT_TOKEN
+npx wrangler secret put SIMPLE_WEBHOOK_SECRET      # e.g. openssl rand -hex 16
+# 3. Point the new bot at its own route
+curl -X POST "https://api.telegram.org/bot<SIMPLE_BOT_TOKEN>/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://<worker>.<subdomain>.workers.dev/webhook/simple","secret_token":"<SIMPLE_WEBHOOK_SECRET>"}'
+```
+
 ## Web pages (admin and payer event pages)
 
 **Check-in at the door.** The event page has a **Check-In** button: it opens the phone camera, reads the attendee's payment
@@ -222,9 +237,11 @@ npx wrangler d1 migrations apply paynow-db --remote  # Apply to production
 src/
 ├── worker.ts              # Fetch handler, routing
 ├── bot.ts                 # grammY bot factory, webhook handler, callback dispatcher
+├── simple-bot.ts          # Simple_PayNow_Bot factory + /webhook/simple handler
 ├── env.ts                 # Cloudflare Workers environment bindings
 ├── index.ts               # Worker entry + ChatSessionDO export
 ├── commands/
+│   ├── simple-handler.ts  # Simple_PayNow_Bot conversation (payee → amount → payer-may-change → description)
 │   ├── init-handler.ts    # /init — create event (name + payee)
 │   ├── start-handler.ts   # /start — create payment QR (event picker → amount → QR)
 │   ├── payments-handler.ts # /payments — list events, drill into payments
