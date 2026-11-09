@@ -459,6 +459,54 @@ load();
 ${ME_JS}</script></body></html>`;
 }
 
+/** Public home page at `/`: what the bot does and a link to add it on Telegram. No data, no session. */
+export function renderLandingPage(botUsername: string): string {
+  const bot = botUsername.replace(/[^A-Za-z0-9_]/g, '');
+  const cta = `<a class="cta" href="https://t.me/${bot}">Add the bot on Telegram</a>`;
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Event PayNow Bot</title><link rel="icon" href="/logo.png">
+${THEME_EARLY}
+<style>
+:root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa}
+@media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b}}
+:root[data-theme="dark"]{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b}
+*{box-sizing:border-box}body{max-width:36rem;margin:0 auto;padding:20px;font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
+.topbar{display:flex;justify-content:flex-end;margin-bottom:8px}
+.icon{min-height:32px;padding:2px 12px;font-size:13px;background:var(--bg);color:var(--fg);border:1px solid var(--border);border-radius:8px;cursor:pointer}
+.brand{display:flex;align-items:center;gap:12px;margin-bottom:12px}.brand img{border-radius:12px}
+h1{font-size:1.6rem;line-height:1.2;margin:0;letter-spacing:-.02em}h2{font-size:1.1rem;margin:28px 0 8px}
+.lead{font-size:1.05rem;margin:0 0 18px}.muted{color:var(--muted-fg)}
+.cta{display:block;text-align:center;padding:14px 16px;border-radius:10px;background:var(--primary);color:var(--primary-fg);font-weight:600;text-decoration:none;overflow-wrap:anywhere}
+ul,ol{padding-left:1.2rem;margin:0}li{margin:6px 0}code{background:var(--muted);padding:1px 6px;border-radius:5px;font-size:.9em}
+.end{margin-top:28px}
+</style></head><body>
+<div class="topbar"><button id="theme" class="icon" aria-label="Switch between light and dark theme"></button></div>
+<div class="brand"><img src="/logo.png" alt="" width="56" height="56"><h1>Event PayNow Bot</h1></div>
+<p class="lead">Collect PayNow payments for your event from a Telegram group: a QR code for every request, and a clear record of who has paid.</p>
+${cta}
+<h2>What it does</h2>
+<ul>
+<li><b>Events with a PayNow payee</b>: set a name, a payee (mobile or UEN) and an optional default amount.</li>
+<li><b>PayNow QR codes</b>: one per payment request, with the payer's name printed on it.</li>
+<li><b>Payment tracking</b>: mark payments received, void requests, and pay back with a refund QR.</li>
+<li><b>Check-in</b>: scan an attendee's payment QR, or tap Check-In on their row, on the web page.</li>
+<li><b>Payment page</b>: share one link so attendees make their own request, no sign-in needed.</li>
+</ul>
+<h2>Get started</h2>
+<ol>
+<li>Add the bot to your Telegram group.</li>
+<li>Send <code>/init</code> to create an event.</li>
+<li>Send <code>/web_payment</code> and share the link, or issue QR codes yourself with <code>/start</code>.</li>
+<li>Send <code>/web_admin</code> to manage payments and check people in.</li>
+</ol>
+<div class="end">${cta}</div>
+<script>
+const $=id=>document.getElementById(id);
+${THEME_JS}
+</script></body></html>`;
+}
+
 /** Standalone payer page: no event history or administrator actions are exposed here. */
 export function renderPayerPage(ref: string, botUsername: string): string {
   const bot = botUsername.replace(/[^A-Za-z0-9_]/g, '');
