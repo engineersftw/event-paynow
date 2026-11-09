@@ -86,6 +86,7 @@ This project uses OpenSpec for change management. All changes are archived:
 24. `attendee-check-in` (14 tasks) — archived 2026-11-09
 25. `row-check-in` (5 tasks) — archived 2026-11-09
 26. `add-landing-page` (6 tasks) — archived 2026-11-09
+27. `add-simple-paynow-bot` (9 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
@@ -100,7 +101,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (11 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (12 capabilities)
 
 ## Key Design Decisions
 
