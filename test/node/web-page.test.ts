@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { handleWeb, type WebEnv } from '../../src/web/handler';
-import { renderPage, renderPayerPage } from '../../src/web/page';
+import { renderPage, renderPayerPage, videoCard } from '../../src/web/page';
 
 describe('event page shell', () => {
   it('serves valid inline script with the payment request and payback controls, without forms or innerHTML', async () => {
@@ -195,5 +195,35 @@ describe('landing page', () => {
     const html = await (await get('a"><script>x</script>')).text();
     expect(html).toContain('https://t.me/ascriptxscript"');
     expect(html).not.toContain('<script>x');
+  });
+
+  describe('explainer video', () => {
+    it('is a click-to-play card: no player, no YouTube request before the click', async () => {
+      const html = await (await get('my_bot')).text();
+      expect(html).toContain('id="play"');
+      expect(html).toContain('data-video="ezOo1OIhl-Y"');
+      expect(html).toContain('href="https://youtu.be/ezOo1OIhl-Y"'); // works without JavaScript
+      expect(html).not.toContain('<iframe');
+      // the only YouTube hosts in the page are the plain link and the script that runs on click
+      expect(html.match(/<(?:img|script|link|iframe)[^>]+(?:youtube|ytimg|google)/gi)).toBeNull();
+      expect(html.indexOf('id="play"')).toBeGreaterThan(html.indexOf('t.me/my_bot'));
+      expect(html.indexOf('id="play"')).toBeLessThan(html.indexOf('What it does'));
+    });
+
+    it('swaps in the privacy-enhanced player on click', async () => {
+      const html = await (await get('my_bot')).text();
+      const code = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!).join('\n');
+      expect(() => new Function(code)).not.toThrow();
+      expect(code).toContain('https://www.youtube-nocookie.com/embed/');
+      expect(code).toContain('autoplay=1');
+      expect(code).toContain('allowFullscreen=true');
+      expect(code).toContain('f.title=');
+    });
+
+    it('leaves the block out for an id that is not a YouTube id', () => {
+      for (const bad of ['', 'short', 'ezOo1OIhl-Y"><script>', 'ezOo1OIhl-YY', 'ezOo1OIhl 1'])
+        expect(videoCard(bad)).toBe('');
+      expect(videoCard('ezOo1OIhl-Y')).toContain('data-video="ezOo1OIhl-Y"');
+    });
   });
 });
