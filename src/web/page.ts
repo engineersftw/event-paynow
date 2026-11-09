@@ -343,7 +343,7 @@ async function load(){
   if(res.status===404){say('Event not found.');return}
   if(!res.ok){say('Something went wrong.');return}
   const d=await res.json(); document.title='Pay: '+d.event.name; $('title').textContent='Pay: '+d.event.name;
-  defaultCents=d.event.defaultAmountCents; $('event-status').textContent=d.event.status==='open'?'Create your payment request.':'This event is closed.';
+  defaultCents=d.event.defaultAmountCents; $('event-status').textContent=d.event.status==='open'?'Make payment for event.':'This event is closed.';
   if(d.event.status!=='open'){$('form').classList.add('hidden');$('app').classList.remove('hidden');return}
   setAmount(); $('app').classList.remove('hidden');
   signedIn=d.signedIn; if(signedIn)loadHistory();else $('signin').classList.remove('hidden');
