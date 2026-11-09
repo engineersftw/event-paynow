@@ -90,6 +90,7 @@ This project uses OpenSpec for change management. All changes are archived:
 27. `add-simple-paynow-bot` (9 tasks) — archived 2026-11-09
 28. `add-simple-bot-confirmation` (5 tasks) — archived 2026-11-09
 29. `add-explainer-video` (7 tasks) — archived 2026-11-09
+30. `add-explainer-soundtrack` (7 tasks) — archived 2026-11-09
 
 **Workflow commands:**
 
