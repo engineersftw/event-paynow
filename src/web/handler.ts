@@ -33,13 +33,51 @@ const json = (body: unknown, status = 200) =>
     headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' },
   });
 
-function sessionCookie(request: Request): string | undefined {
+function cookieValue(request: Request, name: string): string | undefined {
   return request.headers
     .get('Cookie')
     ?.split(';')
     .map((c) => c.trim())
-    .find((c) => c.startsWith('session='))
-    ?.slice('session='.length);
+    .find((c) => c.startsWith(`${name}=`))
+    ?.slice(name.length + 1);
+}
+
+const sessionCookie = (request: Request) => cookieValue(request, 'session');
+
+const COOKIE_FLAGS = 'HttpOnly; Secure; SameSite=Lax; Path=/';
+const MAX_DISPLAY_NAME = 64;
+
+/** Name shown next to Sign out: first + last name, else @username, else empty. Display only. */
+function displayName(params: URLSearchParams): string {
+  const full = [params.get('first_name'), params.get('last_name')].filter(Boolean).join(' ').trim();
+  const username = params.get('username');
+  return (full || (username ? `@${username}` : '')).slice(0, MAX_DISPLAY_NAME);
+}
+
+/** The remembered display name, or null (absent, empty or malformed cookie). */
+function storedName(request: Request): string | null {
+  const raw = cookieValue(request, 'tg_name');
+  if (!raw) return null;
+  try {
+    return decodeURIComponent(raw).slice(0, MAX_DISPLAY_NAME) || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Who is signed in, for the header of both pages. Never an error: no session is `user: null`. */
+async function me(request: Request, env: WebEnv): Promise<Response> {
+  const userId = await verifySession(sessionCookie(request), env.SESSION_SECRET);
+  return json({ user: userId === null ? null : { name: storedName(request) } });
+}
+
+/** Clear this browser's session. Sessions are stateless, so a copied cookie stays valid until expiry. */
+function logout(): Response {
+  const headers = new Headers();
+  for (const name of ['session', 'tg_name']) {
+    headers.append('Set-Cookie', `${name}=; ${COOKIE_FLAGS}; Max-Age=0`);
+  }
+  return new Response(null, { status: 204, headers });
 }
 
 /**
@@ -64,14 +102,17 @@ export async function handleWeb(
     }
     const next = url.searchParams.get('next');
     const cookie = await signSession(userId, env.SESSION_SECRET);
-    return new Response(null, {
-      status: 302,
-      headers: {
-        Location: `${next === 'pay' ? '/pay' : '/events'}/${ref}`,
-        'Set-Cookie': `session=${cookie}; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=${SESSION_MAX_AGE_SEC}`,
-      },
-    });
+    const headers = new Headers({ Location: `${next === 'pay' ? '/pay' : '/events'}/${ref}` });
+    const age = `Max-Age=${SESSION_MAX_AGE_SEC}`;
+    headers.append('Set-Cookie', `session=${cookie}; ${COOKIE_FLAGS}; ${age}`);
+    headers.append(
+      'Set-Cookie',
+      `tg_name=${encodeURIComponent(displayName(url.searchParams))}; ${COOKIE_FLAGS}; ${age}`
+    );
+    return new Response(null, { status: 302, headers });
   }
+
+  if (url.pathname === '/api/me') return me(request, env);
 
   const payerPage = url.pathname.match(/^\/pay\/([^/]+)$/);
   if (payerPage && REF.test(payerPage[1]!)) {
@@ -289,6 +330,10 @@ async function handlePost(
   fetchFn: typeof fetch
 ): Promise<Response> {
   const path = url.pathname;
+  if (path === '/api/logout') {
+    if (!sameOriginJson(request, url)) return json({ error: 'forbidden' }, 403);
+    return logout();
+  }
   const payerCreate = path.match(/^\/api\/pay\/([^/]+)\/payments$/);
   if (payerCreate && REF.test(payerCreate[1]!)) {
     if (!sameOriginJson(request, url)) return json({ error: 'forbidden' }, 403);

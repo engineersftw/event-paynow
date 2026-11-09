@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { handleWeb, type WebEnv } from '../../src/web/handler';
-import { renderPayerPage } from '../../src/web/page';
+import { renderPage, renderPayerPage } from '../../src/web/page';
 
 describe('event page shell', () => {
   it('serves valid inline script with the payment request and payback controls, without forms or innerHTML', async () => {
@@ -65,6 +65,21 @@ describe('event page shell', () => {
     expect(fmtDate(new Date(2026, 10, 8, 12).getTime())).toBe('08-Nov-2026');
     expect(fmtDate(new Date(2027, 0, 31, 23, 59).getTime())).toBe('31-Jan-2027');
     expect(fmtDate(null)).toBe('');
+  });
+
+  it('both pages show the signed-in user with Sign out, hidden until /api/me reports one', () => {
+    for (const html of [renderPage('EVT1', 'my_bot'), renderPayerPage('EVT1', 'my_bot')]) {
+      expect(html).toContain('id="me"');
+      expect(html).toMatch(/id="me"[^>]*hidden/);
+      expect(html).toContain('id="signout"');
+      expect(html).toContain("fetch('/api/me'");
+      expect(html).toContain("fetch('/api/logout',{method:'POST'");
+      expect(html).toContain("u.name||'Signed in'");
+      expect(html).toContain('location.reload()');
+      expect(html).toContain('textContent');
+      const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+      for (const code of scripts) expect(() => new Function(code)).not.toThrow();
+    }
   });
 
   it('renders the standalone payer page with conditional amount editing and inline QR flow', () => {
