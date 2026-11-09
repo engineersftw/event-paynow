@@ -1,5 +1,6 @@
 import { handleWebhook, validateSecret } from './bot';
 import type { Env } from './env';
+import { handleSimpleWebhook } from './simple-bot';
 
 export default {
   async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
@@ -17,6 +18,17 @@ export default {
         return new Response('Unauthorized', { status: 403 });
       }
       return handleWebhook(request, env);
+    }
+
+    // Simple_PayNow_Bot: own secret, 404 until it is configured
+    if (url.pathname === '/webhook/simple' && request.method === 'POST') {
+      if (!env.SIMPLE_BOT_TOKEN || !env.SIMPLE_WEBHOOK_SECRET) {
+        return new Response('Not found', { status: 404 });
+      }
+      if (!validateSecret(request, env.SIMPLE_WEBHOOK_SECRET)) {
+        return new Response('Unauthorized', { status: 403 });
+      }
+      return handleSimpleWebhook(request, env);
     }
 
     return new Response('Not found', { status: 404 });

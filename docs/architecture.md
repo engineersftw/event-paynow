@@ -104,6 +104,10 @@
 
 **Key behavior**: Secret validation happens BEFORE bot instantiation to avoid "Empty token" errors in tests. The webhook URL must include the `/webhook` path.
 
+### Simple_PayNow_Bot (src/simple-bot.ts)
+
+A second, independent bot in the same Worker on `POST /webhook/simple` (own token and secret; 404 until configured). `SimpleCommandHandler` runs payee → amount → (payer may change the amount?) → description in the chat's Durable Object under key `simple-<id>` (flow `simple`, so it never mixes with the event bot's `chat-<id>`), then claims the state (exactly once, which also wipes it), builds the payload with `buildPayNowPayload` and sends the QR. No D1 access, no logging of answers, private chats only, payee number never printed on the image or caption.
+
 ### grammY Bot (src/bot.ts)
 
 **Role**: Telegram Bot framework integration
