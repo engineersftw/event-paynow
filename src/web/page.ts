@@ -27,20 +27,28 @@ body{margin:0 auto;max-width:44rem;padding:16px;font:14px/1.5 system-ui,-apple-s
 h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
 [hidden]{display:none!important}
 .muted{color:var(--muted-fg)}.sm{font-size:12px}
-.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:16px}
+.head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}
+.actions{display:flex;gap:6px;margin-bottom:16px}
+.actions .btn{flex:1;min-width:0;white-space:nowrap;padding-left:8px;padding-right:8px}
+@media(max-width:360px){.actions .btn{padding-left:4px;padding-right:4px;font-size:13px}}
+.actions .btn.primary{flex:1.6}
+.topbar{display:flex;align-items:center;justify-content:flex-end;gap:8px;margin-bottom:8px;font-size:13px}
+.topbar .btn{min-height:32px;padding:2px 12px;font-size:13px}
+.topbar .btn.icon{width:32px;padding:0}
 .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:16px}
 .card{border:1px solid var(--border);border-radius:var(--radius);padding:12px}
 .stat b{display:block;font-size:1.1rem;margin-top:2px}
 .list{display:grid;gap:8px}
 .row{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
-.row .end{text-align:right;flex:none}
+.row .end{text-align:right;flex:0 1 auto;max-width:70%}
+.row .end .badge{margin-top:2px}
 .name{font-weight:600;overflow-wrap:anywhere}
 .voided .amt{text-decoration:line-through;color:var(--muted-fg)}
 .badge{display:inline-block;border-radius:999px;padding:1px 10px;font-size:12px;font-weight:600;background:var(--muted);color:var(--fg)}
 .badge.pending{background:var(--pending-bg);color:var(--pending-fg)}
 .badge.received,.badge.sent{background:var(--received-bg);color:var(--received-fg)}
 .badge.voided,.badge.cancelled{background:var(--voided-bg);color:var(--voided-fg)}
-.badge.checked{background:transparent;border:1px solid var(--received-fg);color:var(--received-fg)}
+.badge.checked{white-space:nowrap;background:transparent;border:1px solid var(--received-fg);color:var(--received-fg)}
 #sc-video{width:100%;max-height:50vh;border-radius:calc(var(--radius) - 2px);background:#000}
 .banner{border-radius:calc(var(--radius) - 2px);padding:10px 12px;font-weight:600;background:var(--muted)}
 .banner.ok{background:var(--received-bg);color:var(--received-fg)}
@@ -48,7 +56,7 @@ h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
 .big{min-height:48px;width:100%}
 .toggles{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
 .panel{margin-top:8px;padding-top:8px;border-top:1px solid var(--border);display:grid;gap:8px}
-.btn{font:inherit;font-weight:600;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);background:var(--bg);color:var(--fg);border-radius:calc(var(--radius) - 2px);padding:8px 16px;cursor:pointer}
+.btn{text-decoration:none;font:inherit;font-weight:600;min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--border);background:var(--bg);color:var(--fg);border-radius:calc(var(--radius) - 2px);padding:8px 16px;cursor:pointer}
 .btn:hover{background:var(--muted)}
 .btn.primary{background:var(--primary);color:var(--primary-fg);border-color:var(--primary)}
 .btn.primary:hover{opacity:.9}
@@ -60,7 +68,6 @@ h1{font-size:1.5rem;line-height:1.2;margin:0;letter-spacing:-.02em}
 .more{width:100%;margin-top:8px}
 .brand{display:flex;align-items:center;gap:10px;min-width:0}
 ${ME_CSS}
-.me.bar{justify-content:flex-end;margin-bottom:8px}
 .brand img{flex:none;border-radius:8px}
 :focus-visible{outline:2px solid var(--ring);outline-offset:2px}
 .input{font:inherit;min-height:40px;width:100%;border:1px solid var(--border);border-radius:calc(var(--radius) - 2px);padding:6px 10px;background:var(--bg);color:var(--fg)}
@@ -76,8 +83,9 @@ dialog::backdrop{background:rgba(0,0,0,.5)}
 .foot{display:flex;justify-content:flex-end;gap:8px}
 img{max-width:100%;height:auto}
 </style></head><body>
-${ME_HTML.replace('class="me"', 'class="me bar"')}
-<div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div><div class="inline"><button id="scan" class="btn" hidden>Scan</button><a id="payer-link" class="btn" href="/pay/${ref}">Pay</a><button id="theme" class="btn" aria-label="Switch between light and dark theme"></button><button id="new" class="btn primary" hidden>New request</button></div></div>
+<div class="topbar">${ME_HTML}<button id="theme" class="btn icon" aria-label="Switch between light and dark theme"></button></div>
+<div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div></div>
+<div class="actions"><button id="scan" class="btn" hidden>Check-In</button><a id="payer-link" class="btn" href="/pay/${ref}">Pay</a><button id="new" class="btn primary" hidden>New request</button></div>
 <p id="msg" class="alert" hidden></p>
 <div id="login" hidden>
 <p>Sign in with Telegram to view this event.</p>
@@ -199,7 +207,7 @@ function paymentCard(p) {
   end.append(el('div', sgd(p.amountCents), 'amt name'));
   if (p.paidBackCents > 0) end.append(el('div', 'Net ' + sgd(p.netCents), 'muted sm'));
   end.append(el('span', p.status, 'badge ' + p.status));
-  if (p.checkedInAt) end.append(el('span', 'Checked in ' + fmtDate(p.checkedInAt), 'badge checked'));
+  if (p.checkedInAt) end.append(el('span', 'Checked in ' + fmtDate(p.checkedInAt).replace(/-/g, '\\u2011'), 'badge checked'));
   row.append(left, end);
   card.append(row);
   const toggles = el('div', undefined, 'toggles');

@@ -111,7 +111,7 @@ Open Telegram, message your bot:
 
 ## Web pages (admin and payer event pages)
 
-**Check-in at the door.** The event page has a **Scan** button: it opens the phone camera, reads the attendee's payment
+**Check-in at the door.** The event page has a **Check-In** button: it opens the phone camera, reads the attendee's payment
 QR (the one from the payer page, `/start` or the admin dialog, which carries the payment reference), shows that payment
 with a **Check in** button and the usual actions (mark received or void, pay back), and records the check-in time and
 admin once per payment. Pending and received payments can be checked in; voided ones cannot. If the camera is blocked,
@@ -119,7 +119,7 @@ type the payment reference instead. Payment QR captions and the payer page remin
 check-in. QR decoding uses the browser's `BarcodeDetector` when available, else the vendored
 [jsQR](https://github.com/cozmo/jsQR) 1.4.0 (Apache-2.0) at `web/public/vendor/jsqr.js`, a minified build of
 `node_modules/jsqr/dist/jsQR.js` (`npx esbuild node_modules/jsqr/dist/jsQR.js --minify --outfile=web/public/vendor/jsqr.js`,
-then restore the banner comment) loaded only when Scan is used.
+then restore the banner comment) loaded only when Check-In is used.
 
 `/web_admin` replies with a link per event to a Cloudflare Pages page (`web/`) that lists every payment
 of the event. Admins can create a payment request (payer mobile/UEN, optional name, amount; the QR is shown as a PNG
@@ -131,7 +131,7 @@ every change is same-origin and re-checks admin status. Both web pages show the 
 a Sign out button (it clears the cookies in that browser; sessions are stateless, so a copied cookie stays valid until
 it expires after 12 hours).
 
-The admin page header includes a shareable payer link at `/pay/<event-ref>`. Anyone with that link can create a
+The admin page has a Pay button that opens the shareable payer link at `/pay/<event-ref>`. Anyone with that link can create a
 payment request for themselves with no sign-in, without being an event-chat member or administrator (anonymous requests
 are stored with owner `0`, shown to admins like any other, and capped at 30 per event per 10 minutes). Signing in with
 Telegram is optional. If the
