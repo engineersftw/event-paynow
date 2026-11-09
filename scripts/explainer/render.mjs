@@ -1,7 +1,8 @@
 // Builds the explainer video: `npm run video`. Needs Playwright's Chromium and ffmpeg.
 // Output goes to out/explainer/ (gitignored); frames are piped straight into ffmpeg, never written to disk.
 import { spawn } from 'node:child_process';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +19,59 @@ const H = 1080;
 
 const captions = JSON.parse(await readFile(join(here, 'captions.json'), 'utf8'));
 const total = captions.scenes.at(-1).end;
+
+// Music: `npm run video -- --silent` skips it. The audio is never stored in Git: a slice of the
+// remote CC0 track is fetched into the gitignored out/ folder and reused on later runs.
+const silent = process.argv.includes('--silent');
+const music = JSON.parse(await readFile(join(here, 'music.json'), 'utf8'));
+let musicFile = null;
+if (!silent) {
+  const slice = total + 2; // a little spare; the mix trims to the exact video length
+  const key = createHash('sha1')
+    .update(`${music.url}|${music.startSeconds}|${slice}`)
+    .digest('hex')
+    .slice(0, 12);
+  musicFile = join(OUT, '.music-cache', `${key}.mp3`);
+  const cached = await stat(musicFile).then(
+    (f) => f.size > 0,
+    () => false
+  );
+  if (!cached) {
+    await mkdir(dirname(musicFile), { recursive: true });
+    console.log(`Fetching music: ${music.title} by ${music.creator}`);
+    const code = await new Promise((ok) => {
+      // -vn/-map: audio only (the source MP3 carries a cover image); the seek reads just this slice
+      const f = spawn(
+        'ffmpeg',
+        [
+          '-y',
+          '-loglevel',
+          'error',
+          '-ss',
+          String(music.startSeconds),
+          '-i',
+          music.url,
+          '-t',
+          String(slice),
+          '-map',
+          '0:a:0',
+          '-c',
+          'copy',
+          musicFile,
+        ],
+        { stdio: ['ignore', 'inherit', 'inherit'] }
+      );
+      f.on('error', () => ok(1));
+      f.on('exit', ok);
+    });
+    if (code !== 0) {
+      console.error(
+        `Could not fetch the music track (${music.url}). Check the network, or run with --silent.`
+      );
+      process.exit(1);
+    }
+  }
+}
 
 // Sample QR: the bot's own renderer with a fictional UEN, so it never identifies a real payee
 const payload = buildPayNowPayload({
@@ -56,6 +110,7 @@ const ffmpeg = spawn(
     String(FPS),
     '-i',
     '-',
+    ...(musicFile ? ['-i', musicFile] : []),
     '-c:v',
     'libx264',
     '-pix_fmt',
@@ -64,6 +119,25 @@ const ffmpeg = spawn(
     '20',
     '-preset',
     'medium',
+    ...(musicFile
+      ? [
+          '-map',
+          '0:v',
+          '-map',
+          '1:a',
+          // quiet, even level; 2 s fade in, 3 s fade out; exactly as long as the video
+          '-af',
+          `atrim=0:${total},asetpts=N/SR/TB,loudnorm=I=-23:TP=-2:LRA=7,afade=t=in:st=0:d=2,afade=t=out:st=${total - 3}:d=3`,
+          '-c:a',
+          'aac',
+          '-b:a',
+          '192k',
+          '-ar',
+          '48000',
+          '-ac',
+          '2',
+        ]
+      : []),
     '-movflags',
     '+faststart',
     mp4,
@@ -117,6 +191,9 @@ for (const s of captions.scenes) {
     transcript += `\n${chapter}\n`;
   }
   transcript += `${s.text}\n`;
+}
+if (!silent) {
+  transcript += `\nMusic: ${music.title} by ${music.creator} (CC0 1.0), ${music.sourcePage}\n`;
 }
 await writeFile(join(OUT, 'transcript.txt'), transcript);
 

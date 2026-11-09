@@ -150,6 +150,8 @@ curl -X POST "https://api.telegram.org/bot<SIMPLE_BOT_TOKEN>/setWebhook" \
 
 `npm run video` renders a ~76 s, captioned, silent explainer video (Event Organizer chapter, then Attendee chapter) to `out/explainer/` (gitignored, so it is never committed): `explainer.mp4` (1920x1080 H.264), `poster.png`, `captions.srt` (upload it to YouTube for real captions) and `transcript.txt` (for the video description). It needs Playwright's Chromium and ffmpeg and takes about 80 seconds. The scenes are `scripts/explainer/scenes.html` and the caption text is `scripts/explainer/captions.json`; edit them and re-run when the bot changes. A test checks that every command named in the captions is in the bot's `/help` text. All names and the sample QR are fictional.
 
+The video has a quiet music bed (about -23 LUFS, 2 s fade in, 3 s fade out): a slice of "Calm Pill 1 - Still Habitat" by Alaeddin Hallak, published on the Internet Archive under the CC0 1.0 dedication. `scripts/explainer/music.json` records the title, creator, source page, file URL, licence URL and start offset; edit it to use another CC0 track. The audio is never committed: the script fetches just the needed slice into `out/explainer/.music-cache/` the first time (needs network access to archive.org). `npm run video -- --silent` builds without music; if the fetch fails the build stops with a message instead of writing a silent video. `transcript.txt` ends with a music credit line for the YouTube description.
+
 ## Web pages (admin and payer event pages)
 
 **Check-in at the door.** The event page has a **Check-In** button: it opens the phone camera, reads the attendee's payment
