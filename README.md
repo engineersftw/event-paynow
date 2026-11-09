@@ -14,7 +14,7 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 - **Chat admins act on any payment**: administrators of an event's chat can view, receive, void, pay back and mark paybacks sent/cancelled on payments they did not create (checked live with `getChatMember`), and `/payments` shows them every payment of the event; ordinary members keep owner-only access
 - **Audit**: who received/voided a payment and who created/sent/cancelled a payback is recorded (Telegram user ids) for bot and web actions
 - **Names in messages**: Captions and status lines show `Payer: <name>` / `To: <name>`, never a PayNow number
-- **Web pages**: every page carries a small two-line attribution footer ("Built by Michael Cheng & Claude Code AI." then "Open Source with ❤️.", linking to LinkedIn and this repository; edit `LINKEDIN_URL` / `REPO_URL` in `src/web/page.ts`); the site root is a public landing page with an Add-the-bot-on-Telegram button and a click-to-play YouTube explainer video (nothing is requested from YouTube until the visitor clicks; change the video id in `EXPLAINER_VIDEO_ID` in `src/web/page.ts`); `/web_admin` links chat admins to an event management page; each event also has a shareable `/pay/<event-ref>` page where anyone (no sign-in needed) can create their own payment request and see its QR inline; signing in with Telegram adds a private Telegram copy and a history of their requests. Admins can scan an attendee's payment QR from the event page to check them in (and mark received or pay back from the same result)
+- **Web pages**: the landing page and the payment pages carry Open Graph and Twitter card tags (title, description, image) so shared links get a proper preview; payment pages name the event ("Pay for <event>"); every page carries a small two-line attribution footer ("Built by Michael Cheng & Claude Code AI." then "Open Source with ❤️.", linking to LinkedIn and this repository; edit `LINKEDIN_URL` / `REPO_URL` in `src/web/page.ts`); the site root is a public landing page with an Add-the-bot-on-Telegram button and a click-to-play YouTube explainer video (nothing is requested from YouTube until the visitor clicks; change the video id in `EXPLAINER_VIDEO_ID` in `src/web/page.ts`); `/web_admin` links chat admins to an event management page; each event also has a shareable `/pay/<event-ref>` page where anyone (no sign-in needed) can create their own payment request and see its QR inline; signing in with Telegram adds a private Telegram copy and a history of their requests. Admins can scan an attendee's payment QR from the event page to check them in (and mark received or pay back from the same result)
 - **Inline buttons**: Confirm/cancel via buttons, action buttons on QR photos, paginated lists; double taps and racing taps resolve to one winner
 - **Conversation state**: Per-chat Durable Objects with 10-minute idle expiry
 - **Automatic deploys**: GitHub Actions deploys the Worker and Pages from `main` when their files change
@@ -165,6 +165,16 @@ npx wrangler deploy                           # the new value is picked up on th
 
 Not covered by `/stats`: landing page visits (turn on Cloudflare Web Analytics for the Pages project in the Cloudflare dashboard: no code, no cookies) and explainer video views (YouTube Studio).
 
+## Social previews
+
+The landing page and every payment page (`/pay/<event>`) carry Open Graph and Twitter card tags in the server-rendered HTML (crawlers do not run scripts): title, description, canonical URL and an image, all built from the origin the page was requested on. A payment page's title is "Pay for <event name>" (HTML-escaped, shortened to 60 characters); an unknown or closed event, or a database error, falls back to generic wording. The private admin page has no preview tags. The image, `web/public/explainer-poster.jpg` (1280x720, about 60 KB), is the explainer video's title frame, also used as the thumbnail of the click-to-play card on the landing page. It is committed (not built by `npm run video`); to recreate it after rebuilding the video:
+
+```bash
+ffmpeg -i out/explainer/poster.png -vf scale=1280:720:flags=lanczos -pix_fmt yuvj420p -q:v 3 web/public/explainer-poster.jpg
+```
+
+After deploying, check the previews with [Facebook's Sharing Debugger](https://developers.facebook.com/tools/debug/), [LinkedIn's Post Inspector](https://www.linkedin.com/post-inspector/), or by pasting a link into Telegram, WhatsApp or X. Platforms cache previews for days, so use those tools to refresh a link after a change.
+
 ## Web pages (admin and payer event pages)
 
 **Check-in at the door.** The event page has a **Check-In** button: it opens the phone camera, reads the attendee's payment
@@ -309,7 +319,7 @@ docs/
 └── testing.md             # Testing strategy
 
 openspec/
-├── specs/                 # Main specs (16 capabilities)
+├── specs/                 # Main specs (17 capabilities)
 └── changes/archive/       # Archived changes
 ```
 

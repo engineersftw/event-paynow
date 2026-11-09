@@ -96,6 +96,7 @@ This project uses OpenSpec for change management. All changes are archived:
 32. `add-site-footer` (5 tasks) — archived 2026-11-09
 33. `add-usage-stats` (10 tasks) — archived 2026-11-09
 34. `squash-migrations` (8 tasks) — archived 2026-11-09
+35. `add-social-previews` (8 tasks) — archived 2026-11-10
 
 **Workflow commands:**
 
@@ -110,7 +111,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (16 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (17 capabilities)
 
 ## Key Design Decisions
 
@@ -262,7 +263,7 @@ Attendee check-in (`payments.checked_in_at` / `checked_in_by`): `POST /api/event
 The payer page `/pay/<event-ref>` (same top bar and light/dark toggle as the admin page; no sign-in needed: `payerAccess` treats a missing/invalid session as anonymous, `userId` null, and only an unknown event is refused; `GET /api/pay/:ref` returns `signedIn`; `GET|POST /api/pay/:ref/payments`, `GET .../payments/:paymentRef/qr`) shows a fixed default amount as plain text (the server still ignores any submitted amount), creates owner-`0` payments for anonymous visitors (capped at 30 per event per 10 minutes via `countRecentAnonymousPayments`, then 429 `rate_limited`; signed-in users exempt) and returns the QR inline as `payment.qr` (PNG data URL). For signed-in users only it lists their own requests for the event (`listPaymentsByUserAndEvent`, newest first, max 50, no PayNow numbers; history and `GET .../payments/:paymentRef/qr` need a session) and, after creating one, sends them a private `sendPhoto` copy via `sendPaymentDm` in `src/web/telegram.ts` (no buttons; best-effort, `dm: false` in the response when Telegram refuses, e.g. the user never started the bot). It never posts to the event chat.
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
-Every web page (landing, event admin, payer) ends with the shared attribution footer (`FOOTER_HTML`, links in `LINKEDIN_URL` / `REPO_URL`, `src/web/page.ts`).
+The landing page and the payment pages carry Open Graph / Twitter card tags in their server-rendered head (`socialMeta()` in `src/web/page.ts`; URLs from the request origin; the image is the committed `web/public/explainer-poster.jpg`, excluded from the Function in `_routes.json`; the payment page's event name is looked up in `handleWeb`, escaped, and falls back to generic wording; the admin page has none). Every web page (landing, event admin, payer) ends with the shared attribution footer (`FOOTER_HTML`, links in `LINKEDIN_URL` / `REPO_URL`, `src/web/page.ts`).
 The site root `/` is a public landing page (`renderLandingPage` in `src/web/page.ts`, linking to `https://t.me/${BOT_USERNAME}`, with a click-to-play YouTube explainer card (`videoCard`, id in `EXPLAINER_VIDEO_ID`; the player is loaded from `youtube-nocookie.com` only on click); no static `index.html`).
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
 `handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell from `src/web/page.ts`: shadcn-style CSS tokens, compact payment cards, a native `<dialog>` for new requests, paybacks and pending QR/actions behind tap-to-expand buttons so no QR loads with the page; a top bar (`TOPBAR_HTML`, shared with the payer page) with the signed-in name, Sign out and the light/dark toggle (`data-theme`, saved in `localStorage` under one key for both pages; the toggle stays when signed out), then the logo (`web/public/logo.png`) with `Event: <name>`, then one row of Check-In, Pay and New request buttons (mobile layout checked down to 320 px), status-coloured pills and `dd-MMM-YYYY` dates; data

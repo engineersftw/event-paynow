@@ -1,6 +1,13 @@
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { handleWeb, type WebEnv } from '../../src/web/handler';
-import { renderLandingPage, renderPage, renderPayerPage, videoCard } from '../../src/web/page';
+import {
+  renderLandingPage,
+  renderPage,
+  renderPayerPage,
+  socialMeta,
+  videoCard,
+} from '../../src/web/page';
 
 describe('event page shell', () => {
   it('serves valid inline script with the payment request and payback controls, without forms or innerHTML', async () => {
@@ -114,7 +121,10 @@ describe('event page shell', () => {
   });
 
   it('both pages share the top bar: signed-in name, Sign out and the light/dark toggle', () => {
-    for (const html of [renderPage('EVT1', 'my_bot'), renderPayerPage('EVT1', 'my_bot')]) {
+    for (const html of [
+      renderPage('EVT1', 'my_bot'),
+      renderPayerPage('EVT1', 'my_bot', 'https://x.test'),
+    ]) {
       expect(html).toContain('<div class="topbar">');
       expect(html).toContain('id="theme"');
       // The saved theme is applied before first paint and toggled in the page (same key on both pages)
@@ -128,7 +138,10 @@ describe('event page shell', () => {
   });
 
   it('both pages show the signed-in user with Sign out, hidden until /api/me reports one', () => {
-    for (const html of [renderPage('EVT1', 'my_bot'), renderPayerPage('EVT1', 'my_bot')]) {
+    for (const html of [
+      renderPage('EVT1', 'my_bot'),
+      renderPayerPage('EVT1', 'my_bot', 'https://x.test'),
+    ]) {
       expect(html).toContain('id="me"');
       expect(html).toMatch(/id="me"[^>]*hidden/);
       expect(html).toContain('id="signout"');
@@ -143,7 +156,7 @@ describe('event page shell', () => {
   });
 
   it('renders the standalone payer page with conditional amount editing and inline QR flow', () => {
-    const html = renderPayerPage('EVT1', 'my_bot');
+    const html = renderPayerPage('EVT1', 'my_bot', 'https://x.test');
     const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
     for (const code of scripts) expect(() => new Function(code)).not.toThrow();
     expect(html).toContain('/api/pay/EVT1');
@@ -230,9 +243,9 @@ describe('landing page', () => {
 
 describe('attribution footer', () => {
   const pages: Array<[string, string, string]> = [
-    ['landing page', renderLandingPage('my_bot'), 'Get started'],
+    ['landing page', renderLandingPage('my_bot', 'https://x.test'), 'Get started'],
     ['event admin page', renderPage('EVT1', 'my_bot'), 'id="data"'],
-    ['payer page', renderPayerPage('EVT1', 'my_bot'), 'id="app"'],
+    ['payer page', renderPayerPage('EVT1', 'my_bot', 'https://x.test'), 'id="app"'],
   ];
 
   for (const [name, html, content] of pages) {
@@ -257,4 +270,132 @@ describe('attribution footer', () => {
       expect(html).toContain('.site-footer{'); // styled on every page
     });
   }
+});
+
+describe('social preview tags', () => {
+  const ORIGIN = 'https://event-paynow.engineers.sg';
+  const meta = (html: string, key: string) =>
+    html.match(new RegExp(`<meta (?:property|name)="${key}" content="([^"]*)">`))?.[1];
+  const head = (html: string) => html.slice(0, html.indexOf('</head>'));
+
+  it('socialMeta escapes every value and emits the full Open Graph and Twitter set', () => {
+    const out = socialMeta({
+      title: 'A "quoted" <b>title</b> & more',
+      description: "it's <script>alert(1)</script>",
+      url: 'https://x.test/p?a=1&b="2"',
+      image: 'https://x.test/i.jpg',
+    });
+    expect(out).not.toMatch(/<script|<b>|"quoted"/);
+    expect(out).toContain('content="A &quot;quoted&quot; &lt;b&gt;title&lt;/b&gt; &amp; more"');
+    expect(out).toContain('content="it&#39;s &lt;script&gt;alert(1)&lt;/script&gt;"');
+    expect(out).toContain('href="https://x.test/p?a=1&amp;b=&quot;2&quot;"');
+    for (const key of [
+      'og:type',
+      'og:site_name',
+      'og:locale',
+      'og:title',
+      'og:description',
+      'og:url',
+      'og:image',
+      'og:image:type',
+      'og:image:width',
+      'og:image:height',
+      'og:image:alt',
+      'twitter:card',
+      'twitter:title',
+      'twitter:description',
+      'twitter:image',
+      'twitter:image:alt',
+      'description',
+    ]) {
+      expect(out, key).toContain(`"${key}"`);
+    }
+    expect(out).toContain('<meta name="twitter:card" content="summary_large_image">');
+    expect(out).toContain('<link rel="canonical"');
+  });
+
+  it('the landing page has every tag in the server HTML, with absolute URLs from the origin', async () => {
+    const html = await (
+      await handleWeb(new Request(`${ORIGIN}/`), { BOT_USERNAME: 'my_bot' } as unknown as WebEnv)
+    ).text();
+    const h = head(html);
+    expect(meta(h, 'og:title')).toBe('Event PayNow Bot');
+    expect(meta(h, 'og:description')).toContain('Collect PayNow payments');
+    expect(meta(h, 'og:url')).toBe(`${ORIGIN}/`);
+    expect(meta(h, 'og:image')).toBe(`${ORIGIN}/explainer-poster.jpg`);
+    expect(meta(h, 'twitter:image')).toBe(`${ORIGIN}/explainer-poster.jpg`);
+    expect(meta(h, 'twitter:card')).toBe('summary_large_image');
+    expect(h).toContain(`<link rel="canonical" href="${ORIGIN}/">`);
+    // all of it in the head as plain tags: nothing here depends on running a script
+    expect(h).not.toMatch(/<script[^>]*>[^<]*og:/);
+  });
+
+  it('follows the host it was requested on', async () => {
+    const html = await (
+      await handleWeb(new Request('https://other.pages.dev/'), {
+        BOT_USERNAME: 'b',
+      } as unknown as WebEnv)
+    ).text();
+    expect(meta(head(html), 'og:image')).toBe('https://other.pages.dev/explainer-poster.jpg');
+    expect(meta(head(html), 'og:url')).toBe('https://other.pages.dev/');
+  });
+
+  it('payment pages name the event, escaped, and shorten long names', () => {
+    const named = renderPayerPage('EVT1', 'b', ORIGIN, 'Team Dinner');
+    expect(meta(head(named), 'og:title')).toBe('Pay for Team Dinner');
+    expect(meta(head(named), 'og:description')).toContain('Team Dinner');
+    expect(meta(head(named), 'og:url')).toBe(`${ORIGIN}/pay/EVT1`);
+    expect(named).toContain('<title>Pay for Team Dinner</title>');
+
+    const hostile = renderPayerPage('EVT1', 'b', ORIGIN, '"><script>alert(1)</script> & Co');
+    expect(head(hostile)).not.toContain('<script>alert(1)');
+    expect(meta(head(hostile), 'og:title')).toBe(
+      'Pay for &quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt; &amp; Co'
+    );
+    expect(hostile).toContain(
+      '<title>Pay for &quot;&gt;&lt;script&gt;alert(1)&lt;/script&gt; &amp; Co</title>'
+    );
+
+    const long = renderPayerPage('EVT1', 'b', ORIGIN, 'X'.repeat(200));
+    expect(meta(head(long), 'og:title')).toBe(`Pay for ${'X'.repeat(59)}…`);
+
+    const generic = renderPayerPage('EVT1', 'b', ORIGIN, null);
+    expect(meta(head(generic), 'og:title')).toBe('Make a PayNow payment');
+    expect(meta(head(generic), 'og:description')).not.toContain('null');
+  });
+
+  it('the admin page is private and carries no preview tags', () => {
+    const html = renderPage('EVT1', 'b');
+    expect(html).not.toMatch(/(?:property|name)="(?:og|twitter):/);
+    expect(html).not.toContain('rel="canonical"');
+  });
+
+  it('the video card shows the site-hosted poster and nothing from YouTube until clicked', () => {
+    const card = videoCard('ezOo1OIhl-Y');
+    expect(card).toContain('<img class="vposter" src="/explainer-poster.jpg"');
+    expect(card).not.toContain('/logo.png');
+    expect(card.match(/<(?:img|script|link|iframe)[^>]+(?:youtube|ytimg|google)/gi)).toBeNull();
+  });
+
+  it('the preview image is a 1280x720 JPEG under 200 KB', () => {
+    const bytes = readFileSync(new URL('../../web/public/explainer-poster.jpg', import.meta.url));
+    expect(bytes.length).toBeLessThan(200 * 1024);
+    expect([bytes[0], bytes[1]]).toEqual([0xff, 0xd8]); // JPEG magic
+    // read the dimensions from the first start-of-frame marker
+    let i = 2;
+    let size: [number, number] | null = null;
+    while (i < bytes.length - 9) {
+      if (bytes[i] !== 0xff) {
+        i++;
+        continue;
+      }
+      const marker = bytes[i + 1]!;
+      if (marker >= 0xc0 && marker <= 0xcf && ![0xc4, 0xc8, 0xcc].includes(marker)) {
+        size = [bytes.readUInt16BE(i + 7), bytes.readUInt16BE(i + 5)];
+        break;
+      }
+      i += 2 + bytes.readUInt16BE(i + 2);
+    }
+    expect(size).toEqual([1280, 720]);
+  });
 });
