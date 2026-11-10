@@ -832,9 +832,11 @@ export class SplitCommandHandler {
       );
     } else if (step === ASSIGN) {
       const items = (c.receipt as Receipt).items;
+      // The list gets its own bubble so it can be copied whole, without the instructions
+      await ctx.reply(items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n'));
       await this.ask(
         ctx,
-        `Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nItems:\n${items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n')}\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you: your share is not collected.`,
+        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back:\n\nAnn\n1. …\n\nAll:\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you: your share is not collected.',
         keep()
       );
     } else if (step === PAYEE_ME) {
