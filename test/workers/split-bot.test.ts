@@ -766,6 +766,24 @@ describe('Split_PayNow_Bot mentions', () => {
     expect(stub.sentPhotos.map((p) => p.chatId)).toEqual([String(target)]);
   });
 
+  it('the summary counts the organiser when an amount is shown for them', async () => {
+    const run = async (list: string, leftover?: 'omit' | 'even') => {
+      const b = bot();
+      const u = uid++;
+      await say(b, u, '/split_custom');
+      await say(b, u, '100');
+      await say(b, u, list);
+      if (leftover) await tap(b, u, `split_leftover:${leftover}`);
+      await say(b, u, '91234567');
+      await tap(b, u, 'split_payee:me');
+      await tap(b, u, 'split_skip_description');
+      return stub.lastText();
+    };
+    expect(await run('Ann 60\nBob 40')).toContain('shared by 2 people');
+    expect(await run('Ann 40\nBob 30', 'omit')).toContain('shared by 3 people');
+    expect(await run('Ann 40\nBob 30', 'even')).toContain('shared by 2 people');
+  });
+
   it('/start records and replaces a contact, and /forget deletes it', async () => {
     const b = bot();
     const [first, second] = [uid++, uid++];
@@ -884,8 +902,12 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(review).toContain('1. Chilli crab: SGD 30.00');
     expect(review).toContain('Total: SGD 72.00');
     expect(buttons()).toEqual(['split_scan:use', 'split_scan:again', 'split_scan:manual']);
+    const reviewId = lastId();
     await tap(b, org, 'split_scan:use');
+    expect(stub.deletedMessages.map((d) => d.messageId)).toContain(reviewId);
     expect(stub.lastText()).toContain('Who had what?');
+    expect(stub.lastText()).not.toContain('your share is not collected.');
+    expect(stub.lastText()).toContain('otherwise I send you a QR for it');
     // the list is its own bubble, just before the question
     expect(stub.sentMessages.at(-2)!.text).toBe(
       '1. Chilli crab SGD 30.00\n2. Rice SGD 10.00\n3. Beer SGD 20.00'
@@ -893,6 +915,8 @@ describe('Split_PayNow_Bot receipt scan', () => {
     await say(b, org, `1 @ann_${ann}\n2 Bob\n3 me`);
     await say(b, org, '91234567');
     await tap(b, org, 'split_payee:me');
+    expect(stub.editedMessages.at(-1)).toMatchObject({ text: 'Payment was made by you.' });
+    expect(stub.editedMessages.at(-1)!.replyMarkup).toBeUndefined();
     await tap(b, org, 'split_skip_description');
     const summary = stub.lastText();
     expect(summary).toContain(`@ann_${ann}: SGD 36.00 (by direct message)`);
@@ -931,6 +955,23 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(summary).toContain(`@ann_${ann}: SGD 36.00 (by direct message)`);
     expect(summary).toContain('Bob: SGD 12.00');
     expect(summary).toContain('Your own share, not collected: SGD 24.00');
+  });
+
+  it('Scan again keeps the review, and the payee answer is written into its bubble', async () => {
+    const org = uid++;
+    const b = receiptBot();
+    await say(b, org, '/split_receipt');
+    await photo(b, org);
+    const reviewId = lastId();
+    await tap(b, org, 'split_scan:again');
+    expect(stub.deletedMessages.map((d) => d.messageId)).not.toContain(reviewId);
+    await photo(b, org);
+    await tap(b, org, 'split_scan:use');
+    await say(b, org, '1 Ann\n2 Bob\n3 me');
+    await say(b, org, '91234567');
+    await tap(b, org, 'split_payee:other');
+    expect(stub.editedMessages.at(-1)).toMatchObject({ text: 'Payment was made by someone else.' });
+    expect(stub.editedMessages.at(-1)!.replyMarkup).toBeUndefined();
   });
 
   it('reads a photo sent at the total prompt, and Type the total instead goes back to a normal split', async () => {

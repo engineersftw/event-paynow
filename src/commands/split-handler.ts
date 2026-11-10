@@ -283,7 +283,9 @@ function summary(c: Record<string, unknown>, group: boolean): string {
   const listed = c.entries as SplitEntry[] | undefined;
   if (listed) {
     const r = applyLeftover(listed, total, (c.leftover as 'even' | 'omit' | undefined) ?? 'omit');
-    lines.push(`Bill: ${sgd(total)} shared by ${listed.length} people`);
+    // The organiser counts when an amount for them is shown (own share, or a leftover they carry)
+    const people = listed.length + (r.leftoverCents > 0 && r.extraCents === 0 ? 1 : 0);
+    lines.push(`Bill: ${sgd(total)} shared by ${people} people`);
     for (const e of r.entries) {
       const direct = e.username || e.userId ? ' (by direct message)' : '';
       lines.push(`${e.name}: ${sgd(e.cents)}${direct}`);
@@ -615,7 +617,11 @@ export class SplitCommandHandler {
     await ctx.answerCallbackQuery();
 
     if (data.startsWith('split_payee:')) {
-      await this.proceed(ctx, { ...c, payeeIsMe: data.endsWith(':me') });
+      const mine = data.endsWith(':me');
+      await ctx
+        .editMessageText(mine ? 'Payment was made by you.' : 'Payment was made by someone else.')
+        .catch(() => undefined);
+      await this.proceed(ctx, { ...c, payeeIsMe: mine });
     } else if (data.startsWith('split_unassigned:')) {
       const choice = data.endsWith(':even') ? 'even' : 'me';
       const partial = c.partial as AssignedOk;
@@ -657,7 +663,12 @@ export class SplitCommandHandler {
     } else if (data.startsWith('split_scan:')) {
       const scan = c.scan as { receipt: Receipt } | undefined;
       const { scan: _scan, ...rest } = c;
-      await this.setButtons(ctx, new InlineKeyboard()); // the review is answered
+      if (data === 'split_scan:use') {
+        // The confirmed review is no longer needed; if it cannot be deleted, just drop its buttons
+        await ctx.deleteMessage().catch(() => this.setButtons(ctx, new InlineKeyboard()));
+      } else {
+        await this.setButtons(ctx, new InlineKeyboard()); // the review is answered
+      }
       if (data === 'split_scan:use' && scan) {
         // The receipt total is the bill; what the others owe is worked out from the items
         const { entries, leftover, people, suggested, ...clean } = rest;
@@ -836,7 +847,7 @@ export class SplitCommandHandler {
       await ctx.reply(items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n'));
       await this.ask(
         ctx,
-        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back:\n\nAnn\n1. …\n\nAll:\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you: your share is not collected.',
+        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back:\n\nAnn\n1. …\n\nAll:\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you. If you are the one being paid, your share is not collected; otherwise I send you a QR for it.',
         keep()
       );
     } else if (step === PAYEE_ME) {
