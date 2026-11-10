@@ -1,9 +1,14 @@
-import type { BotConfig, Context } from 'grammy';
+import type { Api, BotConfig, Context } from 'grammy';
 import { Bot, webhookCallback } from 'grammy';
 import { collectClaim } from './commands/split-claim';
 import { SPLIT_HELP, SplitCommandHandler } from './commands/split-handler';
 import { D1SplitDirectory } from './db/split-repository';
 import type { Env } from './env';
+import {
+  DEFAULT_RECEIPT_MODEL,
+  type ReceiptReader,
+  WorkersAiReceiptReader,
+} from './receipt-reader';
 import type { ConversationDO } from './worker/conversation-do';
 
 /**
@@ -11,10 +16,38 @@ import type { ConversationDO } from './worker/conversation-do';
  * conversation lives in the chat's Durable Object under its own key (`split-<id>`).
  * `token` is required here (the Worker route only builds this bot when it is configured).
  */
-export function createSplitBot(env: Env, token: string, config?: BotConfig<Context>): Bot {
+export interface SplitBotDeps {
+  /** Reads a receipt photo; defaults to Workers AI when the `AI` binding exists. */
+  reader?: ReceiptReader;
+  /** Downloads a Telegram file; defaults to the Bot API file endpoint. */
+  download?: (api: Api, fileId: string) => Promise<Uint8Array>;
+}
+
+/** The photo's bytes through the Bot API file endpoint (capped: receipts are small). */
+async function downloadTelegramFile(token: string, api: Api, fileId: string): Promise<Uint8Array> {
+  const file = await api.getFile(fileId);
+  if (!file.file_path || (file.file_size ?? 0) > 10_000_000) throw new Error('unusable file');
+  const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
+  if (!response.ok) throw new Error('download failed');
+  return new Uint8Array(await response.arrayBuffer());
+}
+
+export function createSplitBot(
+  env: Env,
+  token: string,
+  config?: BotConfig<Context>,
+  deps: SplitBotDeps = {}
+): Bot {
   const bot = new Bot(token, config);
 
   const directory = new D1SplitDirectory(env.paynow_db);
+  const reader =
+    deps.reader ??
+    (env.AI
+      ? new WorkersAiReceiptReader(env.AI, env.RECEIPT_MODEL ?? DEFAULT_RECEIPT_MODEL)
+      : undefined);
+  const download =
+    deps.download ?? ((api: Api, fileId: string) => downloadTelegramFile(token, api, fileId));
 
   const handler = (ctx: Context): SplitCommandHandler => {
     const id = ctx.chat?.id;
@@ -23,7 +56,8 @@ export function createSplitBot(env: Env, token: string, config?: BotConfig<Conte
     return new SplitCommandHandler(
       stub as unknown as ConversationDO,
       directory,
-      env.SPLIT_BOT_USERNAME
+      env.SPLIT_BOT_USERNAME,
+      { ...(reader ? { reader } : {}), download }
     );
   };
 
@@ -34,6 +68,7 @@ export function createSplitBot(env: Env, token: string, config?: BotConfig<Conte
 
   bot.command('split', (ctx) => handler(ctx).start(ctx));
   bot.command('split_custom', (ctx) => handler(ctx).start(ctx, 'custom'));
+  bot.command('split_receipt', (ctx) => handler(ctx).start(ctx, 'receipt'));
   bot.command('start', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
     // A person who starts the bot becomes reachable by @username in later splits
@@ -64,6 +99,7 @@ export function createSplitBot(env: Env, token: string, config?: BotConfig<Conte
     if (ctx.message.text.startsWith('/')) return;
     await handler(ctx).handleText(ctx);
   });
+  bot.on('message:photo', (ctx) => handler(ctx).handlePhoto(ctx));
   bot.on('edited_message:text', (ctx) => handler(ctx).handleEdit(ctx));
   return bot;
 }

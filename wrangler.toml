@@ -13,6 +13,10 @@ migrations_dir = "drizzle"
 [durable_objects]
 bindings = [{ name = "CHAT_SESSION", class_name = "ChatSessionDO" }]
 
+# Workers AI, used to read receipt photos. Remote only: local runs and tests use a fake reader.
+[ai]
+binding = "AI"
+
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["ChatSessionDO"]
@@ -21,6 +25,9 @@ new_sqlite_classes = ["ChatSessionDO"]
 BOT_USERNAME = "event_paynow_bot"
 SIMPLE_BOT_USERNAME = "Simple_PayNow_Bot"
 SPLIT_BOT_USERNAME = "Split_PayNow_Bot"
+# Vision model for Split_PayNow_Bot receipt scans (Workers AI). Llama 3.2 vision asks for a one-time licence
+# acceptance, which the bot sends itself on the first scan.
+RECEIPT_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct"
 # WEB_ADMIN_URL = "https://event-paynow-web.pages.dev"  # set after creating the Pages project
 
 # Set via `wrangler secret put TELEGRAM_BOT_TOKEN`

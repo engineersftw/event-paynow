@@ -12,6 +12,7 @@ import {
   callbackUpdate,
   editedTextUpdate,
   groupTextUpdate,
+  photoUpdate,
   TEST_BOT_INFO,
   TelegramStub,
   textUpdate,
@@ -769,6 +770,219 @@ describe('Split_PayNow_Bot mentions', () => {
     await tap(b, u, 'split_confirm');
     await confirmSplit(b, uid++, '65', 'Ann 40\nBob 25');
     expect(await counts()).toBe(before);
+  });
+});
+
+describe('Split_PayNow_Bot receipt scan', () => {
+  const directory = () => new D1SplitDirectory(env.paynow_db);
+  // 30 + 10 + 20 = 60.00 of items on a 72.00 receipt: 12.00 of service charge and GST
+  const RECEIPT = {
+    merchant: 'Ah Seng Cafe',
+    items: [
+      { name: 'Chilli crab', price: 30 },
+      { name: 'Rice', price: 10 },
+      { name: 'Beer', price: 20 },
+    ],
+    serviceCharge: 6,
+    gst: 6,
+    total: 72,
+  };
+  let scanned: unknown = RECEIPT;
+  const asked: string[] = [];
+  const reader = {
+    async read(image: Uint8Array) {
+      asked.push(`${image.length} bytes`);
+      if (scanned instanceof Error) throw scanned;
+      return scanned;
+    },
+  };
+  const download = async () => new Uint8Array([1, 2, 3]);
+  const receiptBot = (withReader = true) =>
+    createSplitBot(
+      { ...env, AI: undefined } as never,
+      'split-token',
+      {
+        botInfo: TEST_BOT_INFO,
+        client: {
+          fetch: async (url, init) =>
+            String(url).endsWith('/getChatMemberCount')
+              ? new Response(JSON.stringify({ ok: true, result: 7 }))
+              : stub.fetch(url, init),
+        },
+      },
+      withReader ? { reader, download } : { download }
+    );
+  const photo = (b: B, user: number) => b.handleUpdate(photoUpdate(user, user, 'file-1', upd++));
+  const sayId = async (b: B, user: number, text: string) => {
+    const id = upd++;
+    await b.handleUpdate(textUpdate(user, text, id));
+    return id;
+  };
+  const qrs = () =>
+    stub.sentPhotos.map((p) => {
+      const { data, width, height } = bmpToRgba(p.bytes);
+      return { to: p.chatId, payload: jsQR(data, width, height)!.data, caption: p.caption };
+    });
+  beforeEach(() => {
+    scanned = RECEIPT;
+    asked.length = 0;
+  });
+
+  async function toSummary(b: B, org: number, assignment: string) {
+    await say(b, org, '/split_receipt');
+    await photo(b, org);
+    await tap(b, org, 'split_scan:use');
+    await say(b, org, assignment);
+    await say(b, org, '91234567');
+    await tap(b, org, 'split_skip_description');
+  }
+
+  it('reads the receipt, shares GST and service charge pro rata, and DMs the mentioned person', async () => {
+    const [ann, org] = [uid++, uid++];
+    const b = receiptBot();
+    await b.handleUpdate(
+      (() => {
+        const u = textUpdate(ann, '/start', upd++);
+        (u as unknown as { message: { from: Record<string, unknown> } }).message.from.username =
+          `ann_${ann}`;
+        return u;
+      })()
+    );
+    stub.reset();
+    await say(b, org, '/split_receipt');
+    expect(stub.lastText()).toContain('Send a photo of the receipt');
+    await photo(b, org);
+    expect(asked).toEqual(['3 bytes']);
+    const review = stub.lastText();
+    expect(review).toContain('Ah Seng Cafe');
+    expect(review).toContain('1. Chilli crab: SGD 30.00');
+    expect(review).toContain('Total: SGD 72.00');
+    expect(buttons()).toEqual(['split_scan:use', 'split_scan:again', 'split_scan:manual']);
+    await tap(b, org, 'split_scan:use');
+    expect(stub.lastText()).toContain('Who had what?');
+    expect(stub.lastText()).toContain('3. Beer SGD 20.00');
+    await say(b, org, `1 @ann_${ann}\n2 Bob\n3 me`);
+    await say(b, org, '91234567');
+    await tap(b, org, 'split_skip_description');
+    const summary = stub.lastText();
+    expect(summary).toContain(`@ann_${ann}: SGD 36.00 (by direct message)`);
+    expect(summary).toContain('Bob: SGD 12.00');
+    expect(summary).toContain('Your own share, not collected: SGD 24.00');
+    await tap(b, org, 'split_confirm');
+    const sent = qrs();
+    expect(sent.find((q) => q.to === String(ann))!.payload).toContain('540536.00');
+    expect(sent.find((q) => q.to === String(org))!.payload).toContain('540512.00');
+    expect(sent.find((q) => q.to === String(org))!.caption).toContain('Bob');
+    expect(sent.every((q) => !q.caption.includes('91234567'))).toBe(true);
+  });
+
+  it('reads a photo sent at the total prompt, and Type the total instead goes back to a normal split', async () => {
+    const org = uid++;
+    const b = receiptBot();
+    await say(b, org, '/split');
+    await photo(b, org);
+    expect(stub.lastText()).toContain('I read this receipt');
+    await tap(b, org, 'split_scan:manual');
+    expect(stub.lastText()).toContain('How much is the bill');
+    await say(b, org, '100');
+    expect(stub.lastText()).toContain('How do you want to split');
+  });
+
+  it('warns when the items exceed the total, and says so when a photo cannot be read', async () => {
+    const org = uid++;
+    const b = receiptBot();
+    scanned = { items: [{ name: 'Crab', price: 50 }], total: 40 };
+    await say(b, org, '/split_receipt');
+    await photo(b, org);
+    expect(stub.lastText()).toContain('⚠️ The items add up to more than the total');
+
+    scanned = { items: [] };
+    await tap(b, org, 'split_scan:again');
+    await photo(b, org);
+    expect(stub.lastText()).toContain('could not find a total');
+    expect(buttons()).toEqual(['split_scan:again', 'split_scan:manual']);
+
+    scanned = new Error('model down');
+    await photo(b, org);
+    expect(stub.lastText()).toContain('could not read that photo');
+
+    // at the total prompt a failed photo just asks again, with no extra buttons
+    await say(b, org, '/split');
+    await photo(b, org);
+    expect(stub.lastText()).toContain('could not read that photo');
+    expect(buttons()).toBeUndefined();
+  });
+
+  it('is unavailable without a reader', async () => {
+    const org = uid++;
+    const b = receiptBot(false);
+    await say(b, org, '/split_receipt');
+    expect(stub.lastText()).toContain('not available');
+    expect((await peek(`split-${org}`)).flow).not.toBe('split');
+  });
+
+  it('names assignment mistakes and asks for the whole message again', async () => {
+    const org = uid++;
+    const b = receiptBot();
+    await say(b, org, '/split_receipt');
+    await photo(b, org);
+    await tap(b, org, 'split_scan:use');
+    await say(b, org, '1 Ann\n2 Bob');
+    expect(stub.lastText()).toContain('Item 3 has nobody');
+    await say(b, org, '1 Ann\n2 Ann\n3 me\n3 Bob');
+    expect(stub.lastText()).toContain('Item 3 is listed twice');
+    await say(b, org, '1 me\n2 me\n3 me');
+    expect(stub.lastText()).toContain('Nobody else owes anything');
+    expect((await peek(`split-${org}`)).step).toBe(12);
+    await say(b, org, '1,2 Ann\n3 Bob');
+    expect(stub.lastText()).toContain('Who should be paid');
+  });
+
+  it('Amend offers Items (not Total), and editing the assignment message updates the summary', async () => {
+    const org = uid++;
+    const b = receiptBot();
+    await say(b, org, '/split_receipt');
+    await photo(b, org);
+    await tap(b, org, 'split_scan:use');
+    await say(b, org, '1 Ann\n2 Bob\n3 me');
+    await say(b, org, '91234567');
+    await tap(b, org, 'split_skip_description');
+    expect(stub.lastText()).toContain('Ann: SGD 36.00');
+
+    await tap(b, org, 'split_amend');
+    const menu = stub.otherCalls.findLast((c) => c.method === 'editMessageReplyMarkup')?.body ?? '';
+    expect(menu).toContain('split_pick:items');
+    expect(menu).not.toContain('split_pick:total');
+    await tap(b, org, 'split_pick:items');
+    expect(stub.lastText()).toContain('Who had what?');
+    const assignId = await sayId(b, org, '1 Ann\n2 Bob\n3 Bob');
+    expect(stub.lastText()).toContain('Bob: SGD 36.00');
+    expect(stub.lastText()).toContain('Ann: SGD 36.00');
+
+    // an edit of the latest assignment message re-reads it
+    await b.handleUpdate(editedTextUpdate(org, org, assignId, '1 Ann\n2 me\n3 Bob', upd++));
+    expect(stub.lastText()).toContain('Bob: SGD 24.00');
+    expect(stub.lastText()).toContain('Your own share, not collected: SGD 12.00');
+  });
+
+  it('keeps no receipt data after the split, and writes nothing to the database', async () => {
+    const org = uid++;
+    const b = receiptBot();
+    const before = await env.paynow_db
+      .prepare(
+        'SELECT (SELECT COUNT(*) FROM split_contacts) + (SELECT COUNT(*) FROM split_claims) AS n'
+      )
+      .first<{ n: number }>();
+    await toSummary(b, org, '1 Ann\n2 Bob\n3 me');
+    await tap(b, org, 'split_confirm');
+    expect((await peek(`split-${org}`)).flow).toBe('idle');
+    const after = await env.paynow_db
+      .prepare(
+        'SELECT (SELECT COUNT(*) FROM split_contacts) + (SELECT COUNT(*) FROM split_claims) AS n'
+      )
+      .first<{ n: number }>();
+    expect(after?.n).toBe(before?.n);
+    expect(directory()).toBeDefined();
   });
 });
 

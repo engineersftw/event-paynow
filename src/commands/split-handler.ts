@@ -1,12 +1,14 @@
-import type { Context } from 'grammy';
+import type { Api, Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
 import type { Message } from 'grammy/types';
 import { detectProxyType } from '../db/proxy-validation';
 import type { SplitDirectory } from '../db/split-repository';
+import type { ReceiptReader } from '../receipt-reader';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
 import { renderQrPng } from '../sgqr/qr-render';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
+import { parseAssignments, parseScan, type Receipt, shareReceipt, toEntries } from './receipt';
 import { directMessage, newExpiry, newToken, postWaiting } from './split-claim';
 import {
   applyLeftover,
@@ -28,15 +30,19 @@ const PAYEE = 6;
 const DESCRIPTION = 7;
 const CONFIRM = 8; // summary with Confirm / Amend / Cancel; the QR is made only after Confirm
 const AMEND = 9; // the Amend menu is open on the summary message
+const RECEIPT = 10; // waiting for a receipt photo
+const REVIEW = 11; // the scan is shown: Use this / Send another photo / Type the total instead
+const ASSIGN = 12; // waiting for who had which item
 
 const MAX_DESCRIPTION = 25;
 
 type Ctx = Record<string, unknown>;
-type Field = 'total' | 'people' | 'list' | 'payee' | 'description';
+type Field = 'total' | 'people' | 'list' | 'assign' | 'payee' | 'description';
 const FIELD_OF_STEP: Record<number, Field> = {
   [TOTAL]: 'total',
   [PEOPLE]: 'people',
   [LIST]: 'list',
+  [ASSIGN]: 'assign',
   [PAYEE]: 'payee',
   [DESCRIPTION]: 'description',
 };
@@ -44,6 +50,7 @@ const STEP_OF_FIELD: Record<Field, number> = {
   total: TOTAL,
   people: PEOPLE,
   list: LIST,
+  assign: ASSIGN,
   payee: PAYEE,
   description: DESCRIPTION,
 };
@@ -52,6 +59,7 @@ export const SPLIT_HELP =
   'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
   '/split - total, then equal or custom amounts, payee, optional description\n' +
   '/split_custom - same, straight to custom amounts (one line per person: name and amount; @mention someone to send them their QR directly)\n' +
+  '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge)\n' +
   '/forget - delete what I remember about you (your username, kept when you /start me)\n' +
   '/cancel - stop\n\n' +
   'On the summary, tap Amend to change an answer, or edit the message you sent. ' +
@@ -119,6 +127,18 @@ function readAnswer(
       patch: { entries: list.entries, ...(sum === total ? { leftover: undefined } : {}) },
     };
   }
+  if (field === 'assign') {
+    const receipt = c.receipt as Receipt | undefined;
+    if (!receipt) return { ok: false, error: 'There is no receipt to share out.' };
+    const a = parseAssignments(text, receipt.items.length, textMentions);
+    if (!a.ok) return { ok: false, error: `${a.error} Send the whole message again.` };
+    const entries = toEntries(shareReceipt(receipt.items, a, receipt.totalCents).shares);
+    if (entries.length === 0) {
+      return { ok: false, error: 'Nobody else owes anything. Name at least one other person.' };
+    }
+    // What is left of the receipt total is the organiser's own share
+    return { ok: true, patch: { entries, leftover: 'omit' } };
+  }
   if (field === 'payee') {
     const payee = detectProxyType(text);
     return payee
@@ -154,7 +174,7 @@ function nextNeed(c: Ctx): { step: number; note?: string } {
     }
   } else {
     const entries = c.entries as SplitEntry[] | undefined;
-    if (!entries) return { step: LIST };
+    if (!entries) return { step: c.receipt ? ASSIGN : LIST };
     const sum = sumCents(entries);
     if (sum > total) {
       return {
@@ -186,7 +206,9 @@ function summary(c: Record<string, unknown>, group: boolean): string {
       const direct = e.username || e.userId ? ' (by direct message)' : '';
       lines.push(`${e.name}: ${sgd(e.cents)}${direct}`);
     }
-    if (r.leftoverCents > 0) {
+    if (r.leftoverCents > 0 && c.receipt) {
+      lines.push(`Your own share, not collected: ${sgd(r.leftoverCents)}`);
+    } else if (r.leftoverCents > 0) {
       lines.push(
         r.extraCents > 0
           ? `Leftover ${sgd(r.leftoverCents)} split evenly (${sgd(r.extraCents)} each)`
@@ -215,16 +237,30 @@ function summary(c: Record<string, unknown>, group: boolean): string {
   return lines.join('\n');
 }
 
+/** What was read from the receipt, numbered so the user can say who had what. */
+function reviewText(r: Receipt, warnings: string[]): string {
+  const lines = ['I read this receipt:', ...(r.merchant ? [r.merchant] : [])];
+  for (const [i, it] of r.items.entries()) lines.push(`${i + 1}. ${it.name}: ${sgd(it.cents)}`);
+  if (r.serviceCents) lines.push(`Service charge: ${sgd(r.serviceCents)}`);
+  if (r.gstCents) lines.push(`GST: ${sgd(r.gstCents)}`);
+  if (r.discountCents) lines.push(`Discount: -${sgd(r.discountCents)}`);
+  lines.push(`Total: ${sgd(r.totalCents)}`);
+  for (const w of warnings) lines.push('', `⚠️ ${w}`);
+  lines.push('', 'Is this right? Prices from a photo can be wrong, so check them.');
+  return lines.join('\n');
+}
+
 const summaryButtons = () =>
   new InlineKeyboard()
     .text('✅ Confirm', 'split_confirm')
     .text('✏️ Amend', 'split_amend')
     .text('❌ Cancel', 'split_cancel');
 
-const amendMenu = () =>
-  new InlineKeyboard()
-    .text('Total', 'split_pick:total')
-    .text('Split', 'split_pick:split')
+const amendMenu = (receipt: boolean) =>
+  (receipt
+    ? new InlineKeyboard().text('Items', 'split_pick:items')
+    : new InlineKeyboard().text('Total', 'split_pick:total').text('Split', 'split_pick:split')
+  )
     .row()
     .text('Payee', 'split_pick:payee')
     .text('Description', 'split_pick:description')
@@ -242,15 +278,75 @@ export class SplitCommandHandler {
   constructor(
     private readonly conversationDO: ConversationDO,
     private readonly directory?: SplitDirectory,
-    private readonly botUsername?: string
+    private readonly botUsername?: string,
+    /** `reader` turns a photo into receipt data; `download` fetches a Telegram file's bytes. */
+    private readonly receipts: {
+      reader?: ReceiptReader;
+      download?: (api: Api, fileId: string) => Promise<Uint8Array>;
+    } = {}
   ) {}
 
   /** `/split_custom` passes 'custom': after the total it goes straight to the list. */
-  async start(ctx: Context, mode?: 'custom'): Promise<void> {
+  async start(ctx: Context, mode?: 'custom' | 'receipt'): Promise<void> {
     if (!ctx.from) return;
-    await this.setState({ flow: 'split', step: TOTAL, context: mode ? { mode } : {} });
+    if (mode === 'receipt' && !this.receipts.reader) {
+      await ctx.reply('Receipt scanning is not available. Send /split and type the total instead.');
+      return;
+    }
+    const context = mode === 'custom' ? { mode } : {};
+    const step = mode === 'receipt' ? RECEIPT : TOTAL;
+    await this.setState({ flow: 'split', step, context });
     await this.fetch('/owner', { userId: ctx.from.id, topicId: topicOf(ctx) });
-    await this.askStep(ctx, TOTAL, mode ? { mode } : {});
+    await this.askStep(ctx, step, context);
+  }
+
+  /** A photo: read it as a receipt when the bot is waiting for one (or for the total). */
+  async handlePhoto(ctx: Context): Promise<void> {
+    const state = await this.getState();
+    if (state.flow !== 'split' || !this.isOwner(ctx, state)) return;
+    if (state.step !== RECEIPT && state.step !== TOTAL) return;
+    const photo = ctx.message?.photo?.at(-1); // the largest size
+    const { reader, download } = this.receipts;
+    if (!photo) return;
+    if (!reader || !download) {
+      await ctx.reply('Receipt scanning is not available. Please type the bill total.');
+      await this.setState({ flow: 'split', step: TOTAL, context: state.context });
+      return;
+    }
+    const failed = async (why: string) => {
+      const buttons =
+        state.step === RECEIPT
+          ? new InlineKeyboard()
+              .text('Send another photo', 'split_scan:again')
+              .text('Type the total instead', 'split_scan:manual')
+          : undefined;
+      await ctx.reply(
+        `${why} Send another photo${state.step === RECEIPT ? ', or tap Type the total instead' : ' or type the total'}.`,
+        buttons ? { reply_markup: buttons } : undefined
+      );
+    };
+    await ctx.replyWithChatAction('typing').catch(() => undefined);
+    let scan: ReturnType<typeof parseScan>;
+    try {
+      // The photo lives in memory for this one call and is never logged
+      scan = parseScan(await reader.read(await download(ctx.api, photo.file_id)));
+    } catch {
+      await failed('I could not read that photo.');
+      return;
+    }
+    if (!scan.ok) {
+      await failed(scan.error);
+      return;
+    }
+    const context = { ...state.context, scan: { receipt: scan.receipt, warnings: scan.warnings } };
+    await this.setState({ flow: 'split', step: REVIEW, context });
+    await ctx.reply(reviewText(scan.receipt, scan.warnings), {
+      reply_markup: new InlineKeyboard()
+        .text('✅ Use this', 'split_scan:use')
+        .row()
+        .text('📷 Send another photo', 'split_scan:again')
+        .text('Type the total instead', 'split_scan:manual'),
+    });
   }
 
   async cancel(ctx: Context): Promise<void> {
@@ -334,21 +430,25 @@ export class SplitCommandHandler {
     const step = state.flow === 'split' ? state.step : 0;
     const onSummary = data === 'split_confirm' || data === 'split_cancel' || data === 'split_amend';
     const onMenu = data.startsWith('split_pick:') || data === 'split_back';
-    const expected = data.startsWith('split_mode:')
-      ? MODE
-      : data.startsWith('split_people:')
-        ? PEOPLE
-        : data.startsWith('split_leftover:')
-          ? LEFTOVER
-          : data === 'split_skip_description'
-            ? DESCRIPTION
-            : onSummary
-              ? CONFIRM
-              : onMenu
-                ? AMEND
-                : data === 'split_keep' && c.amending
-                  ? step
-                  : -1;
+    const expected = data.startsWith('split_scan:')
+      ? step === RECEIPT || step === REVIEW
+        ? step
+        : -1
+      : data.startsWith('split_mode:')
+        ? MODE
+        : data.startsWith('split_people:')
+          ? PEOPLE
+          : data.startsWith('split_leftover:')
+            ? LEFTOVER
+            : data === 'split_skip_description'
+              ? DESCRIPTION
+              : onSummary
+                ? CONFIRM
+                : onMenu
+                  ? AMEND
+                  : data === 'split_keep' && c.amending
+                    ? step
+                    : -1;
     // Summary and menu buttons only count on the latest summary message
     const onLatest =
       !(onSummary || onMenu) ||
@@ -360,7 +460,29 @@ export class SplitCommandHandler {
     }
     await ctx.answerCallbackQuery();
 
-    if (data.startsWith('split_mode:')) {
+    if (data.startsWith('split_scan:')) {
+      const scan = c.scan as { receipt: Receipt } | undefined;
+      const { scan: _scan, ...rest } = c;
+      await this.setButtons(ctx, new InlineKeyboard()); // the review is answered
+      if (data === 'split_scan:use' && scan) {
+        // The receipt total is the bill; what the others owe is worked out from the items
+        const { entries, leftover, people, suggested, ...clean } = rest;
+        await this.proceed(ctx, {
+          ...clean,
+          receipt: scan.receipt,
+          totalCents: scan.receipt.totalCents,
+          mode: 'custom',
+        });
+      } else if (data === 'split_scan:again') {
+        await this.setState({ flow: 'split', step: RECEIPT, context: rest });
+        await this.askStep(ctx, RECEIPT, rest);
+      } else if (data === 'split_scan:manual') {
+        // Type the total instead: a normal split, without the receipt
+        const { receipt, mode, ...plain } = rest;
+        await this.setState({ flow: 'split', step: TOTAL, context: plain });
+        await this.askStep(ctx, TOTAL, plain);
+      }
+    } else if (data.startsWith('split_mode:')) {
       // A new choice of type starts that type's details afresh
       const { people, entries, leftover, suggested, ...rest } = c;
       await this.proceed(ctx, { ...rest, mode: data.endsWith(':custom') ? 'custom' : 'equal' });
@@ -378,14 +500,15 @@ export class SplitCommandHandler {
       await this.proceed(ctx, rest);
     } else if (data === 'split_amend') {
       await this.setState({ flow: 'split', step: AMEND, context: c });
-      await this.setButtons(ctx, amendMenu());
+      await this.setButtons(ctx, amendMenu(c.receipt !== undefined));
     } else if (data === 'split_back') {
       await this.setState({ flow: 'split', step: CONFIRM, context: c });
       await this.setButtons(ctx, summaryButtons());
     } else if (onMenu) {
       const pick = data.slice('split_pick:'.length);
       await this.setButtons(ctx, new InlineKeyboard()); // the menu goes; the question replaces it
-      const first = pick === 'split' ? MODE : STEP_OF_FIELD[pick as Field];
+      const first =
+        pick === 'split' ? MODE : pick === 'items' ? ASSIGN : STEP_OF_FIELD[pick as Field];
       const context = { ...c, amending: pick };
       await this.setState({ flow: 'split', step: first, context });
       await this.askStep(ctx, first, context);
@@ -476,6 +599,19 @@ export class SplitCommandHandler {
       await this.ask(
         ctx,
         `${note ? `${note}\n\n` : ''}Bill: ${sgd(total!)}. Send who owes what, one person per line: a name, then an amount. Leave yourself out.\n\nAnn 40\nBob 25.50\n\n(Up to 20 people.)`,
+        keep()
+      );
+    } else if (step === RECEIPT) {
+      await this.ask(
+        ctx,
+        'Send a photo of the receipt. Make sure the whole receipt is in the picture and the numbers are sharp.',
+        new InlineKeyboard().text('Type the total instead', 'split_scan:manual')
+      );
+    } else if (step === ASSIGN) {
+      const items = (c.receipt as Receipt).items;
+      await this.ask(
+        ctx,
+        `Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nItems:\n${items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n')}\n\nGST and service charge are shared in proportion. "me" is you: your share is not collected.`,
         keep()
       );
     } else if (step === PAYEE) {
