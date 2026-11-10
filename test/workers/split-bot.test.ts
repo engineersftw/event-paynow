@@ -4,7 +4,7 @@ import jsQR from 'jsqr';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { D1SplitDirectory } from '../../src/db/split-repository';
 import { ReceiptReaderError } from '../../src/receipt-reader';
-import { createSplitBot } from '../../src/split-bot';
+import { acceptUpdate, createSplitBot } from '../../src/split-bot';
 import worker from '../../src/worker';
 import type { ConversationDO } from '../../src/worker/conversation-do';
 import {
@@ -1008,5 +1008,51 @@ describe('POST /webhook/split', () => {
     const on = { SPLIT_BOT_TOKEN: 't', SPLIT_WEBHOOK_SECRET: 's' };
     expect((await post(on, 'wrong')).status).toBe(403);
     expect((await post(on)).status).toBe(403);
+  });
+});
+
+describe('acceptUpdate', () => {
+  it('answers Telegram at once and finishes a slow update in the background', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const b = createSplitBot(env, 'split-token', {
+      botInfo: TEST_BOT_INFO,
+      client: {
+        fetch: async (url, init) => {
+          await gate; // Telegram (or the model) is slow
+          return stub.fetch(url, init);
+        },
+      },
+    });
+    const pending: Promise<unknown>[] = [];
+    const request = new Request('https://x.test/webhook/split', {
+      method: 'POST',
+      body: JSON.stringify(textUpdate(uid++, '/split', upd++)),
+    });
+    const response = await acceptUpdate(b, request, { waitUntil: (p) => void pending.push(p) });
+    expect(response.status).toBe(200); // returned although the update is still running
+    expect(stub.sentMessages).toHaveLength(0);
+    release();
+    await Promise.all(pending);
+    expect(stub.lastText()).toContain('How much is the bill');
+  });
+
+  it('logs a failing update instead of failing the webhook', async () => {
+    const b = createSplitBot(env, 'split-token', {
+      botInfo: TEST_BOT_INFO,
+      client: {
+        fetch: async () => {
+          throw new Error('telegram down');
+        },
+      },
+    });
+    const pending: Promise<unknown>[] = [];
+    const request = new Request('https://x.test/webhook/split', {
+      method: 'POST',
+      body: JSON.stringify(textUpdate(uid++, '/split', upd++)),
+    });
+    const response = await acceptUpdate(b, request, { waitUntil: (p) => void pending.push(p) });
+    expect(response.status).toBe(200);
+    await expect(Promise.all(pending)).resolves.toBeDefined();
   });
 });

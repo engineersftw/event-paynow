@@ -4,7 +4,7 @@ import { handleSimpleWebhook } from './simple-bot';
 import { handleSplitWebhook } from './split-bot';
 
 export default {
-  async fetch(request: Request, env: Env, _ctx: ExecutionContext): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // Health check
@@ -40,7 +40,7 @@ export default {
       if (!validateSecret(request, env.SPLIT_WEBHOOK_SECRET)) {
         return new Response('Unauthorized', { status: 403 });
       }
-      return handleSplitWebhook(request, env);
+      return handleSplitWebhook(request, env, ctx);
     }
 
     return new Response('Not found', { status: 404 });
