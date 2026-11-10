@@ -3,6 +3,7 @@ import type { Update } from 'grammy/types';
 import jsQR from 'jsqr';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { D1SplitDirectory } from '../../src/db/split-repository';
+import { D1UsageRepository } from '../../src/db/usage-repository';
 import { ReceiptReaderError } from '../../src/receipt-reader';
 import { acceptUpdate, createSplitBot } from '../../src/split-bot';
 import worker from '../../src/worker';
@@ -1154,6 +1155,29 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(mine.payload).toContain('540524.00');
   });
 
+  it('counts receipt scans read and failed, and the receipt split', async () => {
+    const org = uid++;
+    const b = receiptBot();
+    const counts = () => new D1UsageRepository(env.paynow_db).splitSnapshot();
+    const before = await counts();
+    scanned = new ReceiptReaderError('model', 'down');
+    await say(b, org, '/split_receipt');
+    await photo(b, org);
+    scanned = RECEIPT;
+    await tap(b, org, 'split_scan:again');
+    await photo(b, org);
+    await tap(b, org, 'split_scan:use');
+    await say(b, org, '1 Ann\n2 Bob\n3 me');
+    await say(b, org, '91234567');
+    await tap(b, org, 'split_payee:me');
+    await tap(b, org, 'split_skip_description');
+    await tap(b, org, 'split_confirm');
+    const after = await counts();
+    expect(after.scans.failed - before.scans.failed).toBe(1);
+    expect(after.scans.ok - before.scans.ok).toBe(1);
+    expect(after.types.receipt - before.types.receipt).toBe(1);
+  });
+
   it('keeps no receipt data after the split, and writes nothing to the database', async () => {
     const org = uid++;
     const b = receiptBot();
@@ -1300,6 +1324,185 @@ describe('Split_PayNow_Bot when the payee is not the organiser', () => {
     await gtap(b, chat, other, 'split_payee:me');
     expect(stub.callbackAnswers).toContain('This split is not yours.');
     expect((await peek(`split-${chat}`)).step).toBe(14);
+  });
+});
+
+describe('Split_PayNow_Bot /stats and counting', () => {
+  const snap = () => new D1UsageRepository(env.paynow_db).splitSnapshot();
+  const statsBot = (list: string | undefined) =>
+    createSplitBot({ ...env, STATS_USER_IDS: list } as never, 'split-token', {
+      botInfo: TEST_BOT_INFO,
+      client: { fetch: stub.fetch },
+    });
+  const qrAmounts = () =>
+    stub.sentPhotos.map((p) => {
+      const { data, width, height } = bmpToRgba(p.bytes);
+      return jsQR(data, width, height)!.data;
+    });
+
+  describe('access', () => {
+    it('answers an authorized user in a private chat', async () => {
+      const u = uid++;
+      const b = statsBot(`1, ${u},abc`);
+      await say(b, u, '/stats');
+      expect(stub.lastText()).toContain('Split_PayNow_Bot usage');
+      expect(stub.lastText()).toContain('People remembered for direct messages');
+    });
+
+    it('stays silent for anyone else, in a group, and with no list', async () => {
+      const [u, other] = [uid++, uid++];
+      await say(statsBot(String(u)), other, '/stats');
+      expect(stub.sentMessages).toHaveLength(0);
+      await statsBot(String(u)).handleUpdate(
+        groupTextUpdate(-uid++, u, '/stats', undefined, upd++)
+      );
+      expect(stub.sentMessages).toHaveLength(0);
+      for (const none of [undefined, '', 'abc, ,']) {
+        await say(statsBot(none), u, '/stats');
+      }
+      expect(stub.sentMessages).toHaveLength(0);
+    });
+
+    it('is not in /help', async () => {
+      const u = uid++;
+      await say(statsBot(String(u)), u, '/help');
+      expect(stub.lastText()).not.toContain('/stats');
+    });
+  });
+
+  describe('counting', () => {
+    const diff = (a: Awaited<ReturnType<typeof snap>>, z: Awaited<ReturnType<typeof snap>>) => ({
+      confirmed: z.confirmed.total - a.confirmed.total,
+      equal: z.types.equal - a.types.equal,
+      custom: z.types.custom - a.types.custom,
+      receipt: z.types.receipt - a.types.receipt,
+      priv: z.places.private - a.places.private,
+      group: z.places.group - a.places.group,
+      other: z.payeeOther - a.payeeOther,
+      chat: z.qrs.chat - a.qrs.chat,
+      dm: z.qrs.dm - a.qrs.dm,
+    });
+
+    it('an equal split in a private chat', async () => {
+      const u = uid++;
+      const b = bot();
+      const before = await snap();
+      await say(b, u, '/split');
+      await say(b, u, '100');
+      await tap(b, u, 'split_mode:equal');
+      await say(b, u, '4');
+      await say(b, u, '91234567');
+      await tap(b, u, 'split_payee:me');
+      await tap(b, u, 'split_skip_description');
+      expect(diff(before, await snap()).confirmed).toBe(0); // nothing counted before Confirm
+      await tap(b, u, 'split_confirm');
+      expect(diff(before, await snap())).toMatchObject({
+        confirmed: 1,
+        equal: 1,
+        custom: 0,
+        priv: 1,
+        group: 0,
+        other: 0,
+        chat: 1,
+      });
+    });
+
+    it('a custom split in a group with someone else paid counts each distinct amount', async () => {
+      const chat = -uid++;
+      const owner = uid++;
+      const b = bot();
+      const before = await snap();
+      await gsay(b, chat, owner, '/split_custom');
+      await gsay(b, chat, owner, '100');
+      await gsay(b, chat, owner, 'Ann 50\nBob 30\nCy 20');
+      await gsay(b, chat, owner, '91234567');
+      await gtap(b, chat, owner, 'split_payee:other');
+      await gtap(b, chat, owner, 'split_skip_description');
+      await gtap(b, chat, owner, 'split_confirm');
+      expect(diff(before, await snap())).toMatchObject({
+        confirmed: 1,
+        custom: 1,
+        group: 1,
+        priv: 0,
+        other: 1,
+        chat: 3,
+      });
+    });
+
+    it('a failure to count never stops the QR', async () => {
+      const u = uid++;
+      const b = bot();
+      await env.paynow_db.prepare('ALTER TABLE usage_counters RENAME TO usage_counters_off').run();
+      await say(b, u, '/split');
+      await say(b, u, '10');
+      await tap(b, u, 'split_mode:equal');
+      await say(b, u, '2');
+      await say(b, u, '91234567');
+      await tap(b, u, 'split_payee:me');
+      await tap(b, u, 'split_skip_description');
+      await tap(b, u, 'split_confirm');
+      expect(stub.sentPhotos).toHaveLength(1);
+      await env.paynow_db.prepare('ALTER TABLE usage_counters_off RENAME TO usage_counters').run();
+    });
+
+    it('direct messages, waiting QRs and collections', async () => {
+      const [ann, dee, org] = [uid++, uid++, uid++];
+      const b = bot();
+      const start = (id: number, username: string) => {
+        const u = textUpdate(id, '/start', upd++);
+        (u as unknown as { message: { from: Record<string, unknown> } }).message.from.username =
+          username;
+        return b.handleUpdate(u);
+      };
+      await start(ann, `ann_${ann}`);
+      const before = await snap();
+      await say(b, org, '/split_custom');
+      await say(b, org, '65');
+      await say(b, org, `@ann_${ann} 40\n@dee_${dee} 25`);
+      await say(b, org, '91234567');
+      await tap(b, org, 'split_payee:me');
+      await tap(b, org, 'split_skip_description');
+      await tap(b, org, 'split_confirm');
+      const mid = await snap();
+      expect(mid.qrs.dm - before.qrs.dm).toBe(1); // Ann
+      expect(mid.claims.created - before.claims.created).toBe(1); // Dee must collect
+      expect(mid.claims.waiting - before.claims.waiting).toBe(1);
+
+      const waiting = stub.sentMessages.findLast((m) => m.text.startsWith('Waiting for their QR'))!;
+      const url = (waiting.replyMarkup as { inline_keyboard: Array<Array<{ url: string }>> })
+        .inline_keyboard[0]![0]!.url;
+      const token = /start=claim_(\S+)$/.exec(url)![1]!;
+      const claim = textUpdate(dee, `/start claim_${token}`, upd++);
+      (claim as unknown as { message: { from: Record<string, unknown> } }).message.from.username =
+        `dee_${dee}`;
+      await b.handleUpdate(claim);
+      const after = await snap();
+      expect(after.claims.collected - before.claims.collected).toBe(1);
+      expect(after.qrs.dm - before.qrs.dm).toBe(2); // Ann, and Dee's collection
+      expect(after.claims.waiting).toBe(before.claims.waiting);
+      expect(qrAmounts().length).toBeGreaterThan(0);
+    });
+
+    it('records nothing but a day, a metric and a number', async () => {
+      const u = uid++;
+      const b = bot();
+      await say(b, u, '/split');
+      await say(b, u, '12.34');
+      await tap(b, u, 'split_mode:equal');
+      await say(b, u, '3');
+      await say(b, u, '98765432');
+      await tap(b, u, 'split_payee:me');
+      await say(b, u, 'Secret lunch');
+      await tap(b, u, 'split_confirm');
+      const rows = await env.paynow_db
+        .prepare('SELECT day, metric, count FROM usage_counters')
+        .all<{ day: string; metric: string; count: number }>();
+      const text = JSON.stringify(rows.results);
+      for (const secret of ['98765432', 'Secret', '12.34', String(u)]) {
+        expect(text).not.toContain(secret);
+      }
+      expect(rows.results.every((r) => /^\d{4}-\d{2}-\d{2}$/.test(r.day))).toBe(true);
+    });
   });
 });
 

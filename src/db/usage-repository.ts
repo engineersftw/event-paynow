@@ -8,6 +8,21 @@ export const SIMPLE_AMOUNT_SKIPPED = 'simple_amount_skipped';
 export const SIMPLE_AMOUNT_FIXED = 'simple_amount_fixed';
 export const SIMPLE_AMOUNT_EDITABLE = 'simple_amount_editable';
 
+// Split_PayNow_Bot, counted the same way: a day, a metric and a number, nothing else.
+export const SPLIT_CONFIRMED = 'split_confirmed';
+export const SPLIT_TYPE_EQUAL = 'split_type_equal';
+export const SPLIT_TYPE_CUSTOM = 'split_type_custom';
+export const SPLIT_TYPE_RECEIPT = 'split_type_receipt';
+export const SPLIT_PLACE_PRIVATE = 'split_place_private';
+export const SPLIT_PLACE_GROUP = 'split_place_group';
+export const SPLIT_PAYEE_OTHER = 'split_payee_other';
+export const SPLIT_QR_CHAT = 'split_qr_chat';
+export const SPLIT_QR_DM = 'split_qr_dm';
+export const SPLIT_SCAN_OK = 'split_scan_ok';
+export const SPLIT_SCAN_FAILED = 'split_scan_failed';
+export const SPLIT_CLAIM_CREATED = 'split_claim_created';
+export const SPLIT_CLAIM_COLLECTED = 'split_claim_collected';
+
 /** Counts one occurrence of a metric on a day. */
 export interface UsageCounter {
   increment(metric: string, day: string): Promise<void>;
@@ -44,6 +59,18 @@ export interface UsageSnapshot {
   };
 }
 
+/** Split_PayNow_Bot numbers: anonymous daily counters plus two live counts read from its tables. */
+export interface SplitUsageSnapshot {
+  confirmed: { total: number; last7: number; last30: number };
+  types: { equal: number; custom: number; receipt: number };
+  places: { private: number; group: number };
+  payeeOther: number;
+  qrs: { chat: number; dm: number };
+  scans: { ok: number; failed: number };
+  claims: { created: number; collected: number; waiting: number };
+  contacts: number;
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SGT_OFFSET_MS = 8 * 60 * 60 * 1000;
 
@@ -64,6 +91,61 @@ export class D1UsageRepository implements UsageCounter {
       )
       .bind(day, metric)
       .run();
+  }
+
+  /** Split_PayNow_Bot's figures: the counters, and how many contacts and unexpired waiting QRs exist now. */
+  async splitSnapshot(now: Date = new Date()): Promise<SplitUsageSnapshot> {
+    const day7 = sgDay(new Date(now.getTime() - 6 * DAY_MS)); // today and the 6 days before
+    const day30 = sgDay(new Date(now.getTime() - 29 * DAY_MS));
+    const [counters, live] = await this.d1.batch([
+      this.d1
+        .prepare(
+          `SELECT metric,
+                  SUM(count) AS total,
+                  COALESCE(SUM(CASE WHEN day >= ?1 THEN count END), 0) AS last7,
+                  COALESCE(SUM(CASE WHEN day >= ?2 THEN count END), 0) AS last30
+           FROM usage_counters WHERE substr(metric, 1, 6) = 'split_' GROUP BY metric`
+        )
+        .bind(day7, day30),
+      this.d1
+        .prepare(
+          `SELECT (SELECT COUNT(*) FROM split_contacts) AS contacts,
+                  (SELECT COUNT(*) FROM split_claims WHERE expires_at > ?1) AS waiting`
+        )
+        .bind(now.toISOString()),
+    ]);
+    const rows = (counters?.results ?? []) as Array<{
+      metric: string;
+      total: number;
+      last7: number;
+      last30: number;
+    }>;
+    const by = new Map(rows.map((r) => [r.metric, r]));
+    const n = (m: string) => by.get(m)?.total ?? 0;
+    const confirmed = by.get(SPLIT_CONFIRMED);
+    const state = (live?.results[0] ?? {}) as { contacts?: number; waiting?: number };
+    return {
+      confirmed: {
+        total: confirmed?.total ?? 0,
+        last7: confirmed?.last7 ?? 0,
+        last30: confirmed?.last30 ?? 0,
+      },
+      types: {
+        equal: n(SPLIT_TYPE_EQUAL),
+        custom: n(SPLIT_TYPE_CUSTOM),
+        receipt: n(SPLIT_TYPE_RECEIPT),
+      },
+      places: { private: n(SPLIT_PLACE_PRIVATE), group: n(SPLIT_PLACE_GROUP) },
+      payeeOther: n(SPLIT_PAYEE_OTHER),
+      qrs: { chat: n(SPLIT_QR_CHAT), dm: n(SPLIT_QR_DM) },
+      scans: { ok: n(SPLIT_SCAN_OK), failed: n(SPLIT_SCAN_FAILED) },
+      claims: {
+        created: n(SPLIT_CLAIM_CREATED),
+        collected: n(SPLIT_CLAIM_COLLECTED),
+        waiting: state.waiting ?? 0,
+      },
+      contacts: state.contacts ?? 0,
+    };
   }
 
   /** Everything the report needs, from existing records plus the counters. */

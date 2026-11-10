@@ -3,6 +3,21 @@ import { InlineKeyboard, InputFile } from 'grammy';
 import type { Message } from 'grammy/types';
 import { detectProxyType } from '../db/proxy-validation';
 import type { SplitDirectory } from '../db/split-repository';
+import {
+  SPLIT_CLAIM_CREATED,
+  SPLIT_CONFIRMED,
+  SPLIT_PAYEE_OTHER,
+  SPLIT_PLACE_GROUP,
+  SPLIT_PLACE_PRIVATE,
+  SPLIT_QR_CHAT,
+  SPLIT_QR_DM,
+  SPLIT_SCAN_FAILED,
+  SPLIT_SCAN_OK,
+  SPLIT_TYPE_CUSTOM,
+  SPLIT_TYPE_EQUAL,
+  SPLIT_TYPE_RECEIPT,
+  type UsageCounter,
+} from '../db/usage-repository';
 import { type ReceiptReader, ReceiptReaderError } from '../receipt-reader';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
@@ -17,7 +32,7 @@ import {
   shareReceipt,
   toEntries,
 } from './receipt';
-import { directMessage, newExpiry, newToken, postWaiting } from './split-claim';
+import { countAll, directMessage, newExpiry, newToken, postWaiting } from './split-claim';
 import {
   applyLeftover,
   groupByAmount,
@@ -355,7 +370,9 @@ export class SplitCommandHandler {
     private readonly receipts: {
       reader?: ReceiptReader;
       download?: (api: Api, fileId: string) => Promise<Uint8Array>;
-    } = {}
+    } = {},
+    /** Anonymous daily counts for the owner's /stats; absent in tests that do not need it. */
+    private readonly counter?: UsageCounter
   ) {}
 
   /** `/split_custom` passes 'custom': after the total it goes straight to the list. */
@@ -386,6 +403,7 @@ export class SplitCommandHandler {
       return;
     }
     const failed = async (why: string) => {
+      await countAll(this.counter, [SPLIT_SCAN_FAILED]);
       const buttons =
         state.step === RECEIPT
           ? new InlineKeyboard()
@@ -432,6 +450,7 @@ export class SplitCommandHandler {
     }
     const context = { ...state.context, scan: { receipt: scan.receipt, warnings: scan.warnings } };
     await this.setState({ flow: 'split', step: REVIEW, context });
+    await countAll(this.counter, [SPLIT_SCAN_OK]);
     await ctx.reply(reviewText(scan.receipt, scan.warnings), {
       reply_markup: new InlineKeyboard()
         .text('✅ Use this', 'split_scan:use')
@@ -814,6 +833,12 @@ export class SplitCommandHandler {
     const state = (await claimed.json()) as ConversationState;
     await this.dropButtons(ctx);
     const c = state.context;
+    await countAll(this.counter, [
+      SPLIT_CONFIRMED,
+      c.receipt ? SPLIT_TYPE_RECEIPT : c.entries ? SPLIT_TYPE_CUSTOM : SPLIT_TYPE_EQUAL,
+      ctx.chat?.type === 'private' ? SPLIT_PLACE_PRIVATE : SPLIT_PLACE_GROUP,
+      ...(c.payeeIsMe === false ? [SPLIT_PAYEE_OTHER] : []),
+    ]);
     const description = c.description as string | undefined;
     const caution = 'Scan with your banking app. Check the payee name before you pay.';
 
@@ -880,6 +905,7 @@ export class SplitCommandHandler {
           caption: `${lines.join('\n')}\n\n${caution} Send /split for another.`,
         });
         sent++;
+        await countAll(this.counter, [SPLIT_QR_CHAT]);
       }
     } catch {
       // No console logging: the answers include a payee number
@@ -922,6 +948,7 @@ export class SplitCommandHandler {
           caption: dm.caption,
         });
         sentTo.push(own ? 'you' : p.name);
+        await countAll(this.counter, [SPLIT_QR_DM]);
       } catch {
         // Not started the bot, blocked it, or rate limited: they collect it with a button
         waiting.push({
@@ -941,6 +968,10 @@ export class SplitCommandHandler {
     if (sentTo.length > 0)
       await ctx.reply(`Sent their QR by direct message: ${sentTo.join(', ')}.`);
     await postWaiting(ctx, directory, waiting, this.botUsername);
+    await countAll(
+      this.counter,
+      waiting.map(() => SPLIT_CLAIM_CREATED)
+    );
   }
 
   /** Private chats have one user; in a group only the user and topic that started it. */
