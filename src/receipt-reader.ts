@@ -19,7 +19,7 @@ export interface ReceiptReader {
 }
 
 /** Needs a one-time licence acceptance, which the reader sends itself on the first scan. */
-export const DEFAULT_RECEIPT_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
+export const DEFAULT_RECEIPT_MODEL = '@cf/meta/llama-4-scout-17b-16e-instruct';
 
 const INSTRUCTION =
   'You read restaurant and shop receipts. Look at the receipt photo and answer with ONLY a JSON ' +
@@ -64,8 +64,8 @@ export class WorkersAiReceiptReader implements ReceiptReader {
 
   async read(image: Uint8Array): Promise<unknown> {
     const dataUrl = toDataUrl(image);
-    // The image goes in a message part. Tested against the live Llama 3.2 vision model: an `image`
-    // field beside a single user message (the tutorial's shape) is refused with error 3030.
+    // The image goes in a message part. Tested live: Llama 3.2 refuses an `image` field beside a single
+    // user message (the tutorial's shape) with error 3030, and this part shape works for Llama 4 Scout.
     const input = {
       messages: [
         {

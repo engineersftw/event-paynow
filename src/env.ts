@@ -19,7 +19,7 @@ export interface Env {
   SPLIT_BOT_USERNAME?: string;
   /** Workers AI binding for reading receipt photos in Split_PayNow_Bot; scanning is off without it. */
   AI?: Ai;
-  /** Vision model used for receipts; defaults to Llama 3.2 11B Vision. */
+  /** Vision model used for receipts; defaults to Llama 4 Scout. */
   RECEIPT_MODEL?: string;
   /** Telegram user ids (comma-separated) allowed to use the hidden /stats command; none when unset. */
   STATS_USER_IDS?: string;
