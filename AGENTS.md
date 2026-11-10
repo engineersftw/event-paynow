@@ -112,6 +112,7 @@ This project uses OpenSpec for change management. All changes are archived:
 46. `add-receipt-paste-assignment` (6 tasks) — archived 2026-11-10
 47. `tidy-split-receipt-prompts` (7 tasks) — archived 2026-11-10
 48. `tidy-split-scan-bubbles` (6 tasks) — archived 2026-11-10
+49. `add-split-claim-items` (12 tasks) — archived 2026-11-10
 
 **Workflow commands:**
 
