@@ -79,6 +79,9 @@ describe('Split_PayNow_Bot in a private chat', () => {
     await say(b, u, '/split');
     expect(stub.lastText()).toContain('How much is the bill');
     await say(b, u, '187.40');
+    expect(stub.lastText()).toContain('How do you want to split');
+    expect(buttons()).toEqual(['split_mode:equal', 'split_mode:custom']);
+    await tap(b, u, 'split_mode:equal');
     expect(stub.lastText()).toContain('How many people');
     expect(buttons()).toBeUndefined(); // no member-count button in a private chat
     await say(b, u, '4');
@@ -110,6 +113,7 @@ describe('Split_PayNow_Bot in a private chat', () => {
     const b = bot();
     await say(b, u, '/start');
     await say(b, u, '100');
+    await tap(b, u, 'split_mode:equal');
     await say(b, u, '3');
     await say(b, u, '201900000A');
     await tap(b, u, 'split_skip_description');
@@ -127,6 +131,7 @@ describe('Split_PayNow_Bot in a private chat', () => {
     await say(b, u, 'abc');
     expect(stub.lastText()).toContain('positive amount');
     await say(b, u, '10');
+    await tap(b, u, 'split_mode:equal');
     for (const v of ['1', '101', 'x', '2.5']) {
       await say(b, u, v);
       expect(stub.lastText()).toContain('2 to 100');
@@ -143,6 +148,7 @@ describe('Split_PayNow_Bot in a private chat', () => {
 
     await say(b, u, '/split');
     await say(b, u, '10');
+    await tap(b, u, 'split_mode:equal');
     await say(b, u, '2');
     await say(b, u, '91234567');
     await tap(b, u, 'split_skip_description');
@@ -164,6 +170,7 @@ describe('Split_PayNow_Bot in a group', () => {
     expect(first.text).toContain('How much is the bill');
     expect(first.replyMarkup).toMatchObject({ force_reply: true, selective: true });
     await gsay(b, chat, owner, '120');
+    await gtap(b, chat, owner, 'split_mode:equal');
     expect(buttons()).toEqual(['split_people:6']);
     await gtap(b, chat, owner, 'split_people:6');
     expect(stub.lastText()).toContain('Who should be paid');
@@ -186,6 +193,7 @@ describe('Split_PayNow_Bot in a group', () => {
     memberCount = 'nope';
     await gsay(b, chat, owner, '/split');
     await gsay(b, chat, owner, '50');
+    await gtap(b, chat, owner, 'split_mode:equal');
     expect(buttons()).toBeUndefined();
     await gsay(b, chat, owner, '4');
     expect(stub.lastText()).toContain('Who should be paid');
@@ -194,6 +202,7 @@ describe('Split_PayNow_Bot in a group', () => {
     const chat2 = -uid++;
     await gsay(b, chat2, owner, '/split');
     await gsay(b, chat2, owner, '50');
+    await gtap(b, chat2, owner, 'split_mode:equal');
     expect(buttons()).toBeUndefined();
   });
 
@@ -207,6 +216,7 @@ describe('Split_PayNow_Bot in a group', () => {
     await gsay(b, chat, other, '99');
     expect(stub.sentMessages).toHaveLength(0);
     await gsay(b, chat, owner, '60');
+    await gtap(b, chat, owner, 'split_mode:equal');
     await gsay(b, chat, owner, '3');
     await gsay(b, chat, owner, '91234567');
     await gtap(b, chat, owner, 'split_skip_description');
@@ -214,7 +224,7 @@ describe('Split_PayNow_Bot in a group', () => {
     await gtap(b, chat, other, 'split_confirm');
     expect(stub.callbackAnswers).toContain('This split is not yours.');
     expect(stub.sentPhotos).toHaveLength(0);
-    expect((await peek(`split-${chat}`)).step).toBe(5);
+    expect((await peek(`split-${chat}`)).step).toBe(8);
     await gtap(b, chat, owner, 'split_confirm');
     expect(stub.sentPhotos).toHaveLength(1);
   });
@@ -237,9 +247,148 @@ describe('Split_PayNow_Bot in a group', () => {
     });
     await gsay(b, chat, owner, '/split');
     await gsay(b, chat, owner, '40');
+    await gtap(b, chat, owner, 'split_mode:equal');
     await gsay(b, chat, owner, '2');
     await gsay(b, chat, owner, '91234567');
     expect(stub.lastText()).toContain('short description');
+  });
+});
+
+describe('Split_PayNow_Bot custom amounts', () => {
+  const qrs = () =>
+    stub.sentPhotos.map((photo) => {
+      const { data, width, height } = bmpToRgba(photo.bytes);
+      return { payload: jsQR(data, width, height)!.data, caption: photo.caption ?? '' };
+    });
+  async function toPayee(b: B, u: number, list: string, total = '100') {
+    await say(b, u, '/split');
+    await say(b, u, total);
+    await tap(b, u, 'split_mode:custom');
+    expect(stub.lastText()).toContain('one person per line');
+    await say(b, u, list);
+  }
+
+  it('sends one QR per distinct amount, labelled with names', async () => {
+    const u = uid++;
+    const b = bot();
+    await toPayee(b, u, 'Ann 40\nBob 25\nCy 25\nDee 10'); // exactly the bill: no leftover question
+    expect(stub.lastText()).toContain('Who should be paid');
+    await say(b, u, '91234567');
+    await tap(b, u, 'split_skip_description');
+    const summary = stub.lastText();
+    expect(summary).toContain('Ann: SGD 40.00');
+    expect(summary).not.toContain('Leftover');
+    await tap(b, u, 'split_confirm');
+    const sent = qrs();
+    expect(sent).toHaveLength(3);
+    expect(sent[0]!.payload).toContain('540540.00');
+    expect(sent[0]!.caption).toContain('Ann');
+    expect(sent[1]!.payload).toContain('540525.00');
+    expect(sent[1]!.caption).toContain('Bob, Cy');
+    expect(sent[1]!.caption).not.toContain('91234567');
+    expect((await peek(`split-${u}`)).flow).toBe('idle');
+  });
+
+  it('leaves the leftover out when asked: the organiser covers it', async () => {
+    const u = uid++;
+    const b = bot();
+    await toPayee(b, u, 'Ann 40\nBob 40');
+    expect(stub.lastText()).toContain('leaves SGD 20.00');
+    await tap(b, u, 'split_leftover:omit');
+    await say(b, u, '91234567');
+    await tap(b, u, 'split_skip_description');
+    expect(stub.lastText()).toContain('Leftover SGD 20.00 left out: you cover it');
+    await tap(b, u, 'split_confirm');
+    expect(qrs()).toHaveLength(1);
+    expect(qrs()[0]!.payload).toContain('540540.00');
+    expect(qrs()[0]!.caption).toContain('Ann, Bob');
+  });
+
+  it('splits the leftover evenly with rounding, and skips the question on an exact sum', async () => {
+    const u = uid++;
+    const b = bot();
+    await toPayee(b, u, 'Ann 30\nBob 30\nCy 30'); // leftover 10.00 over 3 people
+    await tap(b, u, 'split_leftover:even');
+    await say(b, u, '91234567');
+    await tap(b, u, 'split_skip_description');
+    expect(stub.lastText()).toContain('split evenly (SGD 3.34 each)');
+    expect(stub.lastText()).toContain('SGD 0.02 over');
+    await tap(b, u, 'split_confirm');
+    expect(qrs()).toHaveLength(1);
+    expect(qrs()[0]!.payload).toContain('540533.34');
+
+    stub.reset();
+    const v = uid++;
+    await toPayee(b, v, 'Ann 60\nBob 40');
+    expect(stub.lastText()).toContain('Who should be paid'); // no leftover question
+  });
+
+  it('rejects an over-sum, bad lines and repeated names, asking for the whole list again', async () => {
+    const u = uid++;
+    const b = bot();
+    await toPayee(b, u, 'Ann 70\nBob 40');
+    expect(stub.lastText()).toContain('SGD 10.00 over the bill');
+    await say(b, u, 'Ann 10\nBob');
+    expect(stub.lastText()).toContain('"Bob" needs a name');
+    await say(b, u, 'Ann 10\nann 20');
+    expect(stub.lastText()).toContain('listed twice');
+    expect((await peek(`split-${u}`)).step).toBe(4);
+  });
+
+  it('/split_custom skips the mode question, in a private chat and in a group', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/split_custom');
+    await say(b, u, 'abc');
+    expect(stub.lastText()).toContain('positive amount');
+    await say(b, u, '100');
+    expect(stub.lastText()).toContain('one person per line');
+    expect(buttons()).toBeUndefined();
+
+    // restarting discards the earlier answers
+    await say(b, u, '/split_custom');
+    expect(stub.lastText()).toContain('How much is the bill');
+    expect((await peek(`split-${u}`)).step).toBe(1);
+
+    const chat = -uid++;
+    const owner = uid++;
+    const other = uid++;
+    await gsay(b, chat, owner, '/split_custom');
+    expect(stub.sentMessages.at(-1)!.replyMarkup).toMatchObject({ force_reply: true });
+    await gsay(b, chat, owner, '60');
+    expect(stub.lastText()).toContain('one person per line');
+    stub.reset();
+    await gsay(b, chat, other, 'Eve 60');
+    expect(stub.sentMessages).toHaveLength(0);
+    await gsay(b, chat, owner, 'Ann 30\nBob 30');
+    expect(stub.lastText()).toContain('Who should be paid');
+  });
+
+  it('stops and reports counts when a send fails part way', async () => {
+    const u = uid++;
+    let photos = 0;
+    const b = createSplitBot(env, 'split-token', {
+      botInfo: TEST_BOT_INFO,
+      client: {
+        fetch: async (url, init) =>
+          String(url).endsWith('/sendPhoto') && ++photos === 2
+            ? new Response(
+                JSON.stringify({ ok: false, error_code: 429, description: 'slow down' }),
+                {
+                  status: 429,
+                }
+              )
+            : stub.fetch(url, init),
+      },
+    });
+    await toPayee(b, u, 'Ann 40\nBob 30\nCy 30');
+    await say(b, u, '91234567');
+    await tap(b, u, 'split_skip_description');
+    stub.reset();
+    await tap(b, u, 'split_confirm');
+    expect(stub.sentPhotos).toHaveLength(1);
+    expect(stub.lastText()).toContain('Sent 1 of 2 QRs');
+    expect(stub.lastText()).not.toContain('91234567');
   });
 });
 
@@ -255,7 +404,9 @@ describe('POST /webhook/split', () => {
       {} as ExecutionContext
     );
   it('is 404 until configured, 403 on a wrong secret', async () => {
-    expect((await post({})).status).toBe(404);
+    // .dev.vars may define these locally, so blank them for the unconfigured case
+    const off = { SPLIT_BOT_TOKEN: undefined, SPLIT_WEBHOOK_SECRET: undefined };
+    expect((await post(off)).status).toBe(404);
     const on = { SPLIT_BOT_TOKEN: 't', SPLIT_WEBHOOK_SECRET: 's' };
     expect((await post(on, 'wrong')).status).toBe(403);
     expect((await post(on)).status).toBe(403);

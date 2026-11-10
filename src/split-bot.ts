@@ -25,6 +25,7 @@ export function createSplitBot(env: Env, token: string, config?: BotConfig<Conte
   });
 
   bot.command('split', (ctx) => handler(ctx).start(ctx));
+  bot.command('split_custom', (ctx) => handler(ctx).start(ctx, 'custom'));
   bot.command('start', async (ctx) => {
     if (ctx.chat.type === 'private') await handler(ctx).start(ctx);
   });
