@@ -325,7 +325,7 @@ export class SplitCommandHandler {
         buttons ? { reply_markup: buttons } : undefined
       );
     };
-    await ctx.replyWithChatAction('typing').catch(() => undefined);
+    await ctx.reply('Reading your receipt… this takes a few seconds.');
     // The photo lives in memory for these calls and is never logged. Only the failed step and
     // the error's own message (never receipt data) go to the Worker log, so a failure can be traced.
     const note = (stage: string, error: unknown) =>
