@@ -467,6 +467,23 @@ export function groupTextUpdate(
   return { update_id: updateId, message } as Update;
 }
 
+/** A photo message (the file id stands in for the picture); private when chat and user are the same. */
+export function photoUpdate(chatId: number, userId: number, fileId: string, updateId = 1): Update {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: chatId, type: chatId === userId ? 'private' : 'group' },
+      from: { id: userId, is_bot: false, first_name: 'Test User' },
+      photo: [
+        { file_id: `${fileId}-small`, file_unique_id: 'a', width: 90, height: 90 },
+        { file_id: fileId, file_unique_id: 'b', width: 1280, height: 1280 },
+      ],
+    },
+  } as unknown as Update;
+}
+
 /** An edit of the text of an earlier message (private chat, or a group when `chatId` differs from the user). */
 export function editedTextUpdate(
   chatId: number,
