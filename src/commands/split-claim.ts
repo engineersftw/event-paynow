@@ -1,12 +1,31 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
 import { CLAIM_TTL_MS, type Claim, type SplitDirectory } from '../db/split-repository';
+import {
+  SPLIT_CLAIM_COLLECTED,
+  SPLIT_QR_DM,
+  sgDay,
+  type UsageCounter,
+} from '../db/usage-repository';
 import { formatCents } from '../sgqr/amount';
 import { renderQrPng } from '../sgqr/qr-render';
 
 /** Waiting QRs: a mentioned person the bot could not message yet gets a "Get my QR" button. */
 
 const sgd = (cents: number) => `SGD ${formatCents(cents)}`;
+
+/** Add one to each metric for today. Best effort: counting must never affect the user, and logs nothing. */
+export async function countAll(counter: UsageCounter | undefined, metrics: string[]) {
+  if (!counter) return;
+  const day = sgDay();
+  for (const metric of metrics) {
+    try {
+      await counter.increment(metric, day);
+    } catch {
+      // swallowed on purpose
+    }
+  }
+}
 
 /** The text under a QR sent by direct message, and the lines drawn on the image. */
 export function directMessage(organiser: string, cents: number, description: string | null) {
@@ -70,7 +89,8 @@ export async function collectClaim(
   ctx: Context,
   directory: SplitDirectory,
   token: string,
-  botUsername: string | undefined
+  botUsername: string | undefined,
+  counter?: UsageCounter
 ): Promise<void> {
   const from = ctx.from;
   if (!from) return;
@@ -100,6 +120,7 @@ export async function collectClaim(
     await ctx.reply('Could not make the QR. Ask the organiser to send /split again.');
     return;
   }
+  await countAll(counter, [SPLIT_CLAIM_COLLECTED, SPLIT_QR_DM]);
   if (from.username) await directory.saveContact(from.username.toLowerCase(), from.id);
   if (claim.messageId !== null) {
     const left = await directory.claimsForMessage(claim.chatId, claim.messageId);

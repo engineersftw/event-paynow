@@ -2,7 +2,10 @@ import type { Api, BotConfig, Context } from 'grammy';
 import { Bot } from 'grammy';
 import { collectClaim } from './commands/split-claim';
 import { SPLIT_HELP, SplitCommandHandler } from './commands/split-handler';
+import { formatSplitStats } from './commands/split-stats-handler';
+import { parseUserIds } from './commands/stats-handler';
 import { D1SplitDirectory } from './db/split-repository';
+import { D1UsageRepository } from './db/usage-repository';
 import type { Env } from './env';
 import {
   DEFAULT_RECEIPT_MODEL,
@@ -41,6 +44,7 @@ export function createSplitBot(
   const bot = new Bot(token, config);
 
   const directory = new D1SplitDirectory(env.paynow_db);
+  const usage = new D1UsageRepository(env.paynow_db); // anonymous daily counts only
   const reader =
     deps.reader ??
     (env.AI
@@ -57,7 +61,8 @@ export function createSplitBot(
       stub as unknown as ConversationDO,
       directory,
       env.SPLIT_BOT_USERNAME,
-      { ...(reader ? { reader } : {}), download }
+      { ...(reader ? { reader } : {}), download },
+      usage
     );
   };
 
@@ -75,10 +80,23 @@ export function createSplitBot(
     if (ctx.from?.username)
       await directory.saveContact(ctx.from.username.toLowerCase(), ctx.from.id);
     if (ctx.match.startsWith('claim_')) {
-      await collectClaim(ctx, directory, ctx.match.slice('claim_'.length), env.SPLIT_BOT_USERNAME);
+      await collectClaim(
+        ctx,
+        directory,
+        ctx.match.slice('claim_'.length),
+        env.SPLIT_BOT_USERNAME,
+        usage
+      );
     } else {
       await handler(ctx).start(ctx);
     }
+  });
+  // Hidden (not in /help or the BotFather list): usage numbers for the ids in STATS_USER_IDS, the same
+  // list as Event PayNow Bot's /stats, private chats only. Anyone else gets no reply at all.
+  bot.command('stats', async (ctx) => {
+    if (ctx.chat.type !== 'private' || !ctx.from) return;
+    if (!parseUserIds(env.STATS_USER_IDS).has(ctx.from.id)) return;
+    await ctx.reply(formatSplitStats(await usage.splitSnapshot()));
   });
   bot.command('forget', async (ctx) => {
     if (ctx.chat.type !== 'private' || !ctx.from) {
