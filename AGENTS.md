@@ -104,7 +104,7 @@ This project uses OpenSpec for change management. All changes are archived:
 39. `add-split-amend` (12 tasks) — archived 2026-11-10
 40. `add-split-mentions` (12 tasks) — archived 2026-11-10
 41. `add-split-receipt-scan` (12 tasks) — archived 2026-11-10
-42. `add-split-receipt-unassigned` (8 tasks) — in progress
+42. `add-split-receipt-unassigned` (8 tasks) — archived 2026-11-10
 
 **Workflow commands:**
 
