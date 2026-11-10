@@ -5,20 +5,32 @@ import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
 import { renderQrPng } from '../sgqr/qr-render';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
-import { parsePeople, splitEqually } from './split-math';
+import {
+  applyLeftover,
+  groupByAmount,
+  parseCustomList,
+  parsePeople,
+  type SplitEntry,
+  splitEqually,
+  sumCents,
+} from './split-math';
 
 /** Steps of the `split` flow. */
 const TOTAL = 1;
-const PEOPLE = 2;
-const PAYEE = 3;
-const DESCRIPTION = 4;
-const CONFIRM = 5; // summary with Confirm / Cancel; the QR is made only after Confirm
+const MODE = 2; // Equally or Custom amounts (skipped by /split_custom)
+const PEOPLE = 3; // equal split only
+const LIST = 4; // custom split only: names and amounts
+const LEFTOVER = 5; // custom split only, when the list is short of the bill
+const PAYEE = 6;
+const DESCRIPTION = 7;
+const CONFIRM = 8; // summary with Confirm / Cancel; the QR is made only after Confirm
 
 const MAX_DESCRIPTION = 25;
 
 export const SPLIT_HELP =
   'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
-  '/split - total, number of people, payee, optional description\n' +
+  '/split - total, then equal or custom amounts, payee, optional description\n' +
+  '/split_custom - same, straight to custom amounts (one line per person: name and amount)\n' +
   '/cancel - stop\n\n' +
   'In a group, reply to my questions and I offer the group size as the number of people. ' +
   'The QR never shows the payee number. In a group the payee number you type stays in the chat ' +
@@ -28,23 +40,46 @@ const isGroup = (ctx: Context) => ctx.chat?.type !== 'private';
 const topicOf = (ctx: Context) =>
   ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id ?? 0;
 
+const sgd = (cents: number) => `SGD ${formatCents(cents)}`;
+
 /** Everything entered, for the confirmation step. A group summary hides all but 4 of the payee. */
 function summary(c: Record<string, unknown>, group: boolean): string {
   const total = c.totalCents as number;
-  const people = c.people as number;
-  const { shareCents, collectedCents, overCents } = splitEqually(total, people);
   const value = c.payeeValue as string;
   const lines = [
     'Please check the split:',
     '',
     `Payee: ${c.payeeType === 'uen' ? 'UEN' : 'Mobile'} ${group ? `…${value.slice(-4)}` : value}`,
-    `Bill: SGD ${formatCents(total)} between ${people} people`,
-    `Each share: SGD ${formatCents(shareCents)} (everyone else pays you this)`,
   ];
-  if (overCents > 0) {
+  const listed = c.entries as SplitEntry[] | undefined;
+  if (listed) {
+    const r = applyLeftover(listed, total, (c.leftover as 'even' | 'omit' | undefined) ?? 'omit');
+    lines.push(`Bill: ${sgd(total)} shared by ${listed.length} people`);
+    for (const e of r.entries) lines.push(`${e.name}: ${sgd(e.cents)}`);
+    if (r.leftoverCents > 0) {
+      lines.push(
+        r.extraCents > 0
+          ? `Leftover ${sgd(r.leftoverCents)} split evenly (${sgd(r.extraCents)} each)`
+          : `Leftover ${sgd(r.leftoverCents)} left out: you cover it`
+      );
+    }
+    if (r.overCents > 0) {
+      lines.push(
+        `Amounts add up to ${sgd(total + r.overCents)}, ${sgd(r.overCents)} over, from rounding up`
+      );
+    }
+  } else {
+    const people = c.people as number;
+    const { shareCents, collectedCents, overCents } = splitEqually(total, people);
     lines.push(
-      `Shares add up to SGD ${formatCents(collectedCents)}, SGD ${formatCents(overCents)} over, from rounding up`
+      `Bill: ${sgd(total)} between ${people} people`,
+      `Each share: ${sgd(shareCents)} (everyone else pays you this)`
     );
+    if (overCents > 0) {
+      lines.push(
+        `Shares add up to ${sgd(collectedCents)}, ${sgd(overCents)} over, from rounding up`
+      );
+    }
   }
   lines.push(`Description: ${(c.description as string | undefined) ?? 'none'}`);
   return lines.join('\n');
@@ -58,9 +93,10 @@ function summary(c: Record<string, unknown>, group: boolean): string {
 export class SplitCommandHandler {
   constructor(private readonly conversationDO: ConversationDO) {}
 
-  async start(ctx: Context): Promise<void> {
+  /** `/split_custom` passes 'custom': after the total it goes straight to the list. */
+  async start(ctx: Context, mode?: 'custom'): Promise<void> {
     if (!ctx.from) return;
-    await this.setState({ flow: 'split', step: TOTAL, context: {} });
+    await this.setState({ flow: 'split', step: TOTAL, context: mode ? { mode } : {} });
     await this.fetch('/owner', { userId: ctx.from.id, topicId: topicOf(ctx) });
     await this.ask(ctx, 'How much is the bill in total, in SGD (e.g. 187.40)?');
   }
@@ -88,7 +124,47 @@ export class SplitCommandHandler {
         await ctx.reply('Send a positive amount with up to 2 decimals, e.g. 187.40.');
         return true;
       }
-      await this.askPeople(ctx, state, total);
+      if (state.context.mode === 'custom') await this.askList(ctx, state, total);
+      else await this.askMode(ctx, state, total);
+      return true;
+    }
+
+    if (state.step === MODE || state.step === LEFTOVER) {
+      await ctx.reply('Please tap one of the buttons above (or /cancel).');
+      return true;
+    }
+
+    if (state.step === LIST) {
+      const list = parseCustomList(text);
+      if (!list.ok) {
+        await ctx.reply(`${list.error} Send the whole list again, one person per line.`);
+        return true;
+      }
+      const total = state.context.totalCents as number;
+      const sum = sumCents(list.entries);
+      if (sum > total) {
+        await ctx.reply(
+          `That list adds up to ${sgd(sum)}, which is ${sgd(sum - total)} over the bill of ${sgd(total)}. Send the whole list again.`
+        );
+        return true;
+      }
+      if (sum === total) {
+        await this.askPayee(ctx, state, { entries: list.entries });
+        return true;
+      }
+      await this.setState({
+        flow: 'split',
+        step: LEFTOVER,
+        context: { ...state.context, entries: list.entries },
+      });
+      await ctx.reply(
+        `The list adds up to ${sgd(sum)}, which leaves ${sgd(total - sum)} of the ${sgd(total)} bill. What should happen to it?`,
+        {
+          reply_markup: new InlineKeyboard()
+            .text('Split it evenly', 'split_leftover:even')
+            .text('Leave it out', 'split_leftover:omit'),
+        }
+      );
       return true;
     }
 
@@ -98,7 +174,7 @@ export class SplitCommandHandler {
         await ctx.reply('Send a whole number of people from 2 to 100.');
         return true;
       }
-      await this.askPayee(ctx, state, people);
+      await this.askPayee(ctx, state, { people });
       return true;
     }
 
@@ -155,23 +231,33 @@ export class SplitCommandHandler {
       return true;
     }
     const step = state.flow === 'split' ? state.step : 0;
-    const expected = data.startsWith('split_people:')
-      ? PEOPLE
-      : data === 'split_skip_description'
-        ? DESCRIPTION
-        : data === 'split_confirm' || data === 'split_cancel'
-          ? CONFIRM
-          : -1;
+    const expected = data.startsWith('split_mode:')
+      ? MODE
+      : data.startsWith('split_people:')
+        ? PEOPLE
+        : data.startsWith('split_leftover:')
+          ? LEFTOVER
+          : data === 'split_skip_description'
+            ? DESCRIPTION
+            : data === 'split_confirm' || data === 'split_cancel'
+              ? CONFIRM
+              : -1;
     if (step !== expected) {
       await ctx.answerCallbackQuery({ text: 'That step is over.' });
       return true;
     }
     await ctx.answerCallbackQuery();
 
-    if (data.startsWith('split_people:')) {
+    if (data.startsWith('split_mode:')) {
+      const total = state.context.totalCents as number;
+      if (data === 'split_mode:custom') await this.askList(ctx, state, total);
+      else await this.askPeople(ctx, state, total);
+    } else if (data.startsWith('split_leftover:')) {
+      await this.askPayee(ctx, state, { leftover: data.endsWith(':even') ? 'even' : 'omit' });
+    } else if (data.startsWith('split_people:')) {
       const n = Number(data.slice('split_people:'.length));
       // Only the number we offered (a stale or odd tap changes nothing)
-      if (n === state.context.suggested) await this.askPayee(ctx, state, n);
+      if (n === state.context.suggested) await this.askPayee(ctx, state, { people: n });
     } else if (data === 'split_skip_description') {
       await this.askConfirm(ctx, state, undefined);
     } else if (data === 'split_confirm') {
@@ -195,6 +281,23 @@ export class SplitCommandHandler {
     } else {
       await ctx.reply(text);
     }
+  }
+
+  private async askMode(ctx: Context, state: ConversationState, totalCents: number) {
+    await this.setState({ flow: 'split', step: MODE, context: { ...state.context, totalCents } });
+    await ctx.reply(`Bill: ${sgd(totalCents)}. How do you want to split it?`, {
+      reply_markup: new InlineKeyboard()
+        .text('Equally', 'split_mode:equal')
+        .text('Custom amounts', 'split_mode:custom'),
+    });
+  }
+
+  private async askList(ctx: Context, state: ConversationState, totalCents: number) {
+    await this.setState({ flow: 'split', step: LIST, context: { ...state.context, totalCents } });
+    await this.ask(
+      ctx,
+      `Bill: ${sgd(totalCents)}. Send who owes what, one person per line: a name, then an amount. Leave yourself out.\n\nAnn 40\nBob 25.50\n\n(Up to 20 people.)`
+    );
   }
 
   private async askPeople(ctx: Context, state: ConversationState, totalCents: number) {
@@ -221,11 +324,11 @@ export class SplitCommandHandler {
     );
   }
 
-  private async askPayee(ctx: Context, state: ConversationState, people: number) {
+  private async askPayee(ctx: Context, state: ConversationState, extra: Record<string, unknown>) {
     await this.setState({
       flow: 'split',
       step: PAYEE,
-      context: { ...state.context, people },
+      context: { ...state.context, ...extra },
     });
     await this.ask(ctx, 'Who should be paid? Send a Singapore mobile number or a UEN.');
   }
@@ -266,28 +369,46 @@ export class SplitCommandHandler {
     await this.dropButtons(ctx);
     const c = state.context;
     const description = c.description as string | undefined;
-    const people = c.people as number;
-    const { shareCents } = splitEqually(c.totalCents as number, people);
+    const caution = 'Scan with your banking app. Check the payee name before you pay.';
 
+    // One QR per distinct amount (an equal split has exactly one)
+    const total = c.totalCents as number;
+    const listed = c.entries as SplitEntry[] | undefined;
+    const jobs = listed
+      ? groupByAmount(
+          applyLeftover(listed, total, (c.leftover as 'even' | 'omit' | undefined) ?? 'omit')
+            .entries
+        ).map((g) => ({ cents: g.cents, lines: [sgd(g.cents), g.names.join(', ')] }))
+      : (() => {
+          const people = c.people as number;
+          const share = splitEqually(total, people).shareCents;
+          return [{ cents: share, lines: [`${sgd(share)} each (split ${people} ways)`] }];
+        })();
+
+    let sent = 0;
     try {
-      const payload = buildPayNowPayload({
-        proxyType: c.payeeType as 'mobile' | 'uen',
-        proxyValue: c.payeeValue as string,
-        amountCents: shareCents,
-        editable: false,
-        ...(description ? { description } : {}),
-      });
-      const lines = [
-        ...(description ? [description] : []),
-        `SGD ${formatCents(shareCents)} each (split ${people} ways)`,
-      ];
-      const image = await renderQrPng(payload, lines);
-      await ctx.replyWithPhoto(new InputFile(image, 'paynow-qr.bmp'), {
-        caption: `${lines.join('\n')}\n\nScan with your banking app. Check the payee name before you pay. Send /split for another.`,
-      });
+      for (const job of jobs) {
+        const payload = buildPayNowPayload({
+          proxyType: c.payeeType as 'mobile' | 'uen',
+          proxyValue: c.payeeValue as string,
+          amountCents: job.cents,
+          editable: false,
+          ...(description ? { description } : {}),
+        });
+        const lines = [...(description ? [description] : []), ...job.lines];
+        const image = await renderQrPng(payload, lines);
+        await ctx.replyWithPhoto(new InputFile(image, 'paynow-qr.bmp'), {
+          caption: `${lines.join('\n')}\n\n${caution} Send /split for another.`,
+        });
+        sent++;
+      }
     } catch {
       // No console logging: the answers include a payee number
-      await ctx.reply('Could not make the QR. Please send /split to try again.');
+      await ctx.reply(
+        jobs.length === 1
+          ? 'Could not make the QR. Please send /split to try again.'
+          : `Sent ${sent} of ${jobs.length} QRs; the other ${jobs.length - sent} could not be sent. Please send /split to try again.`
+      );
     }
   }
 
