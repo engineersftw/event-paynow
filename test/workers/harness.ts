@@ -118,6 +118,7 @@ export const TEST_BOT_INFO = {
 
 export interface CapturedSend {
   chatId: string;
+  messageId?: number;
   text: string;
   replyMarkup?: Record<string, unknown>;
   parseMode?: string;
@@ -246,6 +247,11 @@ export class TelegramStub {
     this.otherCalls = [];
   }
 
+  /** Id of the most recent message the stub handed out (survives `reset`). */
+  lastMessageId(): number {
+    return this.messageId;
+  }
+
   /** Last captured sendMessage text (convenience for step assertions). */
   lastText(): string {
     return this.sentMessages[this.sentMessages.length - 1]?.text ?? '';
@@ -262,13 +268,14 @@ export class TelegramStub {
         parse_mode?: string;
         reply_markup?: Record<string, unknown>;
       };
+      this.messageId += 1;
       this.sentMessages.push({
         chatId: String(body.chat_id),
+        messageId: this.messageId,
         text: body.text,
         replyMarkup: body.reply_markup,
         parseMode: body.parse_mode,
       });
-      this.messageId += 1;
       return this.ok(this.message(this.messageId, String(body.chat_id)));
     }
 
@@ -426,6 +433,27 @@ export function groupTextUpdate(
     message.entities = [{ type: 'bot_command', offset: 0, length: text.split(' ')[0]!.length }];
   }
   return { update_id: updateId, message } as Update;
+}
+
+/** An edit of the text of an earlier message (private chat, or a group when `chatId` differs from the user). */
+export function editedTextUpdate(
+  chatId: number,
+  userId: number,
+  messageId: number,
+  text: string,
+  updateId = 1
+): Update {
+  return {
+    update_id: updateId,
+    edited_message: {
+      message_id: messageId,
+      date: Math.floor(Date.now() / 1000),
+      edit_date: Math.floor(Date.now() / 1000),
+      chat: { id: chatId, type: chatId === userId ? 'private' : 'group' },
+      from: { id: userId, is_bot: false, first_name: `User${userId}` },
+      text,
+    },
+  } as Update;
 }
 
 /** Callback-query update (inline button press) on a message in the chat. */

@@ -24,7 +24,7 @@ See `docs/architecture.md` for full details. Key components:
 - `scripts/explainer/` — `npm run video` renders the explainer video into the gitignored `out/explainer/` (scenes page + `captions.json`; frames piped to ffmpeg; Playwright + ffmpeg required, run by hand, never in CI; the CC0 music slice is described in `music.json`, fetched into `out/` and mixed in, `--silent` skips it)
 - `src/commands/stats-handler.ts` + `src/db/usage-repository.ts` — the hidden `/stats` command (private chats, Telegram ids listed in the `STATS_USER_IDS` secret; silent for everyone else) and its read-only usage queries
 - `src/simple-bot.ts` + `src/commands/simple-handler.ts` — Simple_PayNow_Bot (QR-only; stores no payee, amount, description or identity, only anonymous daily counts in `usage_counters` via `src/db/usage-repository.ts`), `POST /webhook/simple` with `SIMPLE_BOT_TOKEN` / `SIMPLE_WEBHOOK_SECRET` (secrets) and `SIMPLE_BOT_USERNAME` (var); its DO key is `simple-<id>`, flow `simple`; private chats only; ends in a Confirm / Cancel summary before the QR; the route is 404 until configured
-- `src/split-bot.ts` + `src/commands/split-handler.ts` + `src/commands/split-math.ts` — Split_PayNow_Bot (equal split with a QR for one share rounded up to the cent, or custom amounts per person with leftover handling and one QR per distinct amount; commands `/split` and `/split_custom`; stores nothing), `POST /webhook/split` with `SPLIT_BOT_TOKEN` / `SPLIT_WEBHOOK_SECRET` (secrets) and `SPLIT_BOT_USERNAME` (var); DO key `split-<id>`, flow `split`; private chats and groups (group: owner-only answers via the DO owner stamp, force-reply prompts so privacy mode can stay on, member-count button, payee masked and its message deleted if allowed); the route is 404 until configured
+- `src/split-bot.ts` + `src/commands/split-handler.ts` + `src/commands/split-math.ts` — Split_PayNow_Bot (equal split with a QR for one share rounded up to the cent, or custom amounts per person with leftover handling and one QR per distinct amount; commands `/split` and `/split_custom`; stores nothing; every answer goes into the DO context and `nextNeed` decides what is still missing, so the first run, the summary's Amend button and edited answer messages (`edited_message:text`, found through the recorded `answerMsgs`) share the same rules; only the latest summary message can be confirmed), `POST /webhook/split` with `SPLIT_BOT_TOKEN` / `SPLIT_WEBHOOK_SECRET` (secrets) and `SPLIT_BOT_USERNAME` (var); DO key `split-<id>`, flow `split`; private chats and groups (group: owner-only answers via the DO owner stamp, force-reply prompts so privacy mode can stay on, member-count button, payee masked and its message deleted if allowed); the route is 404 until configured
 - `src/sgqr/` — SGQR payload builder (TLV + CRC16, runtime-agnostic)
 - `src/db/schema.ts` — Drizzle table definitions
 - `src/db/repository.ts` — Repository layer (Drizzle queries)
@@ -101,6 +101,7 @@ This project uses OpenSpec for change management. All changes are archived:
 36. `add-event-website-link` (12 tasks) — archived 2026-11-10
 37. `add-bill-split-bot` (11 tasks) — archived 2026-11-10
 38. `add-uneven-bill-split` (11 tasks) — archived 2026-11-10
+39. `add-split-amend` (12 tasks) — archived 2026-11-10
 
 **Workflow commands:**
 
