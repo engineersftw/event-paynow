@@ -107,6 +107,12 @@ describe('parseAssignments', () => {
       expect(a.items).toEqual([[0, 1], [0, 1], [2], []]);
       expect(a.unassigned).toEqual([3]);
     });
+    it('treats a colon after a name, and the case of all, as optional', () => {
+      const same = ['All', 'All:', 'ALL :'].map((h) => assign(`Sam\n1. a\n\n${h}\n2. b`, 2).items);
+      expect(same[0]).toEqual([[0], [0]]);
+      expect(same[1]).toEqual(same[0]);
+      expect(same[2]).toEqual(same[0]);
+    });
     it('shares an item listed under two names', () => {
       const a = assign('Ann\n1. a\nBob\n1. a', 1);
       expect(a.items).toEqual([[0, 1]]);

@@ -338,6 +338,7 @@ function reviewButtons(r: Receipt): InlineKeyboard {
     .text('✅ Use this', 'split_scan:use')
     .row()
     .text('📷 Send another photo', 'split_scan:again')
+    .row()
     .text('Type the total instead', 'split_scan:manual');
 }
 
@@ -432,7 +433,7 @@ export class SplitCommandHandler {
         buttons ? { reply_markup: buttons } : undefined
       );
     };
-    await ctx.reply('Reading your receipt… this takes a few seconds.');
+    const reading = await ctx.reply('Reading your receipt… this takes a few seconds.');
     // The photo lives in memory for these calls and is never logged. Only the failed step and
     // the error's own message (never receipt data) go to the Worker log, so a failure can be traced.
     const note = (stage: string, error: unknown) =>
@@ -466,6 +467,8 @@ export class SplitCommandHandler {
       return;
     }
     await countAll(this.counter, [SPLIT_SCAN_OK]);
+    // The notice has done its job; a failure keeps it, so the failure message has context
+    await ctx.api.deleteMessage(reading.chat.id, reading.message_id).catch(() => undefined);
     await this.showReview(ctx, { ...state.context, scan: { receipt: scan.receipt } });
   }
 
@@ -847,7 +850,7 @@ export class SplitCommandHandler {
       await ctx.reply(items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n'));
       await this.ask(
         ctx,
-        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back:\n\nAnn\n1. …\n\nAll:\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you. If you are the one being paid, your share is not collected; otherwise I send you a QR for it.',
+        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back (a colon after a name is optional):\n\nAnn\n1. …\n\nAll\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you. If you are the one being paid, your share is not collected; otherwise I send you a QR for it.',
         keep()
       );
     } else if (step === PAYEE_ME) {

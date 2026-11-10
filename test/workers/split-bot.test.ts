@@ -947,6 +947,8 @@ describe('Split_PayNow_Bot receipt scan', () => {
     await photo(b, org);
     await tap(b, org, 'split_scan:use');
     expect(stub.lastText()).toContain('put a name above each group');
+    expect(stub.lastText()).toContain('\n\nAll\n2. …');
+    expect(stub.lastText()).toContain('colon after a name is optional');
     await say(b, org, `@ann_${ann}\n1. Chilli crab SGD 30.00\n\nBob\n2. whatever\n\nme\n3. Beer`);
     await say(b, org, '91234567');
     await tap(b, org, 'split_payee:me');
@@ -955,6 +957,27 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(summary).toContain(`@ann_${ann}: SGD 36.00 (by direct message)`);
     expect(summary).toContain('Bob: SGD 12.00');
     expect(summary).toContain('Your own share, not collected: SGD 24.00');
+  });
+
+  it('shows the review as three one-button rows and removes the reading notice after a good scan only', async () => {
+    const org = uid++;
+    const b = receiptBot();
+    await say(b, org, '/split_receipt');
+    await photo(b, org);
+    const rows = (stub.sentMessages.at(-1)!.replyMarkup as { inline_keyboard: unknown[][] })
+      .inline_keyboard;
+    expect(rows.map((r) => r.length)).toEqual([1, 1, 1]);
+    const notice = stub.sentMessages.at(-2)!;
+    expect(notice.text).toContain('Reading your receipt');
+    expect(stub.deletedMessages.map((d) => d.messageId)).toContain(notice.messageId);
+
+    // a failed read keeps the notice
+    stub.deletedMessages = [];
+    scanned = new ReceiptReaderError('model', 'model down');
+    await tap(b, org, 'split_scan:again');
+    await photo(b, org);
+    expect(stub.lastText()).toContain('receipt reader failed (model)');
+    expect(stub.deletedMessages).toEqual([]);
   });
 
   it('Scan again keeps the review, and the payee answer is written into its bubble', async () => {
