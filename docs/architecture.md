@@ -104,6 +104,10 @@
 
 **Key behavior**: Secret validation happens BEFORE bot instantiation to avoid "Empty token" errors in tests. The webhook URL must include the `/webhook` path.
 
+### Split_PayNow_Bot (src/split-bot.ts)
+
+A third bot in the same Worker on `POST /webhook/split` (own token and secret; 404 until configured). `SplitCommandHandler` runs total → number of people → payee → description → confirmation summary in the chat's Durable Object under key `split-<id>` (flow `split`). `splitEqually` (`split-math.ts`) works in integer cents and rounds the share up. It works in private chats and groups: in a group the DO owner stamp (`POST /owner`) restricts answers to the user and topic that sent `/split`, text questions are force-reply prompts (so privacy mode can stay on), `getChatMemberCount` minus the bot is offered as a button, the summary masks the payee and the typed payee message is deleted when the bot may. Confirm claims the state once, then sends a fixed-amount QR for one share. Nothing is stored or logged and no counters are kept.
+
 ### Simple_PayNow_Bot (src/simple-bot.ts)
 
 A second, independent bot in the same Worker on `POST /webhook/simple` (own token and secret; 404 until configured). `SimpleCommandHandler` runs payee → amount → (payer may change the amount?) → description → confirmation summary (Confirm / Cancel) in the chat's Durable Object under key `simple-<id>` (flow `simple`, so it never mixes with the event bot's `chat-<id>`), then, on Confirm, claims the state (exactly once, which also wipes it), builds the payload with `buildPayNowPayload` and sends the QR. It stores no payee, amount, description or identity and logs no answers; after the QR is sent it adds anonymous daily counts to D1 (`usage_counters(day, metric, count)`: `simple_qr` plus one of `simple_amount_skipped|fixed|editable`, upserted atomically, best effort, by Singapore day) that feed `/stats`. Private chats only, payee number never printed on the image or caption.

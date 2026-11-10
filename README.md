@@ -146,6 +146,21 @@ curl -X POST "https://api.telegram.org/bot<SIMPLE_BOT_TOKEN>/setWebhook" \
   -d '{"url":"https://<worker>.<subdomain>.workers.dev/webhook/simple","secret_token":"<SIMPLE_WEBHOOK_SECRET>"}'
 ```
 
+## Split_PayNow_Bot (optional third bot)
+
+A bill splitter served by the same Worker at `POST /webhook/split`. `/split` asks for the bill total, how many people share it, the payee (mobile or UEN) and an optional description (up to 25 characters), shows a summary with Confirm / Cancel, and then sends one PayNow QR for **one share** (fixed amount, equal split). The share is rounded up to the next cent so the payer is never short; the summary shows any small over-collection. In a group it offers the group's member count (minus the bot) as a "Split by N" button; you can always type another number. Only the person who started the split can answer, and each question is a reply prompt, so group privacy mode can stay on. The payee number is never on the QR or caption, and the group summary shows only its last four characters; the bot deletes the message with the number if it may, otherwise the number stays in the group history, so use a private chat if that matters. Nothing is stored (answers sit in the chat's Durable Object under `split-<id>` for at most 10 minutes). Until configured, the route answers 404.
+
+```bash
+# 1. BotFather: /newbot -> Split_PayNow_Bot; commands: split - Split a bill and make a PayNow QR, cancel - Stop, help - How it works
+# 2. Secrets (SPLIT_BOT_USERNAME is a var in wrangler.toml), then redeploy the Worker
+npx wrangler secret put SPLIT_BOT_TOKEN
+npx wrangler secret put SPLIT_WEBHOOK_SECRET       # e.g. openssl rand -hex 16
+# 3. Point the bot at its own route
+curl -X POST "https://api.telegram.org/bot<SPLIT_BOT_TOKEN>/setWebhook" \
+  -H "Content-Type: application/json" \
+  -d '{"url":"https://<worker>.<subdomain>.workers.dev/webhook/split","secret_token":"<SPLIT_WEBHOOK_SECRET>"}'
+```
+
 ## Explainer video
 
 `npm run video` renders a ~76 s, captioned, silent explainer video (Event Organizer chapter, then Attendee chapter) to `out/explainer/` (gitignored, so it is never committed): `explainer.mp4` (1920x1080 H.264), `poster.png`, `captions.srt` (upload it to YouTube for real captions) and `transcript.txt` (for the video description). It needs Playwright's Chromium and ffmpeg and takes about 80 seconds. The scenes are `scripts/explainer/scenes.html` and the caption text is `scripts/explainer/captions.json`; edit them and re-run when the bot changes. A test checks that every command named in the captions is in the bot's `/help` text. All names and the sample QR are fictional.
@@ -269,10 +284,13 @@ src/
 ├── worker.ts              # Fetch handler, routing
 ├── bot.ts                 # grammY bot factory, webhook handler, callback dispatcher
 ├── simple-bot.ts          # Simple_PayNow_Bot factory + /webhook/simple handler
+├── split-bot.ts           # Split_PayNow_Bot factory + /webhook/split handler
 ├── env.ts                 # Cloudflare Workers environment bindings
 ├── index.ts               # Worker entry + ChatSessionDO export
 ├── commands/
 │   ├── simple-handler.ts  # Simple_PayNow_Bot conversation (payee → amount → payer-may-change → description → confirm)
+│   ├── split-handler.ts   # Split_PayNow_Bot conversation (total → people → payee → description → confirm)
+│   ├── split-math.ts      # equal split, rounded up to the cent
 │   ├── init-handler.ts    # /init — create event (name + payee)
 │   ├── start-handler.ts   # /start — create payment QR (event picker → amount → QR)
 │   ├── payments-handler.ts # /payments — list events, drill into payments
@@ -319,7 +337,7 @@ docs/
 └── testing.md             # Testing strategy
 
 openspec/
-├── specs/                 # Main specs (17 capabilities)
+├── specs/                 # Main specs (18 capabilities)
 └── changes/archive/       # Archived changes
 ```
 
