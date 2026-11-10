@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyUnassigned,
+  assignmentFromClaims,
+  claimerName,
   MAX_ITEMS,
   missingCents,
   parseAddedItems,
@@ -404,5 +406,53 @@ describe('parseAddedItems', () => {
     expect(parseAddedItems('A 1', MAX_ITEMS).ok).toBe(false);
     expect(parseAddedItems('A 1\nB 2', MAX_ITEMS - 1).ok).toBe(false);
     expect(parseAddedItems('A 1', MAX_ITEMS - 1).ok).toBe(true);
+  });
+});
+
+describe('claims', () => {
+  const claimers = [
+    { id: 1, name: 'Ann' },
+    { id: 2, name: 'Bob', username: 'Bob_B' },
+    { id: 9, name: 'Org' },
+  ];
+  const items = [
+    { name: 'Crab', cents: 3000 },
+    { name: 'Rice', cents: 1000 },
+    { name: 'Beer', cents: 2000 },
+  ];
+  const receipt = { items, serviceCents: 0, gstCents: 0, discountCents: 0, totalCents: 6000 };
+
+  it('builds people, shared items and the organiser as me', () => {
+    const a = assignmentFromClaims(3, { '0': [1, 2], '1': [2], '2': [9] }, claimers, 9);
+    expect(a.people.map((p) => p.name)).toEqual(['Ann', 'Bob', 'me']);
+    expect(a.people[1]).toMatchObject({ userId: 2, username: 'bob_b' });
+    expect(a.people[2]!.isMe).toBe(true);
+    expect(a.items).toEqual([[0, 1], [1], [2]]);
+    expect(a.unassigned).toEqual([]);
+  });
+
+  it('lists unclaimed items, and they can go to the organiser or be shared', () => {
+    const a = assignmentFromClaims(3, { '0': [1] }, claimers.slice(0, 2), 9);
+    expect(a.unassigned).toEqual([1, 2]);
+    expect(applyUnassigned(a, 'me').people.at(-1)!.isMe).toBe(true);
+    expect(applyUnassigned(a, 'even').items).toEqual([[0], [0, 1], [0, 1]]);
+  });
+
+  it('gives the same amounts as the typed assignment for the same people', () => {
+    const typed = parseAssignments('1 Ann, Bob\n2 Bob\n3 me', 3);
+    if (!typed.ok) throw new Error(typed.error);
+    const claimed = assignmentFromClaims(3, { '0': [1, 2], '1': [2], '2': [9] }, claimers, 9);
+    const sum = (a: typeof claimed) =>
+      shareReceipt(receipt.items, a, receipt.totalCents).shares.map((s) => s.cents);
+    expect(sum(claimed)).toEqual(sum(typed));
+  });
+
+  it('shows different names for claimers who share a first name', () => {
+    expect(claimerName([], { first_name: 'Ann' })).toBe('Ann');
+    expect(claimerName(['Ann'], { first_name: 'Ann', last_name: 'Lee' })).toBe('Ann L.');
+    expect(
+      claimerName(['Ann', 'Ann L.'], { first_name: 'Ann', last_name: 'Lim', username: 'al' })
+    ).toBe('@al');
+    expect(claimerName(['ann', 'Ann 2'], { first_name: 'Ann' })).toBe('Ann 3');
   });
 });

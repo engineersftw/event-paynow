@@ -195,6 +195,58 @@ describe('ConversationDO', () => {
     });
   });
 
+  describe('revision check and idle limit', () => {
+    const post = (body: unknown) =>
+      conversationDO.fetch(
+        new Request('http://localhost/state', { method: 'POST', body: JSON.stringify(body) })
+      );
+    const read = async () =>
+      (await (await conversationDO.fetch(new Request('http://localhost/state'))).json()) as {
+        rev?: number;
+        context: Record<string, unknown>;
+      };
+
+    it('accepts a write that expects the current revision and refuses a stale one', async () => {
+      await post({ flow: 'split', step: 1, context: { n: 1 } });
+      const first = await read();
+      expect(first.rev).toBe(1);
+
+      expect((await post({ flow: 'split', step: 1, context: { n: 2 }, ifRev: 1 })).status).toBe(
+        200
+      );
+      // the same expectation again is now stale: nothing is written
+      const stale = await post({ flow: 'split', step: 1, context: { n: 3 }, ifRev: 1 });
+      expect(stale.status).toBe(409);
+      const after = await read();
+      expect(after.context.n).toBe(2);
+      expect(after.rev).toBe(2);
+    });
+
+    it('keeps a conversation with a one hour limit past ten minutes and expires it after the hour', async () => {
+      const at = (minutes: number): ConversationState => ({
+        flow: 'split',
+        step: 17,
+        context: {},
+        idleMs: 60 * 60 * 1000,
+        lastActivity: new Date(Date.now() - minutes * 60 * 1000).toISOString(),
+      });
+      await conversationDO.state.storage.put('conversation', JSON.stringify(at(30)));
+      await conversationDO.alarm();
+      expect(await conversationDO.state.storage.get('conversation')).toBeDefined();
+
+      await conversationDO.state.storage.put('conversation', JSON.stringify(at(61)));
+      await conversationDO.alarm();
+      expect(await conversationDO.state.storage.get('conversation')).toBeUndefined();
+    });
+
+    it('schedules the alarm one hour ahead for such a conversation', async () => {
+      await post({ flow: 'split', step: 17, context: {}, idleMs: 60 * 60 * 1000 });
+      await read();
+      const alarm = (await conversationDO.state.storage.getAlarm())!;
+      expect(alarm).toBeGreaterThan(Date.now() + 59 * 60 * 1000);
+    });
+  });
+
   describe('alarm handling', () => {
     it('should schedule alarm after state access', async () => {
       const request = new Request('http://localhost/state', { method: 'GET' });
