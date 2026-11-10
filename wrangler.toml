@@ -25,9 +25,9 @@ new_sqlite_classes = ["ChatSessionDO"]
 BOT_USERNAME = "event_paynow_bot"
 SIMPLE_BOT_USERNAME = "Simple_PayNow_Bot"
 SPLIT_BOT_USERNAME = "Split_PayNow_Bot"
-# Vision model for Split_PayNow_Bot receipt scans (Workers AI). Llama 3.2 vision asks for a one-time licence
-# acceptance, which the bot sends itself on the first scan.
-RECEIPT_MODEL = "@cf/meta/llama-3.2-11b-vision-instruct"
+# Vision model for Split_PayNow_Bot receipt scans (Workers AI). Llama 4 Scout read a real 10-item receipt
+# completely in every test run (about 8 s, 70 neurons a scan); Llama 3.2 11B missed one or two items every time.
+RECEIPT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
 # WEB_ADMIN_URL = "https://event-paynow-web.pages.dev"  # set after creating the Pages project
 
 # Set via `wrangler secret put TELEGRAM_BOT_TOKEN`

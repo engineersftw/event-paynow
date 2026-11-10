@@ -151,7 +151,12 @@ describe('shareReceipt', () => {
   });
 });
 
-import { extractJson, toDataUrl, WorkersAiReceiptReader } from '../../src/receipt-reader';
+import {
+  DEFAULT_RECEIPT_MODEL,
+  extractJson,
+  toDataUrl,
+  WorkersAiReceiptReader,
+} from '../../src/receipt-reader';
 
 describe('receipt reader', () => {
   it('pulls the JSON out of a chatty reply or a code fence', () => {
@@ -183,6 +188,9 @@ describe('receipt reader', () => {
     const reader = new WorkersAiReceiptReader(ai);
     expect(await reader.read(new Uint8Array([1, 2, 3]))).toEqual({ total: 12.5, items: [] });
     expect(calls.map((c) => c.input.prompt ?? 'scan')).toEqual(['scan', 'agree', 'scan']);
+    // the default is the model that read a real 10-item receipt completely in live tests
+    expect(DEFAULT_RECEIPT_MODEL).toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
+    expect(calls.every((c) => c.model === DEFAULT_RECEIPT_MODEL)).toBe(true);
     // the photo travels as an image part of the user message (the `image` field is refused live)
     const part = (
       calls[0]!.input.messages as Array<{ content: Array<Record<string, unknown>> }>
