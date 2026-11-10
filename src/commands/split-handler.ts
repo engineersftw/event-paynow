@@ -3,7 +3,7 @@ import { InlineKeyboard, InputFile } from 'grammy';
 import type { Message } from 'grammy/types';
 import { detectProxyType } from '../db/proxy-validation';
 import type { SplitDirectory } from '../db/split-repository';
-import type { ReceiptReader } from '../receipt-reader';
+import { type ReceiptReader, ReceiptReaderError } from '../receipt-reader';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
 import { renderQrPng } from '../sgqr/qr-render';
@@ -326,14 +326,34 @@ export class SplitCommandHandler {
       );
     };
     await ctx.replyWithChatAction('typing').catch(() => undefined);
-    let scan: ReturnType<typeof parseScan>;
+    // The photo lives in memory for these calls and is never logged. Only the failed step and
+    // the error's own message (never receipt data) go to the Worker log, so a failure can be traced.
+    const note = (stage: string, error: unknown) =>
+      console.error(
+        `split receipt ${stage} failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`
+      );
+    let bytes: Uint8Array;
     try {
-      // The photo lives in memory for this one call and is never logged
-      scan = parseScan(await reader.read(await download(ctx.api, photo.file_id)));
-    } catch {
-      await failed('I could not read that photo.');
+      bytes = await download(ctx.api, photo.file_id);
+    } catch (error) {
+      note('download', error);
+      await failed('I could not download that photo (download).');
       return;
     }
+    let raw: unknown;
+    try {
+      raw = await reader.read(bytes);
+    } catch (error) {
+      const stage = error instanceof ReceiptReaderError ? error.stage : 'model';
+      note(stage, error);
+      await failed(
+        stage === 'reply'
+          ? 'The reader answered, but I could not use its answer (reply).'
+          : 'The receipt reader failed (model).'
+      );
+      return;
+    }
+    const scan = parseScan(raw);
     if (!scan.ok) {
       await failed(scan.error);
       return;

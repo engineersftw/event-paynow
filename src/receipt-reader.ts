@@ -3,6 +3,16 @@
  * The caller (`parseScan`) validates it; this file only gets the photo to the model and the
  * model's answer back. The photo is held in memory for the one call and never logged.
  */
+export class ReceiptReaderError extends Error {
+  constructor(
+    /** `model`: the AI call failed. `reply`: it answered, but not with JSON we can use. */
+    readonly stage: 'model' | 'reply',
+    message: string
+  ) {
+    super(message);
+  }
+}
+
 export interface ReceiptReader {
   /** The model's JSON as a value. Throws when the model fails or answers with no JSON. */
   read(image: Uint8Array): Promise<unknown>;
@@ -70,14 +80,22 @@ export class WorkersAiReceiptReader implements ReceiptReader {
         };
     let result: unknown;
     try {
-      result = await this.ai.run(this.model, input);
+      try {
+        result = await this.ai.run(this.model, input);
+      } catch (error) {
+        // Some models need their licence accepted once per account: say "agree", then retry once
+        if (!/agree|licen[cs]e|terms/i.test(String(error))) throw error;
+        await this.ai.run(this.model, { prompt: 'agree' });
+        result = await this.ai.run(this.model, input);
+      }
     } catch (error) {
-      // Some models need their licence accepted once per account: say "agree", then retry once
-      if (!/agree|licen[cs]e|terms/i.test(String(error))) throw error;
-      await this.ai.run(this.model, { prompt: 'agree' });
-      result = await this.ai.run(this.model, input);
+      throw new ReceiptReaderError('model', error instanceof Error ? error.message : String(error));
     }
     const reply = (result as { response?: unknown } | null)?.response ?? result;
-    return extractJson(reply);
+    try {
+      return extractJson(reply);
+    } catch (error) {
+      throw new ReceiptReaderError('reply', error instanceof Error ? error.message : String(error));
+    }
   }
 }

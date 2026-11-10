@@ -3,6 +3,7 @@ import type { Update } from 'grammy/types';
 import jsQR from 'jsqr';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { D1SplitDirectory } from '../../src/db/split-repository';
+import { ReceiptReaderError } from '../../src/receipt-reader';
 import { createSplitBot } from '../../src/split-bot';
 import worker from '../../src/worker';
 import type { ConversationDO } from '../../src/worker/conversation-do';
@@ -902,14 +903,17 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(stub.lastText()).toContain('could not find a total');
     expect(buttons()).toEqual(['split_scan:again', 'split_scan:manual']);
 
-    scanned = new Error('model down');
+    scanned = new ReceiptReaderError('model', 'model down');
     await photo(b, org);
-    expect(stub.lastText()).toContain('could not read that photo');
+    expect(stub.lastText()).toContain('receipt reader failed (model)');
+    scanned = new ReceiptReaderError('reply', 'no JSON in reply');
+    await photo(b, org);
+    expect(stub.lastText()).toContain('could not use its answer (reply)');
 
     // at the total prompt a failed photo just asks again, with no extra buttons
     await say(b, org, '/split');
     await photo(b, org);
-    expect(stub.lastText()).toContain('could not read that photo');
+    expect(stub.lastText()).toContain('(reply)');
     expect(buttons()).toBeUndefined();
   });
 
