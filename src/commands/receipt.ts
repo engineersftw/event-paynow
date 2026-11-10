@@ -113,15 +113,23 @@ export interface Person {
 }
 
 export type Assignment =
-  | { ok: true; people: Person[]; items: number[][] } // items[i] = indices into people
+  | {
+      ok: true;
+      people: Person[];
+      items: number[][]; // items[i] = indices into people; empty when nobody was given item i
+      unassigned: number[]; // zero-based indexes of the items nobody was given
+    }
   | { ok: false; error: string };
+
+export type AssignedOk = Extract<Assignment, { ok: true }>;
 
 const USERNAME = /^@([A-Za-z][A-Za-z0-9_]{4,31})$/;
 const MAX_PEOPLE = 20;
 
 /**
  * "1,3 Ann", "2 Ann, Bob", "4 me", "5 all": item numbers (or ranges), then comma-separated people.
- * `me` is the organiser, `all` is everyone named in the message. Every item exactly once.
+ * `me` is the organiser, `all` is everyone named in the message. An item may not be given twice;
+ * items given to nobody are returned in `unassigned` for the caller to settle.
  */
 export function parseAssignments(
   text: string,
@@ -204,14 +212,27 @@ export function parseAssignments(
       assigned[n - 1] = sharers;
     }
   }
-  const missing = assigned.map((a, i) => (a.length === 0 ? i + 1 : 0)).filter(Boolean);
-  if (missing.length > 0) {
-    return {
-      ok: false,
-      error: `Item ${missing.join(', ')} ${missing.length > 1 ? 'have' : 'has'} nobody.`,
-    };
+  const unassigned = assigned.flatMap((a, i) => (a.length === 0 ? [i] : []));
+  return { ok: true, people, items: assigned, unassigned };
+}
+
+/**
+ * Give the unassigned items to somebody: `me` makes the organiser carry them (counted, not
+ * collected); `even` shares each one equally between everyone named in the message.
+ */
+export function applyUnassigned(a: AssignedOk, choice: 'me' | 'even'): AssignedOk {
+  if (a.unassigned.length === 0) return a;
+  const people = [...a.people];
+  let who: number[];
+  if (choice === 'me') {
+    let me = people.findIndex((p) => p.isMe);
+    if (me < 0) me = people.push({ name: 'me', isMe: true }) - 1;
+    who = [me];
+  } else {
+    who = people.map((_, i) => i);
   }
-  return { ok: true, people, items: assigned };
+  const items = a.items.map((sharers, i) => (a.unassigned.includes(i) ? who : sharers));
+  return { ok: true, people, items, unassigned: [] };
 }
 
 export interface PersonShare {
@@ -229,7 +250,7 @@ export interface PersonShare {
  */
 export function shareReceipt(
   items: ReceiptItem[],
-  assignment: Extract<Assignment, { ok: true }>,
+  assignment: AssignedOk,
   totalCents: number
 ): { shares: PersonShare[]; extrasCents: number } {
   const { people } = assignment;

@@ -931,15 +931,122 @@ describe('Split_PayNow_Bot receipt scan', () => {
     await say(b, org, '/split_receipt');
     await photo(b, org);
     await tap(b, org, 'split_scan:use');
-    await say(b, org, '1 Ann\n2 Bob');
-    expect(stub.lastText()).toContain('Item 3 has nobody');
     await say(b, org, '1 Ann\n2 Ann\n3 me\n3 Bob');
     expect(stub.lastText()).toContain('Item 3 is listed twice');
+    await say(b, org, '9 Ann');
+    expect(stub.lastText()).toContain('There is no item 9');
     await say(b, org, '1 me\n2 me\n3 me');
+    expect(stub.lastText()).toContain('Nobody else owes anything');
+    await say(b, org, '1 me'); // items 2 and 3 are unassigned, but only the organiser is named
     expect(stub.lastText()).toContain('Nobody else owes anything');
     expect((await peek(`split-${org}`)).step).toBe(12);
     await say(b, org, '1,2 Ann\n3 Bob');
     expect(stub.lastText()).toContain('Who should be paid');
+  });
+
+  describe('items nobody was given', () => {
+    async function toGap(b: B, org: number, text = '1 Ann\n3 Bob') {
+      await say(b, org, '/split_receipt');
+      await photo(b, org);
+      await tap(b, org, 'split_scan:use');
+      const id = await sayId(b, org, text);
+      return id;
+    }
+    const finish = async (b: B, org: number) => {
+      await say(b, org, '91234567');
+      await tap(b, org, 'split_skip_description');
+    };
+
+    it('asks, naming the items and their price, and does not guess', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toGap(b, org);
+      expect(stub.lastText()).toContain(
+        'Item 2 (SGD 10.00 before charges) was not given to anyone'
+      );
+      expect(buttons()).toEqual(['split_unassigned:even', 'split_unassigned:me']);
+      expect((await peek(`split-${org}`)).step).toBe(13);
+    });
+
+    it('Split evenly shares the gap between those named', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toGap(b, org);
+      await tap(b, org, 'split_unassigned:even');
+      expect(stub.lastText()).toContain('Who should be paid');
+      await finish(b, org);
+      // item 2 (10.00) is split 5.00 each: Ann 30+5, Bob 20+5, then 12.00 of charges pro rata
+      expect(stub.lastText()).toContain('Ann: SGD 42.00');
+      expect(stub.lastText()).toContain('Bob: SGD 30.00');
+      expect(stub.lastText()).not.toContain('Your own share');
+    });
+
+    it('Leave them out makes the organiser carry the gap, not collected', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toGap(b, org);
+      await tap(b, org, 'split_unassigned:me');
+      await finish(b, org);
+      expect(stub.lastText()).toContain('Ann: SGD 36.00');
+      expect(stub.lastText()).toContain('Bob: SGD 24.00');
+      expect(stub.lastText()).toContain('Your own share, not collected: SGD 12.00');
+    });
+
+    it('lists several items together', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toGap(b, org, '1 Ann');
+      expect(stub.lastText()).toContain('Items 2, 3 (SGD 30.00 before charges) were not given');
+    });
+
+    it('keeps the choice when an edit leaves the same gap, and asks again for a different gap', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      const id = await toGap(b, org);
+      await tap(b, org, 'split_unassigned:me');
+      await finish(b, org);
+      expect(stub.lastText()).toContain('Ann: SGD 36.00');
+
+      // same gap (item 2): the earlier choice applies and a new summary appears
+      await b.handleUpdate(editedTextUpdate(org, org, id, '1 Ann, Bob\n3 Bob', upd++));
+      expect(stub.lastText()).toContain('Please check the split');
+      expect(stub.lastText()).toContain('Ann: SGD 18.00');
+      expect(stub.lastText()).toContain('Bob: SGD 42.00');
+
+      // a different gap (item 1): the bot asks again
+      await b.handleUpdate(editedTextUpdate(org, org, id, '2 Ann\n3 Bob', upd++));
+      expect(stub.lastText()).toContain('Item 1 (SGD 30.00 before charges) was not given');
+      expect(buttons()).toEqual(['split_unassigned:even', 'split_unassigned:me']);
+    });
+
+    it('no question once every item is given, and an old choice is dropped', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      const id = await toGap(b, org);
+      await tap(b, org, 'split_unassigned:even');
+      // the payee question is open, so the edit is simply applied
+      await b.handleUpdate(editedTextUpdate(org, org, id, '1 Ann\n2 Ann\n3 Bob', upd++));
+      expect(stub.lastText()).toBe('Updated.');
+      const ctx = await peek(`split-${org}`);
+      expect(ctx.context).not.toHaveProperty('unassignedChoice');
+    });
+
+    it('Amend → Items goes through the same question', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toGap(b, org);
+      await tap(b, org, 'split_unassigned:me');
+      await finish(b, org);
+      await tap(b, org, 'split_amend');
+      await tap(b, org, 'split_pick:items');
+      await say(b, org, '1 Ann\n3 Bob'); // the same gap: the choice stays
+      expect(stub.lastText()).toContain('Please check the split');
+      await tap(b, org, 'split_amend');
+      await tap(b, org, 'split_pick:items');
+      await say(b, org, '1 Ann\n2 Bob\n3 Bob'); // gap closed: no question
+      expect(stub.lastText()).toContain('Please check the split');
+      expect(stub.lastText()).toContain('Bob: SGD 36.00');
+    });
   });
 
   it('Amend offers Items (not Total), and editing the assignment message updates the summary', async () => {
