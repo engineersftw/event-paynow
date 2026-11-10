@@ -1868,6 +1868,37 @@ describe('Split_PayNow_Bot group claiming', () => {
     return stub.lastText();
   };
 
+  it("does not answer the organiser's chat while taps are awaited in a group, but does in private", async () => {
+    const { b, chat, org, ann, msg } = await startClaiming();
+    const quiet = async (text: string) => {
+      const before = stub.sentMessages.length;
+      await gsay(b, chat, org, text);
+      expect(stub.sentMessages.length).toBe(before);
+    };
+    // while members claim
+    await tapOn(b, chat, ann, 'split_claim:0', msg);
+    await quiet('@Ann please tap item 3');
+    await quiet('hmm...');
+    expect((await stateOf(chat)).context.claims).toEqual({ '0': [ann] });
+
+    // at the summary, a button-only step
+    await tapOn(b, chat, ann, 'split_claim:1', msg);
+    await tapOn(b, chat, ann, 'split_claim:2', msg);
+    await tapOn(b, chat, org, 'split_claim:done', msg);
+    await gsay(b, chat, org, '91234567'); // a typed answer is still read
+    await gtap(b, chat, org, 'split_payee:me');
+    await gtap(b, chat, org, 'split_skip_description');
+    expect(stub.lastText()).toContain('Please check the split');
+    await quiet('is this right?');
+
+    // a private chat keeps the hint
+    const u = uid++;
+    await say(b, u, '/split_receipt');
+    await b.handleUpdate(photoUpdate(u, u, 'file-1', upd++));
+    await say(b, u, 'hello?');
+    expect(stub.lastText()).toContain('Please tap one of the buttons above');
+  });
+
   it('offers the choice in a group but not in a private chat', async () => {
     const b = claimBot();
     const u = uid++;

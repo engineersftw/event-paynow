@@ -563,6 +563,8 @@ export class SplitCommandHandler {
 
     const field = FIELD_OF_STEP[state.step];
     if (!field) {
+      // In a group the organiser's chat is mostly for other people: no nagging while taps are awaited
+      if (isGroup(ctx)) return true;
       await ctx.reply(
         state.step === CONFIRM
           ? 'Please tap Confirm, Amend or Cancel on the summary above.'
