@@ -1,11 +1,13 @@
 import { env } from 'cloudflare:test';
 import type { Update } from 'grammy/types';
 import jsQR from 'jsqr';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { D1SplitDirectory } from '../../src/db/split-repository';
 import { createSplitBot } from '../../src/split-bot';
 import worker from '../../src/worker';
 import type { ConversationDO } from '../../src/worker/conversation-do';
 import {
+  applyTestSchema,
   bmpToRgba,
   callbackUpdate,
   editedTextUpdate,
@@ -19,6 +21,9 @@ const stub = new TelegramStub();
 let memberCount: unknown = 7;
 let uid = 8000;
 let upd = 1;
+beforeAll(async () => {
+  await applyTestSchema(env.paynow_db);
+});
 beforeEach(() => {
   stub.reset();
   memberCount = 7;
@@ -593,6 +598,177 @@ describe('Split_PayNow_Bot amend and edited messages', () => {
     await gtap(b, chat, owner, 'split_pick:total');
     await gsay(b, chat, owner, '90');
     expect(summaryText().text).toContain('Each share: SGD 30.00');
+  });
+});
+
+describe('Split_PayNow_Bot mentions', () => {
+  const directory = () => new D1SplitDirectory(env.paynow_db);
+  const asUser = (update: Update, username: string) => {
+    (update as unknown as { message: { from: Record<string, unknown> } }).message.from.username =
+      username;
+    return update;
+  };
+  /** A person messaging the bot privately with a Telegram username. */
+  const privately = (b: B, id: number, username: string, text: string) =>
+    b.handleUpdate(asUser(textUpdate(id, text, upd++), username));
+  const counts = async () => {
+    const r = await env.paynow_db
+      .prepare(
+        'SELECT (SELECT COUNT(*) FROM split_contacts) AS contacts, (SELECT COUNT(*) FROM split_claims) AS claims'
+      )
+      .first<{ contacts: number; claims: number }>();
+    return `${r?.contacts}/${r?.claims}`;
+  };
+  const claimToken = () => {
+    const url = stub.sentMessages.findLast((m) => m.text.startsWith('Waiting for their QR'))!
+      .replyMarkup as { inline_keyboard: Array<Array<{ url: string }>> };
+    return /start=claim_(\S+)$/.exec(url.inline_keyboard[0]![0]!.url)![1]!;
+  };
+  /** Run a confirmed custom split of `list` (total `total`) from a fresh organiser. */
+  async function confirmSplit(b: B, organiser: number, total: string, list: string, desc?: string) {
+    await say(b, organiser, '/split_custom');
+    await say(b, organiser, total);
+    await say(b, organiser, list);
+    await say(b, organiser, '91234567');
+    if (desc) await say(b, organiser, desc);
+    else await tap(b, organiser, 'split_skip_description');
+    await tap(b, organiser, 'split_confirm');
+  }
+
+  it('DMs each known mentioned person their own QR and posts nothing in the chat', async () => {
+    const b = bot();
+    const [ann, bob, org] = [uid++, uid++, uid++];
+    await privately(b, ann, `ann_${ann}`, '/start');
+    await privately(b, bob, `bob_${bob}`, '/start');
+    stub.reset();
+    await say(b, org, '/split_custom');
+    await say(b, org, '65');
+    await say(b, org, `@ann_${ann} 40\n@Bob_${bob} 25`); // usernames match ignoring case
+    await say(b, org, '91234567');
+    await tap(b, org, 'split_skip_description');
+    expect(stub.lastText()).toContain(`@ann_${ann}: SGD 40.00 (by direct message)`);
+    await tap(b, org, 'split_confirm');
+
+    expect(stub.sentPhotos.map((p) => p.chatId).sort()).toEqual([String(ann), String(bob)].sort());
+    const toAnn = stub.sentPhotos.find((p) => p.chatId === String(ann))!;
+    expect(toAnn.caption).toContain('Test User asks you for SGD 40.00');
+    expect(toAnn.caption).not.toContain('91234567');
+    expect(stub.lastText()).toContain('Sent their QR by direct message');
+    expect(stub.sentPhotos.some((p) => p.chatId === String(org))).toBe(false);
+    expect((await peek(`split-${org}`)).flow).toBe('idle');
+  });
+
+  it('mixed list: the mentioned person gets a DM, the plain name a chat QR', async () => {
+    const b = bot();
+    const [ann, org] = [uid++, uid++];
+    await privately(b, ann, `ann_${ann}`, '/start');
+    stub.reset();
+    await confirmSplit(b, org, '65', `@ann_${ann} 40\nCy 25`);
+    const toChat = stub.sentPhotos.filter((p) => p.chatId === String(org));
+    expect(toChat).toHaveLength(1);
+    expect(toChat[0]!.caption).toContain('Cy');
+    expect(stub.sentPhotos.filter((p) => p.chatId === String(ann))).toHaveLength(1);
+  });
+
+  it('an unknown person gets a Get my QR button, only they can collect, and only once', async () => {
+    const b = bot();
+    const [dee, eve, org] = [uid++, uid++, uid++];
+    await confirmSplit(b, org, '25', `@dee_${dee} 25`);
+    expect(stub.sentPhotos).toHaveLength(0);
+    expect(stub.lastText()).toContain('Waiting for their QR');
+    const token = claimToken();
+
+    await privately(b, eve, `eve_${eve}`, `/start claim_${token}`);
+    expect(stub.lastText()).toContain('This QR is for someone else.');
+    expect(stub.sentPhotos).toHaveLength(0);
+
+    await privately(b, dee, `Dee_${dee}`, `/start claim_${token}`); // case-insensitive
+    expect(stub.sentPhotos).toHaveLength(1);
+    expect(stub.sentPhotos[0]!.chatId).toBe(String(dee));
+    expect(stub.sentPhotos[0]!.caption).toContain('asks you for SGD 25.00');
+    expect(stub.editedMessages.at(-1)!.text).toBe('Everyone has their QR.');
+    expect((await directory().findContacts([`dee_${dee}`])).get(`dee_${dee}`)).toBe(dee);
+
+    await privately(b, dee, `Dee_${dee}`, `/start claim_${token}`);
+    expect(stub.lastText()).toContain('expired or was already collected');
+    expect(stub.sentPhotos).toHaveLength(1);
+  });
+
+  it('an expired request sends nothing', async () => {
+    const b = bot();
+    const [dee, org] = [uid++, uid++];
+    await confirmSplit(b, org, '25', `@dee_${dee} 25`);
+    const token = claimToken();
+    await env.paynow_db
+      .prepare('UPDATE split_claims SET expires_at = ?1 WHERE token = ?2')
+      .bind(new Date(Date.now() - 1000).toISOString(), token)
+      .run();
+    await privately(b, dee, `dee_${dee}`, `/start claim_${token}`);
+    expect(stub.lastText()).toContain('expired or was already collected');
+    expect(stub.sentPhotos).toHaveLength(0);
+  });
+
+  it('a known person who refuses the message falls back to a button', async () => {
+    const b = bot();
+    const [ann, org] = [uid++, uid++];
+    await privately(b, ann, `ann_${ann}`, '/start');
+    stub.reset();
+    stub.blockedChats.add(String(ann));
+    await confirmSplit(b, org, '40', `@ann_${ann} 40`);
+    expect(stub.sentPhotos).toHaveLength(0);
+    expect(stub.lastText()).toContain('Waiting for their QR');
+  });
+
+  it('a text mention carries the user id, so no earlier /start is needed', async () => {
+    const b = bot();
+    const [target, org] = [uid++, uid++];
+    await say(b, org, '/split_custom');
+    await say(b, org, '40');
+    const update = textUpdate(org, 'Ann Lee 40', upd++);
+    (update as unknown as { message: Record<string, unknown> }).message.entities = [
+      {
+        type: 'text_mention',
+        offset: 0,
+        length: 7,
+        user: { id: target, is_bot: false, first_name: 'Ann' },
+      },
+    ];
+    await b.handleUpdate(update);
+    await say(b, org, '91234567');
+    await tap(b, org, 'split_skip_description');
+    expect(stub.lastText()).toContain('Ann Lee: SGD 40.00 (by direct message)');
+    await tap(b, org, 'split_confirm');
+    expect(stub.sentPhotos.map((p) => p.chatId)).toEqual([String(target)]);
+  });
+
+  it('/start records and replaces a contact, and /forget deletes it', async () => {
+    const b = bot();
+    const [first, second] = [uid++, uid++];
+    const name = `shared_${first}`;
+    await privately(b, first, name, '/start');
+    expect((await directory().findContacts([name])).get(name)).toBe(first);
+    await privately(b, second, name, '/start'); // the username changed hands
+    expect((await directory().findContacts([name])).get(name)).toBe(second);
+    await privately(b, second, name, '/forget');
+    expect(stub.lastText()).toContain('Forgotten');
+    expect((await directory().findContacts([name])).size).toBe(0);
+    await b.handleUpdate(groupTextUpdate(-uid++, second, '/forget', undefined, upd++));
+    expect(stub.lastText()).toContain('private chat');
+  });
+
+  it('writes nothing for an equal split or a custom split with no mentions', async () => {
+    const b = bot();
+    const before = await counts();
+    const u = uid++;
+    await say(b, u, '/split');
+    await say(b, u, '100');
+    await tap(b, u, 'split_mode:equal');
+    await say(b, u, '2');
+    await say(b, u, '91234567');
+    await tap(b, u, 'split_skip_description');
+    await tap(b, u, 'split_confirm');
+    await confirmSplit(b, uid++, '65', 'Ann 40\nBob 25');
+    expect(await counts()).toBe(before);
   });
 });
 

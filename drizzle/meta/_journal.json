@@ -15,6 +15,13 @@
       "when": 1794241327411,
       "tag": "0001_event_website",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794282248533,
+      "tag": "0002_split_directory",
+      "breakpoints": true
     }
   ]
 }

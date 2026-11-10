@@ -116,3 +116,30 @@ describe('applyLeftover and groupByAmount', () => {
     ]);
   });
 });
+
+describe('parseCustomList mentions', () => {
+  it('reads @username mentions, lowercased, mixed with plain names', () => {
+    const r = parseCustomList('@Ann_Lee 40\nBob 25');
+    expect(r).toEqual({
+      ok: true,
+      entries: [
+        { name: '@Ann_Lee', cents: 4000, username: 'ann_lee' },
+        { name: 'Bob', cents: 2500 },
+      ],
+    });
+  });
+  it('reads a text mention by its display text and carries the user id', () => {
+    const r = parseCustomList('Ann Lee 40', new Map([['Ann Lee', 555]]));
+    expect(r).toEqual({ ok: true, entries: [{ name: 'Ann Lee', cents: 4000, userId: 555 }] });
+  });
+  it('treats the same mention twice, ignoring case, as a repeat', () => {
+    expect(parseCustomList('@Annie 10\n@annie 20').ok).toBe(false);
+  });
+  it('lets a long username through but not a long plain name', () => {
+    const long = `@${'a'.repeat(30)}`;
+    expect(parseCustomList(`${long} 10`).ok).toBe(true);
+    expect(parseCustomList(`${'a'.repeat(21)} 10`).ok).toBe(false);
+    expect(parseCustomList('@ab 10').ok).toBe(true); // too short to be a username: just a name
+    expect(parseCustomList('@ab 10')).toMatchObject({ entries: [{ name: '@ab' }] });
+  });
+});
