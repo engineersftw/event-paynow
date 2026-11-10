@@ -1,3 +1,4 @@
+import { formatCents, parseAmount } from '../sgqr/amount';
 import type { SplitEntry } from './split-math';
 
 /** One line of a receipt, price in cents (the line total, not a unit price). */
@@ -14,13 +15,15 @@ export interface Receipt {
   discountCents: number;
   totalCents: number;
   subtotalCents?: number;
+  /** Lines the model returned that could not be read (kept so the warning survives edits). */
+  skipped?: number;
 }
 
 export type ScanResult =
   | { ok: true; receipt: Receipt; warnings: string[] }
   | { ok: false; error: string };
 
-const MAX_ITEMS = 40;
+export const MAX_ITEMS = 40;
 const MAX_NAME = 30;
 const MAX_CENTS = 10_000_000; // SGD 100,000: anything above is a misread
 
@@ -42,6 +45,81 @@ const CONTROL = /[\u0000-\u001f\u007f]/g;
 const clean = (v: unknown, max: number) =>
   typeof v === 'string' ? v.replace(CONTROL, ' ').replace(/\s+/g, ' ').trim().slice(0, max) : '';
 
+const sumItems = (r: Receipt) => r.items.reduce((s, i) => s + i.cents, 0);
+
+/**
+ * How much the items fall short of what they should add up to, or 0. The expected amount is the
+ * printed subtotal or, without one, the total minus service charge and GST plus any discount (only
+ * when a charge was read, because otherwise a gap cannot be told apart from charges). Two cents of
+ * rounding is ignored; items above the expected amount are not a shortfall.
+ */
+export function missingCents(r: Receipt): number {
+  const expected =
+    r.subtotalCents ??
+    (r.serviceCents > 0 || r.gstCents > 0
+      ? r.totalCents - r.serviceCents - r.gstCents + r.discountCents
+      : undefined);
+  if (expected === undefined) return 0;
+  const gap = expected - sumItems(r);
+  return gap > 2 ? gap : 0;
+}
+
+/** What the user is told about a scan; worked out again whenever items are added. */
+export function receiptWarnings(r: Receipt): string[] {
+  const warnings: string[] = [];
+  if (r.skipped) warnings.push(`I skipped ${r.skipped} line(s) I could not read.`);
+  const sum = sumItems(r);
+  const missing = missingCents(r);
+  if (sum > r.totalCents) {
+    warnings.push('The items add up to more than the total, so something was misread.');
+  }
+  if (missing > 0) {
+    warnings.push(
+      `The items add up to SGD ${formatCents(sum)} but ${r.subtotalCents !== undefined ? `the subtotal is SGD ${formatCents(r.subtotalCents)}` : 'they should come to more'}: SGD ${formatCents(missing)} looks missing.`
+    );
+  } else if (r.subtotalCents && Math.abs(sum - r.subtotalCents) > 2) {
+    warnings.push('The items do not add up to the subtotal printed on the receipt.');
+  }
+  if (
+    r.subtotalCents &&
+    Math.abs(r.subtotalCents + r.serviceCents + r.gstCents - r.discountCents - r.totalCents) > 5
+  ) {
+    warnings.push('The subtotal, charges and total on the receipt do not add up.');
+  }
+  return warnings;
+}
+
+export type AddedItems = { ok: true; items: ReceiptItem[] } | { ok: false; error: string };
+
+/**
+ * Items the user types for what the scan missed: one per line, a name then a price
+ * ("Sapporo Black 9.50"). `existing` is how many items the receipt already has (for numbering and
+ * the 40-item cap). The first bad line is named and nothing is added.
+ */
+export function parseAddedItems(text: string, existing: number): AddedItems {
+  const lines = text
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length === 0) return { ok: false, error: 'Send at least one item.' };
+  if (existing + lines.length > MAX_ITEMS) {
+    return { ok: false, error: `A receipt can have at most ${MAX_ITEMS} items.` };
+  }
+  const items: ReceiptItem[] = [];
+  for (const line of lines) {
+    const m = /^(.*?)\s*(\S+)$/.exec(line);
+    const cents = m ? parseAmount(m[2]!.replace(/^\$/, '')) : null;
+    if (!m || cents === null || cents > MAX_CENTS) {
+      return {
+        ok: false,
+        error: `"${line}" needs a price, for example Sapporo Black 9.50. Send the items again.`,
+      };
+    }
+    items.push({ name: clean(m[1], MAX_NAME) || `Item ${existing + items.length + 1}`, cents });
+  }
+  return { ok: true, items };
+}
+
 /**
  * Turn what the vision model returned into a receipt. The model is not trusted: anything that is
  * not a sane number is dropped or refused, names are cleaned, and odd totals produce warnings
@@ -56,7 +134,6 @@ export function parseScan(raw: unknown): ScanResult {
   if (totalCents === null || totalCents === 0) {
     return { ok: false, error: 'I could not find a total on that receipt.' };
   }
-  const warnings: string[] = [];
   const items: ReceiptItem[] = [];
   let skipped = 0;
   for (const it of Array.isArray(r.items) ? r.items : []) {
@@ -73,7 +150,6 @@ export function parseScan(raw: unknown): ScanResult {
   if (items.length > MAX_ITEMS) {
     return { ok: false, error: `That receipt has more than ${MAX_ITEMS} items.` };
   }
-  if (skipped > 0) warnings.push(`I skipped ${skipped} line(s) I could not read.`);
 
   const merchant = clean(r.merchant, MAX_NAME);
   const subtotal = toCents(r.subtotal);
@@ -86,22 +162,8 @@ export function parseScan(raw: unknown): ScanResult {
     totalCents,
     ...(subtotal ? { subtotalCents: subtotal } : {}),
   };
-  const sum = items.reduce((s, i) => s + i.cents, 0);
-  if (sum > totalCents) {
-    warnings.push('The items add up to more than the total, so something was misread.');
-  }
-  if (subtotal && Math.abs(sum - subtotal) > 2) {
-    warnings.push('The items do not add up to the subtotal printed on the receipt.');
-  }
-  if (
-    subtotal &&
-    Math.abs(
-      subtotal + receipt.serviceCents + receipt.gstCents - receipt.discountCents - totalCents
-    ) > 5
-  ) {
-    warnings.push('The subtotal, charges and total on the receipt do not add up.');
-  }
-  return { ok: true, receipt, warnings };
+  if (skipped > 0) receipt.skipped = skipped;
+  return { ok: true, receipt, warnings: receiptWarnings(receipt) };
 }
 
 /** A person in the assignment: a name, an @username, a picked mention, or the organiser. */

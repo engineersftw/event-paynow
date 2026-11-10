@@ -26,9 +26,12 @@ import type { ConversationDO, ConversationState } from '../worker/conversation-d
 import {
   type AssignedOk,
   applyUnassigned,
+  missingCents,
+  parseAddedItems,
   parseAssignments,
   parseScan,
   type Receipt,
+  receiptWarnings,
   shareReceipt,
   toEntries,
 } from './receipt';
@@ -57,6 +60,7 @@ const RECEIPT = 10; // waiting for a receipt photo
 const REVIEW = 11; // the scan is shown: Use this / Send another photo / Type the total instead
 const ASSIGN = 12; // waiting for who had which item
 const UNASSIGNED = 13; // items nobody was given: split evenly or the organiser covers them
+const ADD_ITEM = 15; // the user is adding an item the scan missed
 const PAYEE_ME = 14; // is the payee the organiser? if not, the organiser pays their own share too
 
 const MAX_DESCRIPTION = 25;
@@ -324,6 +328,17 @@ function summary(c: Record<string, unknown>, group: boolean): string {
   return lines.join('\n');
 }
 
+/** The review's buttons; adding a missing item is offered only when the numbers show a gap. */
+function reviewButtons(r: Receipt): InlineKeyboard {
+  const kb = new InlineKeyboard();
+  if (missingCents(r) > 0) kb.text('➕ Add a missing item', 'split_scan:add').row();
+  return kb
+    .text('✅ Use this', 'split_scan:use')
+    .row()
+    .text('📷 Send another photo', 'split_scan:again')
+    .text('Type the total instead', 'split_scan:manual');
+}
+
 /** What was read from the receipt, numbered so the user can say who had what. */
 function reviewText(r: Receipt, warnings: string[]): string {
   const lines = ['I read this receipt:', ...(r.merchant ? [r.merchant] : [])];
@@ -448,16 +463,20 @@ export class SplitCommandHandler {
       await failed(scan.error);
       return;
     }
-    const context = { ...state.context, scan: { receipt: scan.receipt, warnings: scan.warnings } };
-    await this.setState({ flow: 'split', step: REVIEW, context });
     await countAll(this.counter, [SPLIT_SCAN_OK]);
-    await ctx.reply(reviewText(scan.receipt, scan.warnings), {
-      reply_markup: new InlineKeyboard()
-        .text('✅ Use this', 'split_scan:use')
-        .row()
-        .text('📷 Send another photo', 'split_scan:again')
-        .text('Type the total instead', 'split_scan:manual'),
+    await this.showReview(ctx, { ...state.context, scan: { receipt: scan.receipt } });
+  }
+
+  /** Show the scan for review (warnings worked out afresh) and wait for the user's choice. */
+  private async showReview(ctx: Context, context: Ctx): Promise<void> {
+    const receipt = (context.scan as { receipt: Receipt }).receipt;
+    const warnings = receiptWarnings(receipt);
+    await this.setState({
+      flow: 'split',
+      step: REVIEW,
+      context: { ...context, scan: { receipt, warnings } },
     });
+    await ctx.reply(reviewText(receipt, warnings), { reply_markup: reviewButtons(receipt) });
   }
 
   async cancel(ctx: Context): Promise<void> {
@@ -476,6 +495,18 @@ export class SplitCommandHandler {
     const text = ctx.message?.text?.trim() ?? '';
     const state = await this.getState();
     if (state.flow !== 'split' || !this.isOwner(ctx, state)) return false;
+
+    if (state.step === ADD_ITEM) {
+      const scan = state.context.scan as { receipt: Receipt };
+      const added = parseAddedItems(text, scan.receipt.items.length);
+      if (!added.ok) {
+        await ctx.reply(added.error);
+        return true;
+      }
+      const receipt = { ...scan.receipt, items: [...scan.receipt.items, ...added.items] };
+      await this.showReview(ctx, { ...state.context, scan: { receipt } });
+      return true;
+    }
 
     const field = FIELD_OF_STEP[state.step];
     if (!field) {
@@ -546,9 +577,17 @@ export class SplitCommandHandler {
       : data.startsWith('split_unassigned:')
         ? UNASSIGNED
         : data.startsWith('split_scan:')
-          ? step === RECEIPT || step === REVIEW
-            ? step
-            : -1
+          ? data === 'split_scan:add'
+            ? step === REVIEW
+              ? REVIEW
+              : -1
+            : data === 'split_scan:oneline' || data === 'split_scan:back'
+              ? step === ADD_ITEM
+                ? ADD_ITEM
+                : -1
+              : step === RECEIPT || step === REVIEW
+                ? step
+                : -1
           : data.startsWith('split_mode:')
             ? MODE
             : data.startsWith('split_people:')
@@ -590,6 +629,31 @@ export class SplitCommandHandler {
         return true;
       }
       await this.proceed(ctx, { ...c, entries, leftover: 'omit', unassignedChoice: choice });
+    } else if (
+      data === 'split_scan:add' ||
+      data === 'split_scan:oneline' ||
+      data === 'split_scan:back'
+    ) {
+      const scan = c.scan as { receipt: Receipt } | undefined;
+      await this.setButtons(ctx, new InlineKeyboard()); // this prompt is answered
+      if (!scan) return true;
+      if (data === 'split_scan:add') {
+        await this.setState({ flow: 'split', step: ADD_ITEM, context: c });
+        await this.askStep(ctx, ADD_ITEM, c);
+      } else if (data === 'split_scan:oneline') {
+        // One "Unread items" line for exactly what looks missing
+        const missing = missingCents(scan.receipt);
+        const receipt =
+          missing > 0
+            ? {
+                ...scan.receipt,
+                items: [...scan.receipt.items, { name: 'Unread items', cents: missing }],
+              }
+            : scan.receipt;
+        await this.showReview(ctx, { ...c, scan: { receipt } });
+      } else {
+        await this.showReview(ctx, c); // Back: the review again, unchanged
+      }
     } else if (data.startsWith('split_scan:')) {
       const scan = c.scan as { receipt: Receipt } | undefined;
       const { scan: _scan, ...rest } = c;
@@ -736,6 +800,20 @@ export class SplitCommandHandler {
         ctx,
         'Send a photo of the receipt. Make sure the whole receipt is in the picture and the numbers are sharp.',
         new InlineKeyboard().text('Type the total instead', 'split_scan:manual')
+      );
+    } else if (step === ADD_ITEM) {
+      const receipt = (c.scan as { receipt: Receipt }).receipt;
+      const missing = missingCents(receipt);
+      await this.ask(
+        ctx,
+        `${missing > 0 ? `${sgd(missing)} looks missing. ` : ''}Send the missing item(s), one per line: a name, then a price (for example Sapporo Black 9.50).`,
+        new InlineKeyboard()
+          .text(
+            missing > 0 ? `Add as one line (${sgd(missing)})` : 'Add as one line',
+            'split_scan:oneline'
+          )
+          .row()
+          .text('Back', 'split_scan:back')
       );
     } else if (step === UNASSIGNED) {
       const receipt = c.receipt as Receipt;

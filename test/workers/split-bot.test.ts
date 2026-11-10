@@ -1178,6 +1178,138 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(after.types.receipt - before.types.receipt).toBe(1);
   });
 
+  describe('a scan that dropped an item', () => {
+    // nine items read (107.60) of ten, the printed subtotal is 117.10, service 11.71, GST 11.59
+    const DROPPED = {
+      merchant: 'Bistrot',
+      items: [14.9, 12.9, 9.5, 11.9, 1.8, 9.9, 14.9, 12.0, 19.8].map((price, i) => ({
+        name: `Item ${i + 1}`,
+        price,
+      })),
+      subtotal: 117.1,
+      serviceCharge: 11.71,
+      gst: 11.59,
+      total: 140.4,
+    };
+    async function toReview(b: B, org: number, raw: unknown = DROPPED) {
+      scanned = raw;
+      await say(b, org, '/split_receipt');
+      await photo(b, org);
+    }
+
+    it('says how much is missing and offers the button; nothing when the numbers add up', async () => {
+      const [org, org2] = [uid++, uid++];
+      const b = receiptBot();
+      await toReview(b, org);
+      expect(stub.lastText()).toContain(
+        'The items add up to SGD 107.60 but the subtotal is SGD 117.10: SGD 9.50 looks missing.'
+      );
+      expect(buttons()).toEqual([
+        'split_scan:add',
+        'split_scan:use',
+        'split_scan:again',
+        'split_scan:manual',
+      ]);
+      await toReview(b, org2, RECEIPT); // 30 + 10 + 20 + 12 charges = 72: it adds up
+      expect(stub.lastText()).not.toContain('looks missing');
+      expect(buttons()).toEqual(['split_scan:use', 'split_scan:again', 'split_scan:manual']);
+    });
+
+    it('adds a named item as the next number and clears the warning', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org);
+      await tap(b, org, 'split_scan:add');
+      expect(stub.lastText()).toContain('SGD 9.50 looks missing. Send the missing item(s)');
+      expect(buttons()).toEqual(['split_scan:oneline', 'split_scan:back']);
+      await say(b, org, 'Sapporo Black 9.50');
+      expect(stub.lastText()).toContain('10. Sapporo Black: SGD 9.50');
+      expect(stub.lastText()).toContain('9. Item 9: SGD 19.80'); // earlier numbers unchanged
+      expect(stub.lastText()).not.toContain('looks missing');
+      expect(buttons()).toEqual(['split_scan:use', 'split_scan:again', 'split_scan:manual']);
+    });
+
+    it('Add as one line adds Unread items for exactly the gap', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org);
+      await tap(b, org, 'split_scan:add');
+      expect(buttons()?.[0]).toBe('split_scan:oneline');
+      await tap(b, org, 'split_scan:oneline');
+      expect(stub.lastText()).toContain('10. Unread items: SGD 9.50');
+      expect(stub.lastText()).not.toContain('looks missing');
+    });
+
+    it('adds several items, refuses a bad line, and keeps the button while still short', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org);
+      await tap(b, org, 'split_scan:add');
+      await say(b, org, 'Sapporo Black 9.50\nWater');
+      expect(stub.lastText()).toContain('"Water" needs a price');
+      expect((await peek(`split-${org}`)).step).toBe(15);
+      await say(b, org, 'Sapporo Black 4.00\nPeanuts 1.50');
+      expect(stub.lastText()).toContain('10. Sapporo Black: SGD 4.00');
+      expect(stub.lastText()).toContain('11. Peanuts: SGD 1.50');
+      expect(stub.lastText()).toContain('SGD 4.00 looks missing'); // 9.50 - 5.50 still short
+      expect(buttons()?.[0]).toBe('split_scan:add');
+    });
+
+    it('Back shows the review again unchanged', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org);
+      await tap(b, org, 'split_scan:add');
+      await tap(b, org, 'split_scan:back');
+      expect(stub.lastText()).toContain('I read this receipt');
+      expect(stub.lastText()).toContain('SGD 9.50 looks missing');
+      expect((await peek(`split-${org}`)).step).toBe(11);
+    });
+
+    it('the added item is part of what the bot asks about, and shares the receipt total correctly', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org);
+      await tap(b, org, 'split_scan:add');
+      await say(b, org, 'Sapporo Black 9.50');
+      await tap(b, org, 'split_scan:use');
+      expect(stub.lastText()).toContain('10. Sapporo Black SGD 9.50');
+      await say(b, org, '1,2,3,4,5,6,7,8,9 Ann\n10 Bob');
+      await say(b, org, '91234567');
+      await tap(b, org, 'split_payee:me');
+      await tap(b, org, 'split_skip_description');
+      // Bob: 9.50 of the 117.10 of items, plus 9.50/117.10 of the 23.30 charges (1.89), then Ann the rest
+      const summary = stub.lastText();
+      const amounts = [...summary.matchAll(/(Ann|Bob): SGD (\d+\.\d\d)/g)].map((m) => Number(m[2]));
+      expect(amounts.reduce((x, y) => x + y, 0)).toBeCloseTo(140.4, 2);
+      expect(summary).toContain('Bob: SGD 11.39');
+      expect(summary).toContain('Ann: SGD 129.01');
+    });
+
+    it('a new photo discards the added items', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org);
+      await tap(b, org, 'split_scan:add');
+      await say(b, org, 'Sapporo Black 9.50');
+      await tap(b, org, 'split_scan:again');
+      await photo(b, org);
+      expect(stub.lastText()).not.toContain('Sapporo Black');
+      expect(stub.lastText()).toContain('SGD 9.50 looks missing');
+    });
+
+    it('stale buttons do nothing', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org);
+      const reviewId = stub.lastMessageId();
+      await tap(b, org, 'split_scan:add');
+      stub.callbackAnswers = [];
+      await b.handleUpdate(callbackUpdate(org, 'split_scan:add', reviewId, upd++)); // already in ADD_ITEM
+      expect(stub.callbackAnswers).toContain('That step is over.');
+    });
+  });
+
   it('keeps no receipt data after the split, and writes nothing to the database', async () => {
     const org = uid++;
     const b = receiptBot();
