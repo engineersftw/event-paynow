@@ -42,6 +42,7 @@ const RECEIPT = 10; // waiting for a receipt photo
 const REVIEW = 11; // the scan is shown: Use this / Send another photo / Type the total instead
 const ASSIGN = 12; // waiting for who had which item
 const UNASSIGNED = 13; // items nobody was given: split evenly or the organiser covers them
+const PAYEE_ME = 14; // is the payee the organiser? if not, the organiser pays their own share too
 
 const MAX_DESCRIPTION = 25;
 
@@ -69,6 +70,7 @@ export const SPLIT_HELP =
   '/split - total, then equal or custom amounts, payee, optional description\n' +
   '/split_custom - same, straight to custom amounts (one line per person: name and amount; @mention someone to send them their QR directly)\n' +
   '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge)\n' +
+  'After the payee I ask whether the payee is you; if someone else paid, you get a QR for your own share too.\n' +
   '/forget - delete what I remember about you (your username, kept when you /start me)\n' +
   '/cancel - stop\n\n' +
   'On the summary, tap Amend to change an answer, or edit the message you sent. ' +
@@ -195,7 +197,11 @@ function readAnswer(
   if (field === 'payee') {
     const payee = detectProxyType(text);
     return payee
-      ? { ok: true, patch: { payeeType: payee.type, payeeValue: payee.normalized } }
+      ? {
+          ok: true,
+          // A new payee means asking again whether it is the organiser
+          patch: { payeeType: payee.type, payeeValue: payee.normalized, payeeIsMe: undefined },
+        }
       : {
           ok: false,
           error:
@@ -241,6 +247,7 @@ function nextNeed(c: Ctx): { step: number; note?: string } {
     if (sum < total && !c.leftover) return { step: LEFTOVER };
   }
   if (!c.payeeValue) return { step: PAYEE };
+  if (c.payeeIsMe === undefined) return { step: PAYEE_ME };
   if (!c.described) return { step: DESCRIPTION };
   return { step: CONFIRM };
 }
@@ -262,13 +269,20 @@ function summary(c: Record<string, unknown>, group: boolean): string {
       const direct = e.username || e.userId ? ' (by direct message)' : '';
       lines.push(`${e.name}: ${sgd(e.cents)}${direct}`);
     }
+    const paid = c.payeeIsMe === false; // someone else is paid, so the organiser pays too
     if (r.leftoverCents > 0 && c.receipt) {
-      lines.push(`Your own share, not collected: ${sgd(r.leftoverCents)}`);
+      lines.push(
+        paid
+          ? `Your own share, which you pay the payee: ${sgd(r.leftoverCents)} (you get a QR)`
+          : `Your own share, not collected: ${sgd(r.leftoverCents)}`
+      );
     } else if (r.leftoverCents > 0) {
       lines.push(
         r.extraCents > 0
           ? `Leftover ${sgd(r.leftoverCents)} split evenly (${sgd(r.extraCents)} each)`
-          : `Leftover ${sgd(r.leftoverCents)} left out: you cover it`
+          : paid
+            ? `Leftover ${sgd(r.leftoverCents)} is yours to pay: you get a QR`
+            : `Leftover ${sgd(r.leftoverCents)} left out: you cover it`
       );
     }
     if (r.overCents > 0) {
@@ -281,7 +295,9 @@ function summary(c: Record<string, unknown>, group: boolean): string {
     const { shareCents, collectedCents, overCents } = splitEqually(total, people);
     lines.push(
       `Bill: ${sgd(total)} between ${people} people`,
-      `Each share: ${sgd(shareCents)} (everyone else pays you this)`
+      c.payeeIsMe === false
+        ? `Each share: ${sgd(shareCents)} (all ${people} people pay the payee this)`
+        : `Each share: ${sgd(shareCents)} (everyone else pays you this)`
     );
     if (overCents > 0) {
       lines.push(
@@ -506,27 +522,29 @@ export class SplitCommandHandler {
     const step = state.flow === 'split' ? state.step : 0;
     const onSummary = data === 'split_confirm' || data === 'split_cancel' || data === 'split_amend';
     const onMenu = data.startsWith('split_pick:') || data === 'split_back';
-    const expected = data.startsWith('split_unassigned:')
-      ? UNASSIGNED
-      : data.startsWith('split_scan:')
-        ? step === RECEIPT || step === REVIEW
-          ? step
-          : -1
-        : data.startsWith('split_mode:')
-          ? MODE
-          : data.startsWith('split_people:')
-            ? PEOPLE
-            : data.startsWith('split_leftover:')
-              ? LEFTOVER
-              : data === 'split_skip_description'
-                ? DESCRIPTION
-                : onSummary
-                  ? CONFIRM
-                  : onMenu
-                    ? AMEND
-                    : data === 'split_keep' && c.amending
-                      ? step
-                      : -1;
+    const expected = data.startsWith('split_payee:')
+      ? PAYEE_ME
+      : data.startsWith('split_unassigned:')
+        ? UNASSIGNED
+        : data.startsWith('split_scan:')
+          ? step === RECEIPT || step === REVIEW
+            ? step
+            : -1
+          : data.startsWith('split_mode:')
+            ? MODE
+            : data.startsWith('split_people:')
+              ? PEOPLE
+              : data.startsWith('split_leftover:')
+                ? LEFTOVER
+                : data === 'split_skip_description'
+                  ? DESCRIPTION
+                  : onSummary
+                    ? CONFIRM
+                    : onMenu
+                      ? AMEND
+                      : data === 'split_keep' && c.amending
+                        ? step
+                        : -1;
     // Summary and menu buttons only count on the latest summary message
     const onLatest =
       !(onSummary || onMenu) ||
@@ -538,7 +556,9 @@ export class SplitCommandHandler {
     }
     await ctx.answerCallbackQuery();
 
-    if (data.startsWith('split_unassigned:')) {
+    if (data.startsWith('split_payee:')) {
+      await this.proceed(ctx, { ...c, payeeIsMe: data.endsWith(':me') });
+    } else if (data.startsWith('split_unassigned:')) {
       const choice = data.endsWith(':even') ? 'even' : 'me';
       const partial = c.partial as AssignedOk;
       const receipt = c.receipt as Receipt;
@@ -720,6 +740,15 @@ export class SplitCommandHandler {
         `Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nItems:\n${items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n')}\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you: your share is not collected.`,
         keep()
       );
+    } else if (step === PAYEE_ME) {
+      await ctx.reply(
+        'Is this payee you?\n\nIf someone else paid the bill, you owe a share too and I will send you your own QR.',
+        {
+          reply_markup: new InlineKeyboard()
+            .text("Yes, it's me", 'split_payee:me')
+            .text('No, someone else', 'split_payee:other'),
+        }
+      );
     } else if (step === PAYEE) {
       await this.ask(ctx, 'Who should be paid? Send a Singapore mobile number or a UEN.', keep());
     } else if (step === DESCRIPTION) {
@@ -807,14 +836,35 @@ export class SplitCommandHandler {
     const isMentioned = (e: SplitEntry) =>
       this.directory !== undefined && (e.username !== undefined || e.userId !== undefined);
     const mentioned = (final ?? []).filter(isMentioned);
-    if (mentioned.length > 0) await this.deliverMentioned(ctx, mentioned, description, payloadFor);
+
+    // Someone else is paid, so the organiser's own amount (their items, or the remainder left
+    // out) is theirs to pay: they get a QR for it like everybody else
+    let ownJob: { cents: number; lines: string[] } | undefined;
+    const selfId = ctx.from?.id;
+    if (listed && c.payeeIsMe === false && c.leftover !== 'even' && selfId !== undefined) {
+      const own = applyLeftover(listed, total, 'omit').leftoverCents;
+      if (own > 0) {
+        if (this.directory) {
+          const first = ctx.from?.first_name || 'You';
+          mentioned.push({ name: first, cents: own, userId: selfId });
+        } else {
+          ownJob = { cents: own, lines: [sgd(own), 'Your share'] };
+        }
+      }
+    }
+    if (mentioned.length > 0) {
+      await this.deliverMentioned(ctx, mentioned, description, payloadFor, selfId);
+    }
 
     // One QR per distinct amount (an equal split has exactly one)
     const jobs = final
-      ? groupByAmount(final.filter((e) => !isMentioned(e))).map((g) => ({
-          cents: g.cents,
-          lines: [sgd(g.cents), g.names.join(', ')],
-        }))
+      ? [
+          ...groupByAmount(final.filter((e) => !isMentioned(e))).map((g) => ({
+            cents: g.cents,
+            lines: [sgd(g.cents), g.names.join(', ')],
+          })),
+          ...(ownJob ? [ownJob] : []),
+        ]
       : (() => {
           const people = c.people as number;
           const share = splitEqually(total, people).shareCents;
@@ -849,7 +899,8 @@ export class SplitCommandHandler {
     ctx: Context,
     people: SplitEntry[],
     description: string | undefined,
-    payloadFor: (cents: number) => string
+    payloadFor: (cents: number) => string,
+    selfId?: number
   ): Promise<void> {
     const directory = this.directory!;
     const organiser = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ');
@@ -861,14 +912,16 @@ export class SplitCommandHandler {
     for (const p of people) {
       const id = p.userId ?? known.get(p.username as string);
       const payload = payloadFor(p.cents);
-      const dm = directMessage(organiser, p.cents, description ?? null);
+      // The organiser's own QR says "Your share"; an empty organiser name marks it in a claim
+      const own = selfId !== undefined && p.userId === selfId;
+      const dm = directMessage(own ? '' : organiser, p.cents, description ?? null);
       try {
         if (id === undefined) throw new Error('unknown');
         const image = await renderQrPng(payload, dm.lines);
         await ctx.api.sendPhoto(id, new InputFile(image, 'paynow-qr.bmp'), {
           caption: dm.caption,
         });
-        sentTo.push(p.name);
+        sentTo.push(own ? 'you' : p.name);
       } catch {
         // Not started the bot, blocked it, or rate limited: they collect it with a button
         waiting.push({
@@ -879,7 +932,7 @@ export class SplitCommandHandler {
           amountCents: p.cents,
           description: description ?? null,
           payload,
-          organiser,
+          organiser: own ? '' : organiser,
           chatId: ctx.chat!.id,
           expiresAt: newExpiry(),
         });

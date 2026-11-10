@@ -10,10 +10,12 @@ const sgd = (cents: number) => `SGD ${formatCents(cents)}`;
 
 /** The text under a QR sent by direct message, and the lines drawn on the image. */
 export function directMessage(organiser: string, cents: number, description: string | null) {
+  const what = `${sgd(cents)}${description ? ` (${description})` : ''}`;
   return {
     lines: [...(description ? [description] : []), sgd(cents)],
     caption:
-      `${organiser} asks you for ${sgd(cents)}${description ? ` (${description})` : ''}.\n\n` +
+      // An empty organiser name marks the organiser's own share
+      `${organiser ? `${organiser} asks you for ${what}` : `Your share: ${what}`}.\n\n` +
       'Scan with your banking app. Check the payee name before you pay.',
   };
 }
