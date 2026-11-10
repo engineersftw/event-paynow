@@ -85,3 +85,31 @@ export const usageCounters = sqliteTable(
   },
   (t) => [primaryKey({ columns: [t.day, t.metric] })]
 );
+
+/**
+ * Split_PayNow_Bot contacts: who has started the bot, so a mention of `@username` can be sent a
+ * direct message. One row per username and per user; removed by `/forget`.
+ */
+export const splitContacts = sqliteTable('split_contacts', {
+  username: text('username').primaryKey(), // lowercase, no @
+  userId: integer('user_id').notNull().unique(),
+  updatedAt: text('updated_at').notNull(),
+});
+
+/**
+ * Split_PayNow_Bot waiting QRs: a mentioned person the bot could not message yet. Holds the QR
+ * payload (which contains the payee), so rows are deleted when collected and expire after 48 hours.
+ */
+export const splitClaims = sqliteTable('split_claims', {
+  token: text('token').primaryKey(),
+  username: text('username'), // lowercase, no @; set when the person was mentioned by username
+  userId: integer('user_id'), // set when the person was mentioned with a Telegram text mention
+  name: text('name').notNull(),
+  amountCents: integer('amount_cents').notNull(),
+  description: text('description'),
+  payload: text('payload').notNull(),
+  organiser: text('organiser').notNull(),
+  chatId: integer('chat_id').notNull(),
+  messageId: integer('message_id'),
+  expiresAt: text('expires_at').notNull(),
+});

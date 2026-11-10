@@ -86,6 +86,25 @@ const TEST_SCHEMA_STATEMENTS = [
     count INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (day, metric)
   )`,
+  `CREATE TABLE IF NOT EXISTS split_contacts (
+    username TEXT PRIMARY KEY NOT NULL,
+    user_id INTEGER NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS split_contacts_user_id_unique ON split_contacts (user_id)`,
+  `CREATE TABLE IF NOT EXISTS split_claims (
+    token TEXT PRIMARY KEY NOT NULL,
+    username TEXT,
+    user_id INTEGER,
+    name TEXT NOT NULL,
+    amount_cents INTEGER NOT NULL,
+    description TEXT,
+    payload TEXT NOT NULL,
+    organiser TEXT NOT NULL,
+    chat_id INTEGER NOT NULL,
+    message_id INTEGER,
+    expires_at TEXT NOT NULL
+  )`,
   `CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)`,
   `CREATE INDEX IF NOT EXISTS idx_paybacks_payment_id ON paybacks(payment_id)`,
@@ -233,6 +252,8 @@ export class TelegramStub {
   editedCaptions: CapturedCaptionEdit[] = [];
   deletedMessages: Array<{ chatId: string; messageId: number }> = [];
   callbackAnswers: string[] = [];
+  /** Chats that refuse photos, as a user who never started or has blocked the bot would. */
+  blockedChats = new Set<string>();
   otherCalls: { method: string; body: string }[] = [];
 
   private messageId = 1000;
@@ -244,6 +265,7 @@ export class TelegramStub {
     this.editedCaptions = [];
     this.deletedMessages = [];
     this.callbackAnswers = [];
+    this.blockedChats = new Set();
     this.otherCalls = [];
   }
 
@@ -304,6 +326,16 @@ export class TelegramStub {
       if (!photoBytes) throw new Error('sendPhoto: no photo file part captured');
 
       const chatId = fields.chat_id?.value ?? '0';
+      if (this.blockedChats.has(chatId)) {
+        return new Response(
+          JSON.stringify({
+            ok: false,
+            error_code: 403,
+            description: 'Forbidden: bot was blocked by the user',
+          }),
+          { status: 403, headers: { 'content-type': 'application/json' } }
+        );
+      }
       const replyMarkupRaw = fields.reply_markup?.value;
       let replyMarkup: CapturedPhoto['replyMarkup'] | undefined;
       if (replyMarkupRaw) {

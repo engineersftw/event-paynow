@@ -1,10 +1,13 @@
 import type { Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
+import type { Message } from 'grammy/types';
 import { detectProxyType } from '../db/proxy-validation';
+import type { SplitDirectory } from '../db/split-repository';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
 import { renderQrPng } from '../sgqr/qr-render';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
+import { directMessage, newExpiry, newToken, postWaiting } from './split-claim';
 import {
   applyLeftover,
   groupByAmount,
@@ -48,7 +51,8 @@ const STEP_OF_FIELD: Record<Field, number> = {
 export const SPLIT_HELP =
   'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
   '/split - total, then equal or custom amounts, payee, optional description\n' +
-  '/split_custom - same, straight to custom amounts (one line per person: name and amount)\n' +
+  '/split_custom - same, straight to custom amounts (one line per person: name and amount; @mention someone to send them their QR directly)\n' +
+  '/forget - delete what I remember about you (your username, kept when you /start me)\n' +
   '/cancel - stop\n\n' +
   'On the summary, tap Amend to change an answer, or edit the message you sent. ' +
   'In a group, reply to my questions and I offer the group size as the number of people. ' +
@@ -64,10 +68,26 @@ const topicOf = (ctx: Context) =>
 
 const sgd = (cents: number) => `SGD ${formatCents(cents)}`;
 
+/** Text mentions (people picked from the member list) in a message: displayed text to user id. */
+function textMentionsOf(message: Message | undefined): Map<string, number> {
+  const found = new Map<string, number>();
+  for (const e of message?.entities ?? []) {
+    if (e.type === 'text_mention' && message?.text) {
+      found.set(message.text.slice(e.offset, e.offset + e.length), e.user.id);
+    }
+  }
+  return found;
+}
+
 type Answer = { ok: true; patch: Ctx } | { ok: false; error: string };
 
 /** Check one typed answer against the rest of the split; on success, the context fields it sets. */
-function readAnswer(field: Field, text: string, c: Ctx): Answer {
+function readAnswer(
+  field: Field,
+  text: string,
+  c: Ctx,
+  textMentions?: Map<string, number>
+): Answer {
   const total = c.totalCents as number | undefined;
   if (field === 'total') {
     const cents = parseAmount(text);
@@ -82,7 +102,7 @@ function readAnswer(field: Field, text: string, c: Ctx): Answer {
       : { ok: true, patch: { people } };
   }
   if (field === 'list') {
-    const list = parseCustomList(text);
+    const list = parseCustomList(text, textMentions);
     if (!list.ok) {
       return { ok: false, error: `${list.error} Send the whole list again, one person per line.` };
     }
@@ -162,7 +182,10 @@ function summary(c: Record<string, unknown>, group: boolean): string {
   if (listed) {
     const r = applyLeftover(listed, total, (c.leftover as 'even' | 'omit' | undefined) ?? 'omit');
     lines.push(`Bill: ${sgd(total)} shared by ${listed.length} people`);
-    for (const e of r.entries) lines.push(`${e.name}: ${sgd(e.cents)}`);
+    for (const e of r.entries) {
+      const direct = e.username || e.userId ? ' (by direct message)' : '';
+      lines.push(`${e.name}: ${sgd(e.cents)}${direct}`);
+    }
     if (r.leftoverCents > 0) {
       lines.push(
         r.extraCents > 0
@@ -215,7 +238,12 @@ const amendMenu = () =>
  * it can answer (the DO records the owner). Nothing is persisted beyond the conversation.
  */
 export class SplitCommandHandler {
-  constructor(private readonly conversationDO: ConversationDO) {}
+  /** `directory` and `botUsername` are needed for mentions; plain splits work without them. */
+  constructor(
+    private readonly conversationDO: ConversationDO,
+    private readonly directory?: SplitDirectory,
+    private readonly botUsername?: string
+  ) {}
 
   /** `/split_custom` passes 'custom': after the total it goes straight to the list. */
   async start(ctx: Context, mode?: 'custom'): Promise<void> {
@@ -251,7 +279,7 @@ export class SplitCommandHandler {
       );
       return true;
     }
-    const answer = readAnswer(field, text, state.context);
+    const answer = readAnswer(field, text, state.context, textMentionsOf(ctx.message));
     if (!answer.ok) {
       await ctx.reply(answer.error);
       return true;
@@ -277,7 +305,7 @@ export class SplitCommandHandler {
     ];
     if (!field) return;
 
-    const answer = readAnswer(field, text, state.context);
+    const answer = readAnswer(field, text, state.context, textMentionsOf(edited));
     if (!answer.ok) {
       await ctx.reply(`That edit was not used: ${answer.error} The earlier answer is kept.`);
       return;
@@ -518,14 +546,33 @@ export class SplitCommandHandler {
     const description = c.description as string | undefined;
     const caution = 'Scan with your banking app. Check the payee name before you pay.';
 
-    // One QR per distinct amount (an equal split has exactly one)
     const total = c.totalCents as number;
     const listed = c.entries as SplitEntry[] | undefined;
-    const jobs = listed
-      ? groupByAmount(
-          applyLeftover(listed, total, (c.leftover as 'even' | 'omit' | undefined) ?? 'omit')
-            .entries
-        ).map((g) => ({ cents: g.cents, lines: [sgd(g.cents), g.names.join(', ')] }))
+    const final = listed
+      ? applyLeftover(listed, total, (c.leftover as 'even' | 'omit' | undefined) ?? 'omit').entries
+      : undefined;
+    const payloadFor = (cents: number) =>
+      buildPayNowPayload({
+        proxyType: c.payeeType as 'mobile' | 'uen',
+        proxyValue: c.payeeValue as string,
+        amountCents: cents,
+        editable: false,
+        ...(description ? { description } : {}),
+      });
+
+    // Mentioned people get their own QR by direct message (or a button to collect it);
+    // everyone else is served by the shared chat QRs below
+    const isMentioned = (e: SplitEntry) =>
+      this.directory !== undefined && (e.username !== undefined || e.userId !== undefined);
+    const mentioned = (final ?? []).filter(isMentioned);
+    if (mentioned.length > 0) await this.deliverMentioned(ctx, mentioned, description, payloadFor);
+
+    // One QR per distinct amount (an equal split has exactly one)
+    const jobs = final
+      ? groupByAmount(final.filter((e) => !isMentioned(e))).map((g) => ({
+          cents: g.cents,
+          lines: [sgd(g.cents), g.names.join(', ')],
+        }))
       : (() => {
           const people = c.people as number;
           const share = splitEqually(total, people).shareCents;
@@ -535,15 +582,8 @@ export class SplitCommandHandler {
     let sent = 0;
     try {
       for (const job of jobs) {
-        const payload = buildPayNowPayload({
-          proxyType: c.payeeType as 'mobile' | 'uen',
-          proxyValue: c.payeeValue as string,
-          amountCents: job.cents,
-          editable: false,
-          ...(description ? { description } : {}),
-        });
         const lines = [...(description ? [description] : []), ...job.lines];
-        const image = await renderQrPng(payload, lines);
+        const image = await renderQrPng(payloadFor(job.cents), lines);
         await ctx.replyWithPhoto(new InputFile(image, 'paynow-qr.bmp'), {
           caption: `${lines.join('\n')}\n\n${caution} Send /split for another.`,
         });
@@ -557,6 +597,55 @@ export class SplitCommandHandler {
           : `Sent ${sent} of ${jobs.length} QRs; the other ${jobs.length - sent} could not be sent. Please send /split to try again.`
       );
     }
+  }
+
+  /**
+   * Send each mentioned person their QR by direct message. Anyone unknown to the bot, or who
+   * refuses the message, is put on one waiting message with a Get my QR button instead.
+   */
+  private async deliverMentioned(
+    ctx: Context,
+    people: SplitEntry[],
+    description: string | undefined,
+    payloadFor: (cents: number) => string
+  ): Promise<void> {
+    const directory = this.directory!;
+    const organiser = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ');
+    const known = await directory.findContacts(
+      people.filter((p) => p.userId === undefined).map((p) => p.username as string)
+    );
+    const sentTo: string[] = [];
+    const waiting: Parameters<typeof postWaiting>[2] = [];
+    for (const p of people) {
+      const id = p.userId ?? known.get(p.username as string);
+      const payload = payloadFor(p.cents);
+      const dm = directMessage(organiser, p.cents, description ?? null);
+      try {
+        if (id === undefined) throw new Error('unknown');
+        const image = await renderQrPng(payload, dm.lines);
+        await ctx.api.sendPhoto(id, new InputFile(image, 'paynow-qr.bmp'), {
+          caption: dm.caption,
+        });
+        sentTo.push(p.name);
+      } catch {
+        // Not started the bot, blocked it, or rate limited: they collect it with a button
+        waiting.push({
+          token: newToken(),
+          username: p.username ?? null,
+          userId: p.userId ?? null,
+          name: p.name,
+          amountCents: p.cents,
+          description: description ?? null,
+          payload,
+          organiser,
+          chatId: ctx.chat!.id,
+          expiresAt: newExpiry(),
+        });
+      }
+    }
+    if (sentTo.length > 0)
+      await ctx.reply(`Sent their QR by direct message: ${sentTo.join(', ')}.`);
+    await postWaiting(ctx, directory, waiting, this.botUsername);
   }
 
   /** Private chats have one user; in a group only the user and topic that started it. */

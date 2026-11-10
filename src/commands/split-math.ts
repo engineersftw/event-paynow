@@ -23,10 +23,17 @@ export function splitEqually(totalCents: number, people: number) {
 export interface SplitEntry {
   name: string;
   cents: number;
+  /** Lowercase Telegram username (no @) when the person was mentioned as @username. */
+  username?: string;
+  /** Telegram user id when the person was picked from the member list (a text mention). */
+  userId?: number;
 }
 
 export const MAX_CUSTOM_PEOPLE = 20;
 export const MAX_NAME_LENGTH = 20;
+/** A mention is not subject to the plain-name limit; a Telegram username is at most 32 characters. */
+export const MAX_MENTION_LENGTH = 33;
+const USERNAME_MENTION = /^@([A-Za-z][A-Za-z0-9_]{4,31})$/;
 
 export type CustomList = { ok: true; entries: SplitEntry[] } | { ok: false; error: string };
 
@@ -34,7 +41,7 @@ export type CustomList = { ok: true; entries: SplitEntry[] } | { ok: false; erro
  * A custom list: one person per line, a name then an amount (`Ann 40`, `Mary Ann 12.50`).
  * 1 to 20 people, names of 1 to 20 characters and unique ignoring case; the first bad line is named.
  */
-export function parseCustomList(text: string): CustomList {
+export function parseCustomList(text: string, textMentions?: Map<string, number>): CustomList {
   const lines = text
     .split('\n')
     .map((l) => l.trim())
@@ -55,12 +62,20 @@ export function parseCustomList(text: string): CustomList {
       };
     }
     const name = m[1]!;
-    if (name.length > MAX_NAME_LENGTH) {
+    const username = USERNAME_MENTION.exec(name)?.[1]?.toLowerCase();
+    const userId = textMentions?.get(name);
+    const mention = username !== undefined || userId !== undefined;
+    if (name.length > (mention ? MAX_MENTION_LENGTH : MAX_NAME_LENGTH)) {
       return { ok: false, error: `"${name}" is longer than ${MAX_NAME_LENGTH} characters.` };
     }
     if (seen.has(name.toLowerCase())) return { ok: false, error: `"${name}" is listed twice.` };
     seen.add(name.toLowerCase());
-    entries.push({ name, cents });
+    entries.push({
+      name,
+      cents,
+      ...(username !== undefined ? { username } : {}),
+      ...(userId !== undefined ? { userId } : {}),
+    });
   }
   return { ok: true, entries };
 }

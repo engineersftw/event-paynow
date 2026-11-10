@@ -48,7 +48,15 @@ describe('migrations (whole history, applied in order)', () => {
         name: string;
       }>
     ).map((t) => t.name);
-    expect(tables).toEqual(['events', 'paybacks', 'payments', 'usage_counters', 'users']);
+    expect(tables).toEqual([
+      'events',
+      'paybacks',
+      'payments',
+      'split_claims',
+      'split_contacts',
+      'usage_counters',
+      'users',
+    ]);
 
     expect(columns(db, 'users')).toEqual([
       'telegram_id',
@@ -110,6 +118,20 @@ describe('migrations (whole history, applied in order)', () => {
       'cancelled_by',
     ]);
     expect(columns(db, 'usage_counters')).toEqual(['day', 'metric', 'count']);
+    expect(columns(db, 'split_contacts')).toEqual(['username', 'user_id', 'updated_at']);
+    expect(columns(db, 'split_claims')).toEqual([
+      'token',
+      'username',
+      'user_id',
+      'name',
+      'amount_cents',
+      'description',
+      'payload',
+      'organiser',
+      'chat_id',
+      'message_id',
+      'expires_at',
+    ]);
   });
 
   it('has unique references and a (day, metric) key for the counters', () => {
