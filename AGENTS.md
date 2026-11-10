@@ -102,7 +102,7 @@ This project uses OpenSpec for change management. All changes are archived:
 37. `add-bill-split-bot` (11 tasks) — archived 2026-11-10
 38. `add-uneven-bill-split` (11 tasks) — archived 2026-11-10
 39. `add-split-amend` (12 tasks) — archived 2026-11-10
-40. `add-split-mentions` (12 tasks) — in progress
+40. `add-split-mentions` (12 tasks) — archived 2026-11-10
 
 **Workflow commands:**
 
