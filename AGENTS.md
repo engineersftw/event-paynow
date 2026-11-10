@@ -100,7 +100,7 @@ This project uses OpenSpec for change management. All changes are archived:
 35. `add-social-previews` (8 tasks) — archived 2026-11-10
 36. `add-event-website-link` (12 tasks) — archived 2026-11-10
 37. `add-bill-split-bot` (11 tasks) — archived 2026-11-10
-38. `add-uneven-bill-split` (11 tasks) — in progress
+38. `add-uneven-bill-split` (11 tasks) — archived 2026-11-10
 
 **Workflow commands:**
 
