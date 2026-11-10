@@ -26,6 +26,10 @@ import type { ConversationDO, ConversationState } from '../worker/conversation-d
 import {
   type AssignedOk,
   applyUnassigned,
+  assignmentFromClaims,
+  type Claimer,
+  claimerName,
+  MAX_CLAIMERS,
   missingCents,
   parseAddedItems,
   parseAssignments,
@@ -61,9 +65,15 @@ const REVIEW = 11; // the scan is shown: Use this / Send another photo / Type th
 const ASSIGN = 12; // waiting for who had which item
 const UNASSIGNED = 13; // items nobody was given: split evenly or the organiser covers them
 const ADD_ITEM = 15; // the user is adding an item the scan missed
+const HOW = 16; // group only: type who had what, or let everyone claim
+const CLAIM = 17; // the claim message is open and any member can tap items
 const PAYEE_ME = 14; // is the payee the organiser? if not, the organiser pays their own share too
 
 const MAX_DESCRIPTION = 25;
+// Each round of simultaneous taps lets one write through, so this many taps at once all fit
+const MAX_TAP_RETRIES = 25;
+const IDLE_MS = 10 * 60 * 1000;
+const CLAIM_IDLE_MS = 60 * 60 * 1000; // people finish dinner at different speeds
 
 type Ctx = Record<string, unknown>;
 type Field = 'total' | 'people' | 'list' | 'assign' | 'payee' | 'description';
@@ -88,7 +98,7 @@ export const SPLIT_HELP =
   'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
   '/split - total, then equal or custom amounts, payee, optional description\n' +
   '/split_custom - same, straight to custom amounts (one line per person: name and amount; @mention someone to send them their QR directly)\n' +
-  '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge)\n' +
+  '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what.\n' +
   'After the payee I ask whether the payee is you; if someone else paid, you get a QR for your own share too.\n' +
   '/forget - delete what I remember about you (your username, kept when you /start me)\n' +
   '/cancel - stop\n\n' +
@@ -162,56 +172,7 @@ function readAnswer(
     if (!receipt) return { ok: false, error: 'There is no receipt to share out.' };
     const a = parseAssignments(text, receipt.items.length, textMentions);
     if (!a.ok) return { ok: false, error: `${a.error} Send the whole message again.` };
-    const nobody = {
-      ok: false as const,
-      error: 'Nobody else owes anything. Name at least one other person.',
-    };
-    if (a.people.every((p) => p.isMe)) return nobody;
-    const share = (done: AssignedOk) =>
-      toEntries(shareReceipt(receipt.items, done, receipt.totalCents).shares);
-
-    if (a.unassigned.length === 0) {
-      // Everything has an owner: the receipt total minus the others' shares is the organiser's own
-      const entries = share(a);
-      if (entries.length === 0) return nobody;
-      return {
-        ok: true,
-        patch: {
-          entries,
-          leftover: 'omit',
-          partial: undefined,
-          gap: undefined,
-          unassignedChoice: undefined,
-        },
-      };
-    }
-    // Some items belong to nobody. Keep an earlier choice only for the very same gap; otherwise
-    // the organiser is asked again.
-    const choice = c.unassignedChoice as 'me' | 'even' | undefined;
-    const sameGap = JSON.stringify(c.gap) === JSON.stringify(a.unassigned);
-    if (choice && sameGap) {
-      const entries = share(applyUnassigned(a, choice));
-      if (entries.length === 0) return nobody;
-      return {
-        ok: true,
-        patch: {
-          entries,
-          leftover: 'omit',
-          partial: a,
-          gap: a.unassigned,
-          unassignedChoice: choice,
-        },
-      };
-    }
-    return {
-      ok: true,
-      patch: {
-        entries: undefined,
-        partial: a,
-        gap: a.unassigned,
-        unassignedChoice: undefined,
-      },
-    };
+    return assignmentPatch(a, c, receipt);
   }
   if (field === 'payee') {
     const payee = detectProxyType(text);
@@ -240,6 +201,64 @@ function readAnswer(
   return { ok: true, patch: { description, described: true } };
 }
 
+/**
+ * What an assignment (typed or claimed) sets in the context: the entries when every item has an
+ * owner or an earlier choice still fits, otherwise the partial assignment for the organiser's
+ * choice about the unassigned items.
+ */
+function assignmentPatch(a: AssignedOk, c: Ctx, receipt: Receipt): Answer {
+  const nobody = {
+    ok: false as const,
+    error: 'Nobody else owes anything. Name at least one other person.',
+  };
+  if (a.people.every((p) => p.isMe)) return nobody;
+  const share = (done: AssignedOk) =>
+    toEntries(shareReceipt(receipt.items, done, receipt.totalCents).shares);
+
+  if (a.unassigned.length === 0) {
+    // Everything has an owner: the receipt total minus the others' shares is the organiser's own
+    const entries = share(a);
+    if (entries.length === 0) return nobody;
+    return {
+      ok: true,
+      patch: {
+        entries,
+        leftover: 'omit',
+        partial: undefined,
+        gap: undefined,
+        unassignedChoice: undefined,
+      },
+    };
+  }
+  // Some items belong to nobody. Keep an earlier choice only for the very same gap; otherwise
+  // the organiser is asked again.
+  const choice = c.unassignedChoice as 'me' | 'even' | undefined;
+  const sameGap = JSON.stringify(c.gap) === JSON.stringify(a.unassigned);
+  if (choice && sameGap) {
+    const entries = share(applyUnassigned(a, choice));
+    if (entries.length === 0) return nobody;
+    return {
+      ok: true,
+      patch: {
+        entries,
+        leftover: 'omit',
+        partial: a,
+        gap: a.unassigned,
+        unassignedChoice: choice,
+      },
+    };
+  }
+  return {
+    ok: true,
+    patch: {
+      entries: undefined,
+      partial: a,
+      gap: a.unassigned,
+      unassignedChoice: undefined,
+    },
+  };
+}
+
 /** The first thing still missing or invalid, in question order; CONFIRM when everything is in. */
 function nextNeed(c: Ctx): { step: number; note?: string } {
   const total = c.totalCents as number | undefined;
@@ -254,7 +273,9 @@ function nextNeed(c: Ctx): { step: number; note?: string } {
     const entries = c.entries as SplitEntry[] | undefined;
     if (!entries) {
       if (!c.receipt) return { step: LIST };
-      return { step: c.partial && !c.unassignedChoice ? UNASSIGNED : ASSIGN };
+      if (c.partial && !c.unassignedChoice) return { step: UNASSIGNED };
+      if (c.group && !c.assignHow) return { step: HOW };
+      return { step: c.assignHow === 'claim' ? CLAIM : ASSIGN };
     }
     const sum = sumCents(entries);
     if (sum > total) {
@@ -371,6 +392,33 @@ const amendMenu = (receipt: boolean) =>
     .text('Description', 'split_pick:description')
     .row()
     .text('Back', 'split_back');
+
+const claimsOf = (c: Ctx) => (c.claims as Record<string, number[]> | undefined) ?? {};
+const claimersOf = (c: Ctx) => (c.claimers as Claimer[] | undefined) ?? [];
+
+/** The claim message: every item with the people who claimed it. */
+function claimText(c: Ctx): string {
+  const claims = claimsOf(c);
+  const claimers = claimersOf(c);
+  const lines = (c.receipt as Receipt).items.map((it, i) => {
+    const who = (claims[String(i)] ?? [])
+      .map((id) => claimers.find((x) => x.id === id)?.name ?? '?')
+      .join(', ');
+    return `${i + 1}. ${it.name} ${sgd(it.cents)}: ${who || 'unclaimed'}`;
+  });
+  return `Tap the items you had; tap again to take one back. An item claimed by several people is split equally. The organiser taps Done when everyone has claimed. This stays open for an hour after the last tap.\n\n${lines.join('\n')}`;
+}
+
+/** One button per item (with how many have claimed it) and Done. */
+function claimButtons(c: Ctx): InlineKeyboard {
+  const claims = claimsOf(c);
+  const kb = new InlineKeyboard();
+  (c.receipt as Receipt).items.forEach((it, i) => {
+    const n = (claims[String(i)] ?? []).length;
+    kb.text(`${i + 1}. ${it.name}${n > 0 ? ` (${n})` : ''}`.slice(0, 40), `split_claim:${i}`).row();
+  });
+  return kb.text('✅ Done', 'split_claim:done');
+}
 
 /**
  * Split_PayNow_Bot conversation. Every answer is stored in the Durable Object context and
@@ -568,9 +616,15 @@ export class SplitCommandHandler {
   /** Button taps; false when the data is not ours. */
   async handleCallback(ctx: Context, data: string): Promise<boolean> {
     if (!data.startsWith('split_')) return false;
+    // Any member of the group may tap an item; everything else is the organiser's
+    if (/^split_claim:\d+$/.test(data)) return this.claimTap(ctx, data);
     const state = await this.getState();
     if (state.flow === 'split' && !this.isOwner(ctx, state)) {
-      await ctx.answerCallbackQuery({ text: 'This split is not yours.' });
+      await ctx.answerCallbackQuery({
+        text: data.startsWith('split_claim:')
+          ? "That is the organiser's button."
+          : 'This split is not yours.',
+      });
       return true;
     }
     const c = state.context;
@@ -579,35 +633,39 @@ export class SplitCommandHandler {
     const onMenu = data.startsWith('split_pick:') || data === 'split_back';
     const expected = data.startsWith('split_payee:')
       ? PAYEE_ME
-      : data.startsWith('split_unassigned:')
-        ? UNASSIGNED
-        : data.startsWith('split_scan:')
-          ? data === 'split_scan:add'
-            ? step === REVIEW
-              ? REVIEW
-              : -1
-            : data === 'split_scan:oneline' || data === 'split_scan:back'
-              ? step === ADD_ITEM
-                ? ADD_ITEM
-                : -1
-              : step === RECEIPT || step === REVIEW
-                ? step
-                : -1
-          : data.startsWith('split_mode:')
-            ? MODE
-            : data.startsWith('split_people:')
-              ? PEOPLE
-              : data.startsWith('split_leftover:')
-                ? LEFTOVER
-                : data === 'split_skip_description'
-                  ? DESCRIPTION
-                  : onSummary
-                    ? CONFIRM
-                    : onMenu
-                      ? AMEND
-                      : data === 'split_keep' && c.amending
-                        ? step
-                        : -1;
+      : data.startsWith('split_how:')
+        ? HOW
+        : data === 'split_claim:done'
+          ? CLAIM
+          : data === 'split_claim:keep' || data.startsWith('split_unassigned:')
+            ? UNASSIGNED
+            : data.startsWith('split_scan:')
+              ? data === 'split_scan:add'
+                ? step === REVIEW
+                  ? REVIEW
+                  : -1
+                : data === 'split_scan:oneline' || data === 'split_scan:back'
+                  ? step === ADD_ITEM
+                    ? ADD_ITEM
+                    : -1
+                  : step === RECEIPT || step === REVIEW
+                    ? step
+                    : -1
+              : data.startsWith('split_mode:')
+                ? MODE
+                : data.startsWith('split_people:')
+                  ? PEOPLE
+                  : data.startsWith('split_leftover:')
+                    ? LEFTOVER
+                    : data === 'split_skip_description'
+                      ? DESCRIPTION
+                      : onSummary
+                        ? CONFIRM
+                        : onMenu
+                          ? AMEND
+                          : data === 'split_keep' && c.amending
+                            ? step
+                            : -1;
     // Summary and menu buttons only count on the latest summary message
     const onLatest =
       !(onSummary || onMenu) ||
@@ -617,9 +675,49 @@ export class SplitCommandHandler {
       await ctx.answerCallbackQuery({ text: 'That step is over.' });
       return true;
     }
+    if (data === 'split_claim:done') {
+      const claimers = (c.claimers as Claimer[] | undefined) ?? [];
+      if (!claimers.some((x) => x.id !== ctx.from?.id)) {
+        await ctx.answerCallbackQuery({
+          text: 'Someone other than you must claim an item first.',
+          show_alert: true,
+        });
+        return true;
+      }
+    }
     await ctx.answerCallbackQuery();
 
-    if (data.startsWith('split_payee:')) {
+    if (data.startsWith('split_how:')) {
+      const claim = data.endsWith(':claim');
+      await ctx
+        .editMessageText(claim ? 'Everyone claims their own items.' : 'You will type who had what.')
+        .catch(() => undefined);
+      const context = { ...c, assignHow: claim ? 'claim' : 'type' };
+      const next = claim ? CLAIM : ASSIGN;
+      await this.setState({ flow: 'split', step: next, context });
+      await this.askStep(ctx, next, context);
+    } else if (data === 'split_claim:done') {
+      const receipt = c.receipt as Receipt;
+      const a = assignmentFromClaims(
+        receipt.items.length,
+        (c.claims as Record<string, number[]> | undefined) ?? {},
+        (c.claimers as Claimer[] | undefined) ?? [],
+        ctx.from!.id
+      );
+      const result = assignmentPatch(a, c, receipt);
+      if (!result.ok) {
+        await ctx.reply(result.error);
+        return true;
+      }
+      // Claiming is over for now (Keep claiming opens a fresh message): the buttons go
+      await ctx.editMessageText(`${claimText(c)}\n\nClaiming is closed.`).catch(() => undefined);
+      await this.proceed(ctx, { ...c, ...result.patch });
+    } else if (data === 'split_claim:keep') {
+      await this.setButtons(ctx, new InlineKeyboard()); // the question is answered
+      const { partial, gap, unassignedChoice, ...rest } = c;
+      await this.setState({ flow: 'split', step: CLAIM, context: rest });
+      await this.askStep(ctx, CLAIM, rest);
+    } else if (data.startsWith('split_payee:')) {
       const mine = data.endsWith(':me');
       await ctx
         .editMessageText(mine ? 'Payment was made by you.' : 'Payment was made by someone else.')
@@ -674,12 +772,23 @@ export class SplitCommandHandler {
       }
       if (data === 'split_scan:use' && scan) {
         // The receipt total is the bill; what the others owe is worked out from the items
-        const { entries, leftover, people, suggested, ...clean } = rest;
+        const {
+          entries,
+          leftover,
+          people,
+          suggested,
+          assignHow,
+          claims,
+          claimers,
+          claimMsg,
+          ...clean
+        } = rest;
         await this.proceed(ctx, {
           ...clean,
           receipt: scan.receipt,
           totalCents: scan.receipt.totalCents,
           mode: 'custom',
+          group: isGroup(ctx), // a group may let everyone claim the items
         });
       } else if (data === 'split_scan:again') {
         await this.setState({ flow: 'split', step: RECEIPT, context: rest });
@@ -716,7 +825,13 @@ export class SplitCommandHandler {
       const pick = data.slice('split_pick:'.length);
       await this.setButtons(ctx, new InlineKeyboard()); // the menu goes; the question replaces it
       const first =
-        pick === 'split' ? MODE : pick === 'items' ? ASSIGN : STEP_OF_FIELD[pick as Field];
+        pick === 'split'
+          ? MODE
+          : pick === 'items'
+            ? c.group
+              ? HOW
+              : ASSIGN
+            : STEP_OF_FIELD[pick as Field];
       const context = { ...c, amending: pick };
       await this.setState({ flow: 'split', step: first, context });
       await this.askStep(ctx, first, context);
@@ -832,18 +947,43 @@ export class SplitCommandHandler {
     } else if (step === UNASSIGNED) {
       const receipt = c.receipt as Receipt;
       const gap = (c.gap as number[]).map((i) => i + 1);
+      const claiming = c.assignHow === 'claim';
       const cents = gap.reduce((sum, n) => sum + receipt.items[n - 1]!.cents, 0);
       await ctx.reply(
-        `${gap.length === 1 ? `Item ${gap[0]}` : `Items ${gap.join(', ')}`} (${sgd(cents)} before charges) ${gap.length === 1 ? 'was' : 'were'} not given to anyone. What should happen to ${gap.length === 1 ? 'it' : 'them'}?`,
+        `${gap.length === 1 ? `Item ${gap[0]}` : `Items ${gap.join(', ')}`} (${sgd(cents)} before charges) ${gap.length === 1 ? 'was' : 'were'} not ${claiming ? 'claimed by' : 'given to'} anyone. What should happen to ${gap.length === 1 ? 'it' : 'them'}?`,
         {
           reply_markup: keep(
-            new InlineKeyboard()
-              .text('Split evenly between those named', 'split_unassigned:even')
-              .row()
-              .text('Leave them out: I cover them', 'split_unassigned:me')
+            (() => {
+              const kb = new InlineKeyboard()
+                .text(
+                  claiming
+                    ? 'Split evenly between those who claimed'
+                    : 'Split evenly between those named',
+                  'split_unassigned:even'
+                )
+                .row()
+                .text('Leave them out: I cover them', 'split_unassigned:me');
+              return claiming ? kb.row().text('Keep claiming', 'split_claim:keep') : kb;
+            })()
           )!,
         }
       );
+    } else if (step === HOW) {
+      await ctx.reply('How do you want to share out the items?', {
+        reply_markup: keep(
+          new InlineKeyboard()
+            .text("I'll type who had what", 'split_how:type')
+            .row()
+            .text('Let everyone claim their items', 'split_how:claim')
+        )!,
+      });
+    } else if (step === CLAIM) {
+      const sent = await ctx.reply(claimText(c), { reply_markup: claimButtons(c) });
+      await this.setState({
+        flow: 'split',
+        step: CLAIM,
+        context: { ...c, claimMsg: sent.message_id },
+      });
     } else if (step === ASSIGN) {
       const items = (c.receipt as Receipt).items;
       // The list gets its own bubble so it can be copied whole, without the instructions
@@ -1069,6 +1209,74 @@ export class SplitCommandHandler {
   }
 
   /** Private chats have one user; in a group only the user and topic that started it. */
+  /**
+   * A member taps an item: claim it, or take their claim back. The write is conditional on the
+   * revision that was read, so simultaneous taps are all kept (the loser reads again and retries).
+   */
+  private async claimTap(ctx: Context, data: string): Promise<boolean> {
+    const index = Number(data.slice('split_claim:'.length));
+    const from = ctx.from;
+    if (!from) return true;
+    for (let attempt = 0; attempt < MAX_TAP_RETRIES; attempt++) {
+      const state = await this.getState();
+      const c = state.context;
+      if (
+        state.flow !== 'split' ||
+        state.step !== CLAIM ||
+        ctx.callbackQuery?.message?.message_id !== c.claimMsg
+      ) {
+        await ctx.answerCallbackQuery({ text: 'That step is over.' });
+        return true;
+      }
+      if (!((c.receipt as Receipt).items[index] !== undefined)) {
+        await ctx.answerCallbackQuery();
+        return true;
+      }
+      const claims: Record<string, number[]> = {};
+      for (const [k, v] of Object.entries(claimsOf(c))) claims[k] = [...v];
+      let claimers = [...claimersOf(c)];
+      const holders = claims[String(index)] ?? [];
+      let note: string;
+      if (holders.includes(from.id)) {
+        claims[String(index)] = holders.filter((id) => id !== from.id);
+        note = 'Removed';
+      } else {
+        if (!claimers.some((x) => x.id === from.id)) {
+          if (claimers.length >= MAX_CLAIMERS) {
+            await ctx.answerCallbackQuery({
+              text: `Up to ${MAX_CLAIMERS} people can claim items.`,
+              show_alert: true,
+            });
+            return true;
+          }
+          claimers.push({
+            id: from.id,
+            name: claimerName(
+              claimers.map((x) => x.name),
+              from
+            ),
+            ...(from.username ? { username: from.username } : {}),
+          });
+        }
+        claims[String(index)] = [...holders, from.id];
+        note = 'Claimed';
+      }
+      // Someone with no items left is no longer counted as a claimer
+      const holding = new Set(Object.values(claims).flat());
+      claimers = claimers.filter((x) => holding.has(x.id));
+      const context = { ...c, claims, claimers };
+      const status = await this.writeIfRev({ flow: 'split', step: CLAIM, context }, state.rev ?? 0);
+      if (status === 409) continue; // another tap got in first: apply this one on top of it
+      await ctx.answerCallbackQuery({ text: note });
+      await ctx
+        .editMessageText(claimText(context), { reply_markup: claimButtons(context) })
+        .catch(() => undefined); // not modified or rate limited: the stored claims are the truth
+      return true;
+    }
+    await ctx.answerCallbackQuery({ text: 'Busy. Please tap again.' });
+    return true;
+  }
+
   private isOwner(ctx: Context, state: ConversationState): boolean {
     if (!isGroup(ctx)) return true;
     const o = state.owner;
@@ -1081,7 +1289,27 @@ export class SplitCommandHandler {
   }
 
   private async setState(state: Pick<ConversationState, 'flow' | 'step' | 'context'>) {
-    await this.fetch('/state', state);
+    // While items are being claimed the conversation waits an hour, not ten minutes
+    const claiming =
+      state.step === HOW ||
+      state.step === CLAIM ||
+      (state.step === UNASSIGNED && state.context.assignHow === 'claim');
+    await this.fetch('/state', { ...state, idleMs: claiming ? CLAIM_IDLE_MS : IDLE_MS });
+  }
+
+  /** Write the state only if nobody wrote since `rev` was read; the HTTP status says which. */
+  private async writeIfRev(
+    state: Pick<ConversationState, 'flow' | 'step' | 'context'>,
+    rev: number
+  ): Promise<number> {
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/state', {
+        method: 'POST',
+        body: JSON.stringify({ ...state, idleMs: CLAIM_IDLE_MS, ifRev: rev }),
+      })
+    );
+    await response.body?.cancel();
+    return response.status;
   }
 
   private async fetch(path: string, body: unknown) {

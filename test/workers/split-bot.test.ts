@@ -1798,3 +1798,189 @@ describe('acceptUpdate', () => {
     await expect(Promise.all(pending)).resolves.toBeDefined();
   });
 });
+
+describe('Split_PayNow_Bot group claiming', () => {
+  // 30 + 10 + 20 = 60.00 of items on a 72.00 receipt: 12.00 of service charge and GST
+  const RECEIPT = {
+    items: [
+      { name: 'Chilli crab', price: 30 },
+      { name: 'Rice', price: 10 },
+      { name: 'Beer', price: 20 },
+    ],
+    serviceCharge: 6,
+    gst: 6,
+    total: 72,
+  };
+  const reader = { read: async () => RECEIPT };
+  const claimBot = () =>
+    createSplitBot(
+      { ...env, AI: undefined } as never,
+      'split-token',
+      {
+        botInfo: TEST_BOT_INFO,
+        client: {
+          fetch: async (url, init) =>
+            String(url).endsWith('/getChatMemberCount')
+              ? new Response(JSON.stringify({ ok: true, result: 7 }))
+              : stub.fetch(url, init),
+        },
+      },
+      { reader, download: async () => new Uint8Array([1, 2, 3]) }
+    );
+  const NAMES: Record<number, string> = {};
+  /** A tap by any member on a given message (the claim message keeps its id across edits). */
+  const tapOn = (b: B, chat: number, user: number, data: string, messageId: number) => {
+    const u = callbackUpdate(user, data, messageId, upd++) as unknown as {
+      callback_query: { from: Record<string, unknown>; message: Record<string, unknown> };
+    };
+    u.callback_query.from = { id: user, is_bot: false, first_name: NAMES[user] ?? `User${user}` };
+    u.callback_query.message.chat = { id: chat, type: 'group' };
+    return b.handleUpdate(u as unknown as Update);
+  };
+  const stateOf = async (chat: number) =>
+    (await peek(`split-${chat}`)) as unknown as {
+      step: number;
+      context: { claims?: Record<string, number[]>; claimers?: Array<{ id: number }> };
+    };
+
+  /** Start /split_receipt in a group, scan, Use this, choose to claim; returns what the tests need. */
+  async function startClaiming() {
+    const chat = -uid++;
+    const [org, ann, bob] = [uid++, uid++, uid++];
+    NAMES[org] = 'Olive';
+    NAMES[ann] = 'Ann';
+    NAMES[bob] = 'Bob';
+    const b = claimBot();
+    stub.reset();
+    await gsay(b, chat, org, '/split_receipt');
+    await b.handleUpdate(photoUpdate(chat, org, 'file-1', upd++));
+    await gtap(b, chat, org, 'split_scan:use');
+    expect(stub.lastText()).toContain('How do you want to share out the items?');
+    await gtap(b, chat, org, 'split_how:claim');
+    const msg = lastId();
+    expect(stub.lastText()).toContain('1. Chilli crab SGD 30.00: unclaimed');
+    return { b, chat, org, ann, bob, msg };
+  }
+  const reachSummary = async (b: B, chat: number, org: number) => {
+    await gsay(b, chat, org, '91234567');
+    await gtap(b, chat, org, 'split_payee:me');
+    await gtap(b, chat, org, 'split_skip_description');
+    return stub.lastText();
+  };
+
+  it('offers the choice in a group but not in a private chat', async () => {
+    const b = claimBot();
+    const u = uid++;
+    await say(b, u, '/split_receipt');
+    await b.handleUpdate(photoUpdate(u, u, 'file-1', upd++));
+    await tap(b, u, 'split_scan:use');
+    expect(stub.lastText()).toContain('Who had what?');
+    expect(stub.lastText()).not.toContain('How do you want to share out');
+  });
+
+  it('lets members claim, share and take back items, and everyone claimed makes the amounts', async () => {
+    const { b, chat, org, ann, bob, msg } = await startClaiming();
+    await tapOn(b, chat, ann, 'split_claim:0', msg);
+    expect(stub.callbackAnswers.at(-1)).toBe('Claimed');
+    await tapOn(b, chat, bob, 'split_claim:0', msg);
+    await tapOn(b, chat, bob, 'split_claim:1', msg);
+    await tapOn(b, chat, org, 'split_claim:2', msg);
+    expect(stub.editedMessages.at(-1)!.text).toContain('1. Chilli crab SGD 30.00: Ann, Bob');
+    expect(stub.editedMessages.at(-1)!.text).toContain('3. Beer SGD 20.00: Olive');
+
+    // taking a claim back removes the name
+    await tapOn(b, chat, bob, 'split_claim:1', msg);
+    expect(stub.callbackAnswers.at(-1)).toBe('Removed');
+    expect(stub.editedMessages.at(-1)!.text).toContain('2. Rice SGD 10.00: unclaimed');
+    await tapOn(b, chat, bob, 'split_claim:1', msg);
+
+    await tapOn(b, chat, org, 'split_claim:done', msg);
+    expect(stub.lastText()).toContain('Who should be paid?');
+    expect(stub.editedMessages.at(-1)!.text).toContain('Claiming is closed.');
+    const summary = await reachSummary(b, chat, org);
+    expect(summary).toContain('Ann: SGD 18.00 (by direct message)');
+    expect(summary).toContain('Bob: SGD 30.00 (by direct message)');
+    expect(summary).toContain('Your own share, not collected: SGD 24.00');
+    expect(summary).toContain('shared by 3 people');
+
+    // confirming sends each claimer their QR by direct message
+    await gtap(b, chat, org, 'split_confirm');
+    expect(stub.sentPhotos.map((p) => p.chatId).sort()).toEqual([String(ann), String(bob)].sort());
+  });
+
+  it('keeps simultaneous taps, and stops at 20 claimers', async () => {
+    const { b, chat, msg } = await startClaiming();
+    const people = Array.from({ length: 6 }, () => uid++);
+    await Promise.all(people.map((p, i) => tapOn(b, chat, p, `split_claim:${i % 3}`, msg)));
+    const state = await stateOf(chat);
+    expect(state.context.claimers).toHaveLength(6);
+    const claimed = Object.values(state.context.claims ?? {}).flat();
+    expect(claimed.sort()).toEqual([...people].sort());
+
+    // 14 more fill the limit (20 people), the 21st is told no
+    for (let i = 0; i < 14; i++) await tapOn(b, chat, uid++, 'split_claim:0', msg);
+    await tapOn(b, chat, uid++, 'split_claim:0', msg);
+    expect(stub.callbackAnswers.at(-1)).toContain('Up to 20 people');
+    expect((await stateOf(chat)).context.claimers).toHaveLength(20);
+  });
+
+  it('refuses Done until someone else claimed, and only the organiser can close', async () => {
+    const { b, chat, org, ann, msg } = await startClaiming();
+    await tapOn(b, chat, org, 'split_claim:0', msg);
+    await tapOn(b, chat, org, 'split_claim:done', msg);
+    expect(stub.callbackAnswers.at(-1)).toContain('Someone other than you');
+    expect((await stateOf(chat)).step).toBe(17);
+
+    await tapOn(b, chat, ann, 'split_claim:1', msg);
+    await tapOn(b, chat, ann, 'split_claim:done', msg);
+    expect(stub.callbackAnswers.at(-1)).toBe("That is the organiser's button.");
+    expect((await stateOf(chat)).step).toBe(17);
+  });
+
+  it('asks what to do with unclaimed items: cover them, share them, or keep claiming', async () => {
+    const run = async (choice: 'split_unassigned:me' | 'split_unassigned:even') => {
+      const { b, chat, org, ann, bob, msg } = await startClaiming();
+      await tapOn(b, chat, ann, 'split_claim:0', msg);
+      await tapOn(b, chat, bob, 'split_claim:1', msg);
+      await tapOn(b, chat, org, 'split_claim:done', msg);
+      expect(stub.lastText()).toContain('Item 3');
+      expect(stub.lastText()).toContain('not claimed by anyone');
+      await gtap(b, chat, org, choice);
+      return reachSummary(b, chat, org);
+    };
+    // 20.00 of beer: covered by the organiser, or split between the two claimers (Ann 40, Bob 20)
+    expect(await run('split_unassigned:me')).toContain('Your own share, not collected: SGD 24.00');
+    const shared = await run('split_unassigned:even');
+    expect(shared).toContain('Ann: SGD 48.00');
+    expect(shared).toContain('Bob: SGD 24.00');
+
+    const { b, chat, org, ann, bob, msg } = await startClaiming();
+    await tapOn(b, chat, ann, 'split_claim:0', msg);
+    await tapOn(b, chat, bob, 'split_claim:1', msg);
+    await tapOn(b, chat, org, 'split_claim:done', msg);
+    await gtap(b, chat, org, 'split_claim:keep');
+    expect(stub.lastText()).toContain('3. Beer SGD 20.00: unclaimed');
+    const again = lastId();
+    await tapOn(b, chat, bob, 'split_claim:2', again);
+    expect(stub.editedMessages.at(-1)!.text).toContain('3. Beer SGD 20.00: Bob');
+  });
+
+  it('answers old claim buttons with "That step is over" and reopens earlier claims on Amend', async () => {
+    const { b, chat, org, ann, bob, msg } = await startClaiming();
+    await tapOn(b, chat, ann, 'split_claim:0', msg);
+    await tapOn(b, chat, bob, 'split_claim:1', msg);
+    await tapOn(b, chat, org, 'split_claim:2', msg);
+    await tapOn(b, chat, org, 'split_claim:done', msg);
+    await reachSummary(b, chat, org);
+
+    await tapOn(b, chat, ann, 'split_claim:1', msg);
+    expect(stub.callbackAnswers.at(-1)).toBe('That step is over.');
+
+    await gtap(b, chat, org, 'split_amend');
+    await gtap(b, chat, org, 'split_pick:items');
+    expect(stub.lastText()).toContain('How do you want to share out the items?');
+    await gtap(b, chat, org, 'split_how:claim');
+    expect(stub.lastText()).toContain('1. Chilli crab SGD 30.00: Ann');
+    expect(stub.lastText()).toContain('2. Rice SGD 10.00: Bob');
+  });
+});

@@ -35,6 +35,12 @@ const ConversationStateSchema = z.object({
   // Who started the conversation and in which topic (0 = no topic). Only their text continues it.
   // Absent on idle state and on conversations that began before this field existed.
   owner: z.object({ userId: z.number(), topicId: z.number() }).optional(),
+
+  // Counts content writes through POST /state, so a caller can refuse to overwrite a newer one
+  rev: z.number().int().nonnegative().optional(),
+
+  // Idle time before this conversation expires; the default applies when absent
+  idleMs: z.number().int().positive().optional(),
 });
 
 export type ConversationState = z.infer<typeof ConversationStateSchema>;
@@ -101,7 +107,7 @@ export class ConversationSerializer {
 export class ConversationDO {
   public state: DurableObjectState;
   private serializer: ConversationSerializer;
-  private alarmTimeoutMs = 10 * 60 * 1000; // 10 minutes
+  private alarmTimeoutMs = 10 * 60 * 1000; // 10 minutes unless the state says otherwise
 
   // workerd constructs DOs with (state, env); this DO only needs storage,
   // so env is accepted but intentionally unused.
@@ -182,7 +188,7 @@ export class ConversationDO {
     await this.saveState(state);
 
     // Schedule alarm for idle expiry
-    await this.scheduleAlarm();
+    await this.scheduleAlarm(state.idleMs);
 
     return new Response(JSON.stringify(state), {
       headers: { 'Content-Type': 'application/json' },
@@ -226,7 +232,9 @@ export class ConversationDO {
    */
   private async updateState(request: Request): Promise<Response> {
     try {
-      const updates = (await request.json()) as Partial<ConversationState>;
+      const { ifRev, ...updates } = (await request.json()) as Partial<ConversationState> & {
+        ifRev?: number;
+      };
       const currentJson = await this.state.storage.get<string>('conversation');
 
       let current: ConversationState;
@@ -242,8 +250,13 @@ export class ConversationDO {
         }
       }
 
+      // A write that expects a revision is refused when somebody else wrote in between
+      if (ifRev !== undefined && (current.rev ?? 0) !== ifRev) {
+        return new Response('Conflict', { status: 409 });
+      }
+
       // Merge updates; an owner never outlives its conversation
-      const updated = { ...current, ...updates };
+      const updated = { ...current, ...updates, rev: (current.rev ?? 0) + 1 };
       if (updated.flow === 'idle') delete updated.owner;
 
       // Validate updated state
@@ -257,7 +270,7 @@ export class ConversationDO {
       await this.saveState(validated);
 
       // Schedule alarm for idle expiry
-      await this.scheduleAlarm();
+      await this.scheduleAlarm(validated.idleMs);
 
       return new Response(JSON.stringify(validated), {
         headers: { 'Content-Type': 'application/json' },
@@ -331,7 +344,7 @@ export class ConversationDO {
       const lastActivity = new Date(state.lastActivity).getTime();
       const now = Date.now();
 
-      if (now - lastActivity >= this.alarmTimeoutMs) {
+      if (now - lastActivity >= (state.idleMs ?? this.alarmTimeoutMs)) {
         // Clear state after 10 minutes of inactivity
         await this.state.storage.delete('conversation');
       }
@@ -349,8 +362,8 @@ export class ConversationDO {
   /**
    * Schedule alarm for idle expiry.
    */
-  private async scheduleAlarm(): Promise<void> {
-    const scheduledTime = Date.now() + this.alarmTimeoutMs;
+  private async scheduleAlarm(idleMs?: number): Promise<void> {
+    const scheduledTime = Date.now() + (idleMs ?? this.alarmTimeoutMs);
     await this.state.storage.setAlarm(scheduledTime);
   }
 }

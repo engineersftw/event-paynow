@@ -325,6 +325,66 @@ export function parseAssignments(
   return { ok: true, people, items: assigned, unassigned };
 }
 
+/** Someone who tapped an item in a group: a Telegram account and the name shown for them. */
+export interface Claimer {
+  id: number;
+  name: string;
+  username?: string;
+}
+
+export const MAX_CLAIMERS = 20;
+
+/**
+ * The name shown for a new claimer: the first name; when another claimer already shows it, add
+ * the last initial, then the @username, then a number. Fixed once chosen, so names never change
+ * under the others.
+ */
+export function claimerName(
+  taken: string[],
+  from: { first_name: string; last_name?: string; username?: string }
+): string {
+  const used = new Set(taken.map((t) => t.toLowerCase()));
+  const base = from.first_name.trim().slice(0, 20) || 'Someone';
+  const last = from.last_name?.trim()[0];
+  const tries = [
+    base,
+    ...(last ? [`${base} ${last.toUpperCase()}.`] : []),
+    ...(from.username ? [`@${from.username}`] : []),
+  ];
+  for (const t of tries) if (!used.has(t.toLowerCase())) return t;
+  for (let n = 2; ; n++) if (!used.has(`${base} ${n}`.toLowerCase())) return `${base} ${n}`;
+}
+
+/**
+ * The assignment a group's claims make, in the same shape the typed parser returns. `claims[i]`
+ * holds the ids of the people who claimed item i (zero-based); the organiser is `me`, everyone
+ * else keeps their user id so the QR can be sent to them directly.
+ */
+export function assignmentFromClaims(
+  itemCount: number,
+  claims: Record<string, number[]>,
+  claimers: Claimer[],
+  organiserId: number
+): AssignedOk {
+  const people: Person[] = claimers.map((c) =>
+    c.id === organiserId
+      ? { name: 'me', isMe: true }
+      : {
+          name: c.name,
+          isMe: false,
+          userId: c.id,
+          ...(c.username ? { username: c.username.toLowerCase() } : {}),
+        }
+  );
+  const items = Array.from({ length: itemCount }, (_, i) =>
+    (claims[String(i)] ?? [])
+      .map((id) => claimers.findIndex((c) => c.id === id))
+      .filter((p) => p >= 0)
+  );
+  const unassigned = items.flatMap((a, i) => (a.length === 0 ? [i] : []));
+  return { ok: true, people, items, unassigned };
+}
+
 /**
  * Give the unassigned items to somebody: `me` makes the organiser carry them (counted, not
  * collected); `even` shares each one equally between everyone named in the message.
