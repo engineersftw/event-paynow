@@ -886,7 +886,10 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(buttons()).toEqual(['split_scan:use', 'split_scan:again', 'split_scan:manual']);
     await tap(b, org, 'split_scan:use');
     expect(stub.lastText()).toContain('Who had what?');
-    expect(stub.lastText()).toContain('3. Beer SGD 20.00');
+    // the list is its own bubble, just before the question
+    expect(stub.sentMessages.at(-2)!.text).toBe(
+      '1. Chilli crab SGD 30.00\n2. Rice SGD 10.00\n3. Beer SGD 20.00'
+    );
     await say(b, org, `1 @ann_${ann}\n2 Bob\n3 me`);
     await say(b, org, '91234567');
     await tap(b, org, 'split_payee:me');
@@ -901,6 +904,33 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(sent.find((q) => q.to === String(org))!.payload).toContain('540512.00');
     expect(sent.find((q) => q.to === String(org))!.caption).toContain('Bob');
     expect(sent.every((q) => !q.caption.includes('91234567'))).toBe(true);
+  });
+
+  it('assigns a receipt from a pasted list with names above the items', async () => {
+    const org = uid++;
+    const ann = uid++;
+    const b = receiptBot();
+    await b.handleUpdate(
+      (() => {
+        const u = textUpdate(ann, '/start', upd++);
+        (u as unknown as { message: { from: Record<string, unknown> } }).message.from.username =
+          `ann_${ann}`;
+        return u;
+      })()
+    );
+    stub.reset();
+    await say(b, org, '/split_receipt');
+    await photo(b, org);
+    await tap(b, org, 'split_scan:use');
+    expect(stub.lastText()).toContain('put a name above each group');
+    await say(b, org, `@ann_${ann}\n1. Chilli crab SGD 30.00\n\nBob\n2. whatever\n\nme\n3. Beer`);
+    await say(b, org, '91234567');
+    await tap(b, org, 'split_payee:me');
+    await tap(b, org, 'split_skip_description');
+    const summary = stub.lastText();
+    expect(summary).toContain(`@ann_${ann}: SGD 36.00 (by direct message)`);
+    expect(summary).toContain('Bob: SGD 12.00');
+    expect(summary).toContain('Your own share, not collected: SGD 24.00');
   });
 
   it('reads a photo sent at the total prompt, and Type the total instead goes back to a normal split', async () => {
@@ -1273,7 +1303,7 @@ describe('Split_PayNow_Bot receipt scan', () => {
       await tap(b, org, 'split_scan:add');
       await say(b, org, 'Sapporo Black 9.50');
       await tap(b, org, 'split_scan:use');
-      expect(stub.lastText()).toContain('10. Sapporo Black SGD 9.50');
+      expect(stub.sentMessages.at(-2)!.text).toContain('10. Sapporo Black SGD 9.50');
       await say(b, org, '1,2,3,4,5,6,7,8,9 Ann\n10 Bob');
       await say(b, org, '91234567');
       await tap(b, org, 'split_payee:me');

@@ -187,6 +187,7 @@ export type AssignedOk = Extract<Assignment, { ok: true }>;
 
 const USERNAME = /^@([A-Za-z][A-Za-z0-9_]{4,31})$/;
 const MAX_PEOPLE = 20;
+const ITEM_LINE = /^(\d+)[.)]\s/;
 
 /**
  * "1,3 Ann", "2 Ann, Bob", "4 me", "5 all": item numbers (or ranges), then comma-separated people.
@@ -207,30 +208,8 @@ export function parseAssignments(
   };
   const lines: Array<{ items: number[]; who: Array<number | 'all'> }> = [];
 
-  for (const raw of text.split('\n')) {
-    const line = raw.trim();
-    if (!line) continue;
-    let rest = line;
-    const items: number[] = [];
-    for (;;) {
-      const m = /^(\d+)(?:-(\d+))?(?:\s*,\s*|\s+|$)/.exec(rest);
-      if (!m) break;
-      const from = Number(m[1]);
-      const to = m[2] ? Number(m[2]) : from;
-      if (to < from)
-        return { ok: false, error: `"${line}": the range ${from}-${to} is backwards.` };
-      for (let n = from; n <= to; n++) items.push(n);
-      rest = rest.slice(m[0].length);
-    }
-    if (items.length === 0) {
-      return { ok: false, error: `"${line}" must start with item numbers (for example 1,3 Ann).` };
-    }
-    const names = rest
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean);
-    if (names.length === 0)
-      return { ok: false, error: `"${line}" has no people after the item numbers.` };
+  // Names (me, all, @mention or plain) to people; a string is an error message
+  const resolve = (names: string[]): Array<number | 'all'> | string => {
     const who: Array<number | 'all'> = [];
     for (const name of names) {
       const lower = name.toLowerCase();
@@ -240,9 +219,7 @@ export function parseAssignments(
         const username = USERNAME.exec(name)?.[1]?.toLowerCase();
         const userId = textMentions?.get(name);
         const mention = username !== undefined || userId !== undefined;
-        if (name.length > (mention ? 33 : 20)) {
-          return { ok: false, error: `"${name}" is too long for a name.` };
-        }
+        if (name.length > (mention ? 33 : 20)) return `"${name}" is too long for a name.`;
         who.push(
           indexOf({
             name,
@@ -253,7 +230,75 @@ export function parseAssignments(
         );
       }
     }
-    lines.push({ items, who });
+    return who;
+  };
+  const splitNames = (s: string) =>
+    s
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+  // Header format: a line naming people, then item lines ("1. Pizza SGD 18.80") copied from the list
+  const rows = text
+    .split('\n')
+    .map((r) => r.trim())
+    .filter(Boolean);
+  const headerFormat = rows.some((r) => ITEM_LINE.test(r) || !/^\d/.test(r));
+  if (headerFormat) {
+    let who: Array<number | 'all'> | undefined;
+    for (const row of rows) {
+      const item = ITEM_LINE.exec(row);
+      if (item) {
+        if (!who) {
+          return {
+            ok: false,
+            error: `"${row}" comes before any name. Put a name above the items.`,
+          };
+        }
+        lines.push({ items: [Number(item[1])], who });
+        continue;
+      }
+      const names = splitNames(row.replace(/:$/, ''));
+      if (names.length === 0 || /^\d/.test(row)) {
+        return { ok: false, error: `"${row}" must be a name or an item from the list.` };
+      }
+      const r = resolve(names);
+      if (typeof r === 'string') return { ok: false, error: r };
+      who = r;
+    }
+    if (lines.length === 0) {
+      return {
+        ok: false,
+        error: `"${rows[0]}" must start with item numbers (for example 1,3 Ann).`,
+      };
+    }
+  } else {
+    for (const line of rows) {
+      let rest = line;
+      const items: number[] = [];
+      for (;;) {
+        const m = /^(\d+)(?:-(\d+))?(?:\s*,\s*|\s+|$)/.exec(rest);
+        if (!m) break;
+        const from = Number(m[1]);
+        const to = m[2] ? Number(m[2]) : from;
+        if (to < from)
+          return { ok: false, error: `"${line}": the range ${from}-${to} is backwards.` };
+        for (let n = from; n <= to; n++) items.push(n);
+        rest = rest.slice(m[0].length);
+      }
+      if (items.length === 0) {
+        return {
+          ok: false,
+          error: `"${line}" must start with item numbers (for example 1,3 Ann).`,
+        };
+      }
+      const names = splitNames(rest);
+      if (names.length === 0)
+        return { ok: false, error: `"${line}" has no people after the item numbers.` };
+      const who = resolve(names);
+      if (typeof who === 'string') return { ok: false, error: who };
+      lines.push({ items, who });
+    }
   }
   if (lines.length === 0) return { ok: false, error: 'The message is empty.' };
   if (people.length === 0) return { ok: false, error: '"all" needs people named in other lines.' };
@@ -269,9 +314,11 @@ export function parseAssignments(
     ];
     for (const n of l.items) {
       if (n < 1 || n > itemCount) return { ok: false, error: `There is no item ${n}.` };
-      if (seen.has(n)) return { ok: false, error: `Item ${n} is listed twice.` };
+      if (seen.has(n) && !headerFormat) {
+        return { ok: false, error: `Item ${n} is listed twice.` };
+      }
       seen.add(n);
-      assigned[n - 1] = sharers;
+      assigned[n - 1] = [...new Set([...(assigned[n - 1] ?? []), ...sharers])];
     }
   }
   const unassigned = assigned.flatMap((a, i) => (a.length === 0 ? [i] : []));

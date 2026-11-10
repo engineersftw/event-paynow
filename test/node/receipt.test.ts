@@ -90,6 +90,42 @@ describe('parseAssignments', () => {
     expect(a.people[0]).toMatchObject({ name: '@Ann_Lee', username: 'ann_lee' });
     expect(a.people[1]).toMatchObject({ name: 'Zed Q', userId: 77 });
   });
+  describe('header format', () => {
+    it('reads names above pasted item lines', () => {
+      const a = assign(
+        'Sam\n1. Chefs Pizza SGD 18.80\n\n@benjamin\n2. Clam Chowder SGD 8.80\n\nAll:\n3. Sirloin Steak SGD 30.80\n4. Spaghetti SGD 20.80',
+        4
+      );
+      expect(a.people.map((p) => p.name)).toEqual(['Sam', '@benjamin']);
+      expect(a.people[1]).toMatchObject({ username: 'benjamin' });
+      expect(a.items).toEqual([[0], [1], [0, 1], [0, 1]]);
+      expect(a.unassigned).toEqual([]);
+    });
+    it('matches by number only, accepts ) and a colon, groups and me', () => {
+      const a = assign('Ann, Bob:\n1) pizza\n2. x\nme\n3. y', 4);
+      expect(a.people.map((p) => p.name)).toEqual(['Ann', 'Bob', 'me']);
+      expect(a.items).toEqual([[0, 1], [0, 1], [2], []]);
+      expect(a.unassigned).toEqual([3]);
+    });
+    it('shares an item listed under two names', () => {
+      const a = assign('Ann\n1. a\nBob\n1. a', 1);
+      expect(a.items).toEqual([[0, 1]]);
+    });
+    it('counts a name with no items in All', () => {
+      const a = assign('Ann\n1. a\nBob\nAll\n2. b', 2);
+      expect(a.items).toEqual([[0], [0, 1]]);
+    });
+    it('rejects mistakes', () => {
+      const err = (t: string, n = 3) => {
+        const a = parseAssignments(t, n);
+        return a.ok ? '' : a.error;
+      };
+      expect(err('1. Pizza\nAnn')).toContain('before any name');
+      expect(err('Ann\n9. Pizza')).toContain('no item 9');
+      expect(err('Ann\nBob')).toContain('must start with item numbers');
+      expect(err('Ann\n1,2 Bob')).toContain('must be a name or an item');
+    });
+  });
   it('treats names that differ only by case as one person', () => {
     const a = assign('1 Ann\n2 ann', 2);
     expect(a.people).toHaveLength(1);
