@@ -108,7 +108,7 @@ This project uses OpenSpec for change management. All changes are archived:
 42. `add-split-receipt-unassigned` (8 tasks) — archived 2026-11-10
 43. `add-split-payee-is-organiser` (8 tasks) — archived 2026-11-10
 44. `add-split-stats` (8 tasks) — archived 2026-11-10
-45. `add-receipt-missing-item` (8 tasks) — in progress
+45. `add-receipt-missing-item` (8 tasks) — archived 2026-11-10
 
 **Workflow commands:**
 
