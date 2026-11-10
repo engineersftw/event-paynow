@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyUnassigned,
+  MAX_ITEMS,
+  missingCents,
+  parseAddedItems,
   parseAssignments,
   parseScan,
+  receiptWarnings,
   shareReceipt,
   toEntries,
 } from '../../src/commands/receipt';
@@ -266,5 +270,97 @@ describe('unassigned items', () => {
   it('changes nothing when nothing is unassigned', () => {
     const a = assign('1 Ann\n2 Bob', 2);
     expect(applyUnassigned(a, 'me')).toBe(a);
+  });
+});
+
+describe('a scan that dropped an item', () => {
+  // The real receipt: nine items read (107.60) of ten, printed subtotal 117.10, service 11.71, GST 11.59
+  const dropped = {
+    merchant: 'Bistrot',
+    items: [14.9, 12.9, 9.5, 11.9, 1.8, 9.9, 14.9, 12.0, 19.8].map((price, i) => ({
+      name: `Item ${i + 1}`,
+      price,
+    })),
+    subtotal: 117.1,
+    serviceCharge: 11.71,
+    gst: 11.59,
+    total: 140.4,
+  };
+  const read = (raw: unknown) => {
+    const r = parseScan(raw);
+    if (!r.ok) throw new Error(r.error);
+    return r;
+  };
+
+  it('says how much is missing, against the printed subtotal', () => {
+    const r = read(dropped);
+    expect(missingCents(r.receipt)).toBe(950);
+    expect(r.warnings.join(' ')).toContain(
+      'The items add up to SGD 107.60 but the subtotal is SGD 117.10: SGD 9.50 looks missing.'
+    );
+    expect(r.warnings.join(' ')).not.toContain('do not add up to the subtotal');
+  });
+
+  it('works out the gap from the total and charges when no subtotal was read', () => {
+    const r = read({ ...dropped, subtotal: undefined });
+    expect(missingCents(r.receipt)).toBe(950);
+    expect(r.warnings.join(' ')).toContain('SGD 9.50 looks missing');
+    // a discount is added back to what the items should come to
+    const disc = read({ ...dropped, subtotal: undefined, discount: 5, total: 135.4 });
+    expect(missingCents(disc.receipt)).toBe(950);
+  });
+
+  it('cannot tell a gap from charges when neither a subtotal nor a charge was read', () => {
+    const r = read({ items: [{ name: 'a', price: 10 }], total: 30 });
+    expect(missingCents(r.receipt)).toBe(0);
+  });
+
+  it('ignores two cents of rounding, and items above the expected amount', () => {
+    expect(missingCents(read({ ...dropped, subtotal: 107.62, total: 126.92 }).receipt)).toBe(0);
+    const over = read({ ...dropped, subtotal: 100, total: 123.3 });
+    expect(missingCents(over.receipt)).toBe(0);
+    expect(over.warnings.join(' ')).toContain('do not add up to the subtotal');
+  });
+
+  it('keeps the skipped-lines warning and clears the missing one once the item is added', () => {
+    const r = read({ ...dropped, items: [...dropped.items, { name: 'bad', price: 'abc' }] });
+    expect(r.receipt.skipped).toBe(1);
+    expect(receiptWarnings(r.receipt).join(' ')).toContain('skipped 1');
+    const added = parseAddedItems('Sapporo Black 9.50', r.receipt.items.length);
+    if (!added.ok) throw new Error(added.error);
+    const fixed = { ...r.receipt, items: [...r.receipt.items, ...added.items] };
+    expect(missingCents(fixed)).toBe(0);
+    expect(receiptWarnings(fixed).join(' ')).not.toContain('looks missing');
+    expect(receiptWarnings(fixed).join(' ')).toContain('skipped 1');
+  });
+});
+
+describe('parseAddedItems', () => {
+  const ok = (t: string, n = 9) => {
+    const r = parseAddedItems(t, n);
+    if (!r.ok) throw new Error(r.error);
+    return r.items;
+  };
+  it('reads a name and a price per line, in order', () => {
+    expect(ok('Sapporo Black 9.50\nRice $1.80')).toEqual([
+      { name: 'Sapporo Black', cents: 950 },
+      { name: 'Rice', cents: 180 },
+    ]);
+  });
+  it('numbers an item with no name after the existing ones', () => {
+    expect(ok('9.50', 9)).toEqual([{ name: 'Item 10', cents: 950 }]);
+  });
+  it('names the first bad line and adds nothing', () => {
+    for (const bad of ['Sapporo', 'Sapporo 0', 'Sapporo 9.505', 'Sapporo -3', 'Sapporo abc']) {
+      const r = parseAddedItems(`Beer 5\n${bad}`, 3);
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.error).toContain(bad);
+    }
+    expect(parseAddedItems('  \n ', 3).ok).toBe(false);
+  });
+  it('refuses to go past the item cap', () => {
+    expect(parseAddedItems('A 1', MAX_ITEMS).ok).toBe(false);
+    expect(parseAddedItems('A 1\nB 2', MAX_ITEMS - 1).ok).toBe(false);
+    expect(parseAddedItems('A 1', MAX_ITEMS - 1).ok).toBe(true);
   });
 });
