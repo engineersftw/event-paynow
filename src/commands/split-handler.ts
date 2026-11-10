@@ -8,7 +8,15 @@ import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
 import { renderQrPng } from '../sgqr/qr-render';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
-import { parseAssignments, parseScan, type Receipt, shareReceipt, toEntries } from './receipt';
+import {
+  type AssignedOk,
+  applyUnassigned,
+  parseAssignments,
+  parseScan,
+  type Receipt,
+  shareReceipt,
+  toEntries,
+} from './receipt';
 import { directMessage, newExpiry, newToken, postWaiting } from './split-claim';
 import {
   applyLeftover,
@@ -33,6 +41,7 @@ const AMEND = 9; // the Amend menu is open on the summary message
 const RECEIPT = 10; // waiting for a receipt photo
 const REVIEW = 11; // the scan is shown: Use this / Send another photo / Type the total instead
 const ASSIGN = 12; // waiting for who had which item
+const UNASSIGNED = 13; // items nobody was given: split evenly or the organiser covers them
 
 const MAX_DESCRIPTION = 25;
 
@@ -132,12 +141,56 @@ function readAnswer(
     if (!receipt) return { ok: false, error: 'There is no receipt to share out.' };
     const a = parseAssignments(text, receipt.items.length, textMentions);
     if (!a.ok) return { ok: false, error: `${a.error} Send the whole message again.` };
-    const entries = toEntries(shareReceipt(receipt.items, a, receipt.totalCents).shares);
-    if (entries.length === 0) {
-      return { ok: false, error: 'Nobody else owes anything. Name at least one other person.' };
+    const nobody = {
+      ok: false as const,
+      error: 'Nobody else owes anything. Name at least one other person.',
+    };
+    if (a.people.every((p) => p.isMe)) return nobody;
+    const share = (done: AssignedOk) =>
+      toEntries(shareReceipt(receipt.items, done, receipt.totalCents).shares);
+
+    if (a.unassigned.length === 0) {
+      // Everything has an owner: the receipt total minus the others' shares is the organiser's own
+      const entries = share(a);
+      if (entries.length === 0) return nobody;
+      return {
+        ok: true,
+        patch: {
+          entries,
+          leftover: 'omit',
+          partial: undefined,
+          gap: undefined,
+          unassignedChoice: undefined,
+        },
+      };
     }
-    // What is left of the receipt total is the organiser's own share
-    return { ok: true, patch: { entries, leftover: 'omit' } };
+    // Some items belong to nobody. Keep an earlier choice only for the very same gap; otherwise
+    // the organiser is asked again.
+    const choice = c.unassignedChoice as 'me' | 'even' | undefined;
+    const sameGap = JSON.stringify(c.gap) === JSON.stringify(a.unassigned);
+    if (choice && sameGap) {
+      const entries = share(applyUnassigned(a, choice));
+      if (entries.length === 0) return nobody;
+      return {
+        ok: true,
+        patch: {
+          entries,
+          leftover: 'omit',
+          partial: a,
+          gap: a.unassigned,
+          unassignedChoice: choice,
+        },
+      };
+    }
+    return {
+      ok: true,
+      patch: {
+        entries: undefined,
+        partial: a,
+        gap: a.unassigned,
+        unassignedChoice: undefined,
+      },
+    };
   }
   if (field === 'payee') {
     const payee = detectProxyType(text);
@@ -174,7 +227,10 @@ function nextNeed(c: Ctx): { step: number; note?: string } {
     }
   } else {
     const entries = c.entries as SplitEntry[] | undefined;
-    if (!entries) return { step: c.receipt ? ASSIGN : LIST };
+    if (!entries) {
+      if (!c.receipt) return { step: LIST };
+      return { step: c.partial && !c.unassignedChoice ? UNASSIGNED : ASSIGN };
+    }
     const sum = sumCents(entries);
     if (sum > total) {
       return {
@@ -429,7 +485,7 @@ export class SplitCommandHandler {
     if (field === 'payee' && isGroup(ctx)) await ctx.deleteMessage().catch(() => undefined);
     const context = this.withAnswer(state.context, answer.patch, field, edited.message_id);
     const need = nextNeed(context);
-    if (need.step === state.step && need.step !== CONFIRM) {
+    if (need.step === state.step && need.step !== CONFIRM && need.step !== UNASSIGNED) {
       // The open question is still the right one: just remember the change
       await this.setState({ flow: 'split', step: state.step, context });
       await ctx.reply('Updated.');
@@ -450,25 +506,27 @@ export class SplitCommandHandler {
     const step = state.flow === 'split' ? state.step : 0;
     const onSummary = data === 'split_confirm' || data === 'split_cancel' || data === 'split_amend';
     const onMenu = data.startsWith('split_pick:') || data === 'split_back';
-    const expected = data.startsWith('split_scan:')
-      ? step === RECEIPT || step === REVIEW
-        ? step
-        : -1
-      : data.startsWith('split_mode:')
-        ? MODE
-        : data.startsWith('split_people:')
-          ? PEOPLE
-          : data.startsWith('split_leftover:')
-            ? LEFTOVER
-            : data === 'split_skip_description'
-              ? DESCRIPTION
-              : onSummary
-                ? CONFIRM
-                : onMenu
-                  ? AMEND
-                  : data === 'split_keep' && c.amending
-                    ? step
-                    : -1;
+    const expected = data.startsWith('split_unassigned:')
+      ? UNASSIGNED
+      : data.startsWith('split_scan:')
+        ? step === RECEIPT || step === REVIEW
+          ? step
+          : -1
+        : data.startsWith('split_mode:')
+          ? MODE
+          : data.startsWith('split_people:')
+            ? PEOPLE
+            : data.startsWith('split_leftover:')
+              ? LEFTOVER
+              : data === 'split_skip_description'
+                ? DESCRIPTION
+                : onSummary
+                  ? CONFIRM
+                  : onMenu
+                    ? AMEND
+                    : data === 'split_keep' && c.amending
+                      ? step
+                      : -1;
     // Summary and menu buttons only count on the latest summary message
     const onLatest =
       !(onSummary || onMenu) ||
@@ -480,7 +538,20 @@ export class SplitCommandHandler {
     }
     await ctx.answerCallbackQuery();
 
-    if (data.startsWith('split_scan:')) {
+    if (data.startsWith('split_unassigned:')) {
+      const choice = data.endsWith(':even') ? 'even' : 'me';
+      const partial = c.partial as AssignedOk;
+      const receipt = c.receipt as Receipt;
+      const entries = toEntries(
+        shareReceipt(receipt.items, applyUnassigned(partial, choice), receipt.totalCents).shares
+      );
+      if (entries.length === 0) {
+        await ctx.reply('Nobody else owes anything. Name at least one other person.');
+        await this.setState({ flow: 'split', step: ASSIGN, context: c });
+        return true;
+      }
+      await this.proceed(ctx, { ...c, entries, leftover: 'omit', unassignedChoice: choice });
+    } else if (data.startsWith('split_scan:')) {
       const scan = c.scan as { receipt: Receipt } | undefined;
       const { scan: _scan, ...rest } = c;
       await this.setButtons(ctx, new InlineKeyboard()); // the review is answered
@@ -627,11 +698,26 @@ export class SplitCommandHandler {
         'Send a photo of the receipt. Make sure the whole receipt is in the picture and the numbers are sharp.',
         new InlineKeyboard().text('Type the total instead', 'split_scan:manual')
       );
+    } else if (step === UNASSIGNED) {
+      const receipt = c.receipt as Receipt;
+      const gap = (c.gap as number[]).map((i) => i + 1);
+      const cents = gap.reduce((sum, n) => sum + receipt.items[n - 1]!.cents, 0);
+      await ctx.reply(
+        `${gap.length === 1 ? `Item ${gap[0]}` : `Items ${gap.join(', ')}`} (${sgd(cents)} before charges) ${gap.length === 1 ? 'was' : 'were'} not given to anyone. What should happen to ${gap.length === 1 ? 'it' : 'them'}?`,
+        {
+          reply_markup: keep(
+            new InlineKeyboard()
+              .text('Split evenly between those named', 'split_unassigned:even')
+              .row()
+              .text('Leave them out: I cover them', 'split_unassigned:me')
+          )!,
+        }
+      );
     } else if (step === ASSIGN) {
       const items = (c.receipt as Receipt).items;
       await this.ask(
         ctx,
-        `Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nItems:\n${items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n')}\n\nGST and service charge are shared in proportion. "me" is you: your share is not collected.`,
+        `Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nItems:\n${items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n')}\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you: your share is not collected.`,
         keep()
       );
     } else if (step === PAYEE) {

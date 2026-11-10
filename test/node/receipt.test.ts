@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { parseAssignments, parseScan, shareReceipt, toEntries } from '../../src/commands/receipt';
+import {
+  applyUnassigned,
+  parseAssignments,
+  parseScan,
+  shareReceipt,
+  toEntries,
+} from '../../src/commands/receipt';
 
 const items = (...cents: number[]) => cents.map((c, i) => ({ name: `Item ${i + 1}`, cents: c }));
 const assign = (text: string, n: number, mentions?: Map<string, number>) => {
@@ -89,7 +95,6 @@ describe('parseAssignments', () => {
       const a = parseAssignments(t, n);
       return a.ok ? '' : a.error;
     };
-    expect(err('1 Ann\n3 Bob')).toContain('Item 2 has nobody');
     expect(err('1 Ann\n1 Bob\n2 Ann\n3 Ann')).toContain('Item 1 is listed twice');
     expect(err('1 Ann\n2 Ann\n9 Ann')).toContain('no item 9');
     expect(err('Ann 1')).toContain('must start with item numbers');
@@ -201,5 +206,57 @@ describe('receipt reader', () => {
         new Uint8Array(1)
       )
     ).rejects.toThrow('overloaded');
+  });
+});
+
+describe('unassigned items', () => {
+  it('reports the gap instead of failing', () => {
+    const a = assign('1 Ann\n3 Bob', 3);
+    expect(a.unassigned).toEqual([1]);
+    expect(a.items[1]).toEqual([]);
+    expect(assign('1 Ann\n2 Bob', 2).unassigned).toEqual([]);
+  });
+  it('still refuses the real mistakes', () => {
+    const err = (t: string) => {
+      const a = parseAssignments(t, 3);
+      return a.ok ? '' : a.error;
+    };
+    expect(err('1 Ann\n1 Bob')).toContain('listed twice');
+    expect(err('9 Ann')).toContain('no item 9');
+    expect(err('1')).toContain('no people');
+  });
+  it('Leave them out: the organiser carries the gap and is not collected', () => {
+    const a = applyUnassigned(assign('1 Ann\n3 Bob', 3), 'me');
+    expect(a.people.map((p) => p.name)).toEqual(['Ann', 'Bob', 'me']);
+    expect(a.items).toEqual([[0], [2], [1]]);
+    const r = shareReceipt(items(3000, 1000, 2000), a, 6600);
+    expect(r.shares.map((s) => s.cents)).toEqual([3300, 2200, 1100]);
+    expect(toEntries(r.shares).map((e) => e.name)).toEqual(['Ann', 'Bob']);
+  });
+  it('Leave them out reuses the organiser when they were named', () => {
+    const a = applyUnassigned(assign('1 Ann\n3 me', 3), 'me');
+    expect(a.people.map((p) => p.name)).toEqual(['Ann', 'me']);
+    expect(a.items[1]).toEqual([1]);
+  });
+  it('Split evenly: each gap item is shared by everyone named, odd cents to the first', () => {
+    const a = applyUnassigned(assign('1 Ann\n3 Bob', 3), 'even');
+    expect(a.items[1]).toEqual([0, 1]);
+    const r = shareReceipt(items(3000, 901, 2000), a, 5901);
+    expect(r.shares.map((s) => s.cents)).toEqual([3451, 2450]);
+  });
+  it('Split evenly includes me when named, and the amounts always add up', () => {
+    const a = applyUnassigned(assign('1 Ann\n3 me', 3), 'even');
+    expect(a.items[1]).toEqual([0, 1]);
+    for (const total of [5000, 5333, 6001]) {
+      for (const choice of ['me', 'even'] as const) {
+        const done = applyUnassigned(assign('1 Ann\n2 Bob', 3), choice);
+        const r = shareReceipt(items(1500, 2500, 1001), done, total);
+        expect(r.shares.reduce((x, y) => x + y.cents, 0)).toBe(total);
+      }
+    }
+  });
+  it('changes nothing when nothing is unassigned', () => {
+    const a = assign('1 Ann\n2 Bob', 2);
+    expect(applyUnassigned(a, 'me')).toBe(a);
   });
 });
