@@ -23,24 +23,131 @@ const LIST = 4; // custom split only: names and amounts
 const LEFTOVER = 5; // custom split only, when the list is short of the bill
 const PAYEE = 6;
 const DESCRIPTION = 7;
-const CONFIRM = 8; // summary with Confirm / Cancel; the QR is made only after Confirm
+const CONFIRM = 8; // summary with Confirm / Amend / Cancel; the QR is made only after Confirm
+const AMEND = 9; // the Amend menu is open on the summary message
 
 const MAX_DESCRIPTION = 25;
+
+type Ctx = Record<string, unknown>;
+type Field = 'total' | 'people' | 'list' | 'payee' | 'description';
+const FIELD_OF_STEP: Record<number, Field> = {
+  [TOTAL]: 'total',
+  [PEOPLE]: 'people',
+  [LIST]: 'list',
+  [PAYEE]: 'payee',
+  [DESCRIPTION]: 'description',
+};
+const STEP_OF_FIELD: Record<Field, number> = {
+  total: TOTAL,
+  people: PEOPLE,
+  list: LIST,
+  payee: PAYEE,
+  description: DESCRIPTION,
+};
 
 export const SPLIT_HELP =
   'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
   '/split - total, then equal or custom amounts, payee, optional description\n' +
   '/split_custom - same, straight to custom amounts (one line per person: name and amount)\n' +
   '/cancel - stop\n\n' +
+  'On the summary, tap Amend to change an answer, or edit the message you sent. ' +
   'In a group, reply to my questions and I offer the group size as the number of people. ' +
   'The QR never shows the payee number. In a group the payee number you type stays in the chat ' +
   'unless I may delete messages, so use a private chat if that matters.';
 
 const isGroup = (ctx: Context) => ctx.chat?.type !== 'private';
 const topicOf = (ctx: Context) =>
-  ctx.message?.message_thread_id ?? ctx.callbackQuery?.message?.message_thread_id ?? 0;
+  ctx.message?.message_thread_id ??
+  ctx.editedMessage?.message_thread_id ??
+  ctx.callbackQuery?.message?.message_thread_id ??
+  0;
 
 const sgd = (cents: number) => `SGD ${formatCents(cents)}`;
+
+type Answer = { ok: true; patch: Ctx } | { ok: false; error: string };
+
+/** Check one typed answer against the rest of the split; on success, the context fields it sets. */
+function readAnswer(field: Field, text: string, c: Ctx): Answer {
+  const total = c.totalCents as number | undefined;
+  if (field === 'total') {
+    const cents = parseAmount(text);
+    return cents === null
+      ? { ok: false, error: 'Send a positive amount with up to 2 decimals, e.g. 187.40.' }
+      : { ok: true, patch: { totalCents: cents } };
+  }
+  if (field === 'people') {
+    const people = parsePeople(text, total ?? 0);
+    return people === null
+      ? { ok: false, error: 'Send a whole number of people from 2 to 100.' }
+      : { ok: true, patch: { people } };
+  }
+  if (field === 'list') {
+    const list = parseCustomList(text);
+    if (!list.ok) {
+      return { ok: false, error: `${list.error} Send the whole list again, one person per line.` };
+    }
+    const sum = sumCents(list.entries);
+    if (total !== undefined && sum > total) {
+      return {
+        ok: false,
+        error: `That list adds up to ${sgd(sum)}, which is ${sgd(sum - total)} over the bill of ${sgd(total)}. Send the whole list again.`,
+      };
+    }
+    // An exact list needs no leftover choice; a stale one would only confuse
+    return {
+      ok: true,
+      patch: { entries: list.entries, ...(sum === total ? { leftover: undefined } : {}) },
+    };
+  }
+  if (field === 'payee') {
+    const payee = detectProxyType(text);
+    return payee
+      ? { ok: true, patch: { payeeType: payee.type, payeeValue: payee.normalized } }
+      : {
+          ok: false,
+          error:
+            'That is not a valid payee. Send a Singapore mobile number (e.g. 91234567 or +6591234567) or a UEN (9 to 13 letters and digits).',
+        };
+  }
+  const description = truncateAnsi(text, 1000); // what the QR can actually carry
+  if (!description) {
+    return {
+      ok: false,
+      error: 'Send a short description using letters, numbers or common symbols.',
+    };
+  }
+  if (description.length > MAX_DESCRIPTION) {
+    return { ok: false, error: `Keep the description to ${MAX_DESCRIPTION} characters or fewer.` };
+  }
+  return { ok: true, patch: { description, described: true } };
+}
+
+/** The first thing still missing or invalid, in question order; CONFIRM when everything is in. */
+function nextNeed(c: Ctx): { step: number; note?: string } {
+  const total = c.totalCents as number | undefined;
+  if (total === undefined) return { step: TOTAL };
+  if (!c.mode) return { step: MODE };
+  if (c.mode === 'equal') {
+    const people = c.people as number | undefined;
+    if (people === undefined || parsePeople(String(people), total) === null) {
+      return { step: PEOPLE };
+    }
+  } else {
+    const entries = c.entries as SplitEntry[] | undefined;
+    if (!entries) return { step: LIST };
+    const sum = sumCents(entries);
+    if (sum > total) {
+      return {
+        step: LIST,
+        note: `The list adds up to ${sgd(sum)}, which is ${sgd(sum - total)} over the bill of ${sgd(total)}. Send the whole list again.`,
+      };
+    }
+    if (sum < total && !c.leftover) return { step: LEFTOVER };
+  }
+  if (!c.payeeValue) return { step: PAYEE };
+  if (!c.described) return { step: DESCRIPTION };
+  return { step: CONFIRM };
+}
 
 /** Everything entered, for the confirmation step. A group summary hides all but 4 of the payee. */
 function summary(c: Record<string, unknown>, group: boolean): string {
@@ -85,10 +192,27 @@ function summary(c: Record<string, unknown>, group: boolean): string {
   return lines.join('\n');
 }
 
+const summaryButtons = () =>
+  new InlineKeyboard()
+    .text('✅ Confirm', 'split_confirm')
+    .text('✏️ Amend', 'split_amend')
+    .text('❌ Cancel', 'split_cancel');
+
+const amendMenu = () =>
+  new InlineKeyboard()
+    .text('Total', 'split_pick:total')
+    .text('Split', 'split_pick:split')
+    .row()
+    .text('Payee', 'split_pick:payee')
+    .text('Description', 'split_pick:description')
+    .row()
+    .text('Back', 'split_back');
+
 /**
- * Split_PayNow_Bot conversation: total -> people -> payee -> description -> confirm -> QR.
- * Works in private chats and groups. In a group only the user who started it can answer
- * (the DO records the owner). Nothing is persisted: answers live in the DO until the QR is sent.
+ * Split_PayNow_Bot conversation. Every answer is stored in the Durable Object context and
+ * `nextNeed` decides what is still missing, so the first run, an Amend and an edited message all
+ * follow the same rules. Works in private chats and groups; in a group only the user who started
+ * it can answer (the DO records the owner). Nothing is persisted beyond the conversation.
  */
 export class SplitCommandHandler {
   constructor(private readonly conversationDO: ConversationDO) {}
@@ -98,7 +222,7 @@ export class SplitCommandHandler {
     if (!ctx.from) return;
     await this.setState({ flow: 'split', step: TOTAL, context: mode ? { mode } : {} });
     await this.fetch('/owner', { userId: ctx.from.id, topicId: topicOf(ctx) });
-    await this.ask(ctx, 'How much is the bill in total, in SGD (e.g. 187.40)?');
+    await this.askStep(ctx, TOTAL, mode ? { mode } : {});
   }
 
   async cancel(ctx: Context): Promise<void> {
@@ -118,108 +242,56 @@ export class SplitCommandHandler {
     const state = await this.getState();
     if (state.flow !== 'split' || !this.isOwner(ctx, state)) return false;
 
-    if (state.step === TOTAL) {
-      const total = parseAmount(text);
-      if (total === null) {
-        await ctx.reply('Send a positive amount with up to 2 decimals, e.g. 187.40.');
-        return true;
-      }
-      if (state.context.mode === 'custom') await this.askList(ctx, state, total);
-      else await this.askMode(ctx, state, total);
-      return true;
-    }
-
-    if (state.step === MODE || state.step === LEFTOVER) {
-      await ctx.reply('Please tap one of the buttons above (or /cancel).');
-      return true;
-    }
-
-    if (state.step === LIST) {
-      const list = parseCustomList(text);
-      if (!list.ok) {
-        await ctx.reply(`${list.error} Send the whole list again, one person per line.`);
-        return true;
-      }
-      const total = state.context.totalCents as number;
-      const sum = sumCents(list.entries);
-      if (sum > total) {
-        await ctx.reply(
-          `That list adds up to ${sgd(sum)}, which is ${sgd(sum - total)} over the bill of ${sgd(total)}. Send the whole list again.`
-        );
-        return true;
-      }
-      if (sum === total) {
-        await this.askPayee(ctx, state, { entries: list.entries });
-        return true;
-      }
-      await this.setState({
-        flow: 'split',
-        step: LEFTOVER,
-        context: { ...state.context, entries: list.entries },
-      });
+    const field = FIELD_OF_STEP[state.step];
+    if (!field) {
       await ctx.reply(
-        `The list adds up to ${sgd(sum)}, which leaves ${sgd(total - sum)} of the ${sgd(total)} bill. What should happen to it?`,
-        {
-          reply_markup: new InlineKeyboard()
-            .text('Split it evenly', 'split_leftover:even')
-            .text('Leave it out', 'split_leftover:omit'),
-        }
+        state.step === CONFIRM
+          ? 'Please tap Confirm, Amend or Cancel on the summary above.'
+          : 'Please tap one of the buttons above (or /cancel).'
       );
       return true;
     }
-
-    if (state.step === PEOPLE) {
-      const people = parsePeople(text, state.context.totalCents as number);
-      if (people === null) {
-        await ctx.reply('Send a whole number of people from 2 to 100.');
-        return true;
-      }
-      await this.askPayee(ctx, state, { people });
+    const answer = readAnswer(field, text, state.context);
+    if (!answer.ok) {
+      await ctx.reply(answer.error);
       return true;
     }
+    // The number was typed into the chat: remove it from a group if we may (best effort)
+    if (field === 'payee' && isGroup(ctx)) await ctx.deleteMessage().catch(() => undefined);
+    await this.proceed(
+      ctx,
+      this.withAnswer(state.context, answer.patch, field, ctx.message?.message_id)
+    );
+    return true;
+  }
 
-    if (state.step === PAYEE) {
-      const payee = detectProxyType(text);
-      if (!payee) {
-        await ctx.reply(
-          'That is not a valid payee. Send a Singapore mobile number (e.g. 91234567 or +6591234567) or a UEN (9 to 13 letters and digits).'
-        );
-        return true;
-      }
-      // The number was typed into the chat: remove it from a group if we may (best effort)
-      if (isGroup(ctx)) await ctx.deleteMessage().catch(() => undefined);
-      await this.setState({
-        flow: 'split',
-        step: DESCRIPTION,
-        context: { ...state.context, payeeType: payee.type, payeeValue: payee.normalized },
-      });
-      await this.ask(
-        ctx,
-        `Add a short description (up to ${MAX_DESCRIPTION} characters), or tap Skip.`,
-        new InlineKeyboard().text('Skip', 'split_skip_description')
-      );
-      return true;
-    }
+  /** An edited message: if it was a recorded answer of this split, apply it as a new answer. */
+  async handleEdit(ctx: Context): Promise<void> {
+    const edited = ctx.editedMessage;
+    const text = edited?.text?.trim();
+    if (!edited || !text || text.startsWith('/')) return;
+    const state = await this.getState();
+    if (state.flow !== 'split' || !this.isOwner(ctx, state)) return;
+    const field = (state.context.answerMsgs as Record<string, Field> | undefined)?.[
+      String(edited.message_id)
+    ];
+    if (!field) return;
 
-    if (state.step === DESCRIPTION) {
-      const description = truncateAnsi(text, 1000); // what the QR can actually carry
-      if (!description) {
-        await ctx.reply('Send a short description using letters, numbers or common symbols.');
-        return true;
-      }
-      if (description.length > MAX_DESCRIPTION) {
-        await ctx.reply(`Keep the description to ${MAX_DESCRIPTION} characters or fewer.`);
-        return true;
-      }
-      await this.askConfirm(ctx, state, description);
-      return true;
+    const answer = readAnswer(field, text, state.context);
+    if (!answer.ok) {
+      await ctx.reply(`That edit was not used: ${answer.error} The earlier answer is kept.`);
+      return;
     }
-
-    if (state.step === CONFIRM) {
-      await ctx.reply('Please tap Confirm or Cancel on the summary above.');
-      return true;
+    if (field === 'payee' && isGroup(ctx)) await ctx.deleteMessage().catch(() => undefined);
+    const context = this.withAnswer(state.context, answer.patch, field, edited.message_id);
+    const need = nextNeed(context);
+    if (need.step === state.step && need.step !== CONFIRM) {
+      // The open question is still the right one: just remember the change
+      await this.setState({ flow: 'split', step: state.step, context });
+      await ctx.reply('Updated.');
+      return;
     }
-    return false;
+    await this.proceed(ctx, context);
   }
 
   /** Button taps; false when the data is not ours. */
@@ -230,7 +302,10 @@ export class SplitCommandHandler {
       await ctx.answerCallbackQuery({ text: 'This split is not yours.' });
       return true;
     }
+    const c = state.context;
     const step = state.flow === 'split' ? state.step : 0;
+    const onSummary = data === 'split_confirm' || data === 'split_cancel' || data === 'split_amend';
+    const onMenu = data.startsWith('split_pick:') || data === 'split_back';
     const expected = data.startsWith('split_mode:')
       ? MODE
       : data.startsWith('split_people:')
@@ -239,27 +314,53 @@ export class SplitCommandHandler {
           ? LEFTOVER
           : data === 'split_skip_description'
             ? DESCRIPTION
-            : data === 'split_confirm' || data === 'split_cancel'
+            : onSummary
               ? CONFIRM
-              : -1;
-    if (step !== expected) {
+              : onMenu
+                ? AMEND
+                : data === 'split_keep' && c.amending
+                  ? step
+                  : -1;
+    // Summary and menu buttons only count on the latest summary message
+    const onLatest =
+      !(onSummary || onMenu) ||
+      c.summaryMsg === undefined ||
+      ctx.callbackQuery?.message?.message_id === c.summaryMsg;
+    if (step !== expected || !onLatest) {
       await ctx.answerCallbackQuery({ text: 'That step is over.' });
       return true;
     }
     await ctx.answerCallbackQuery();
 
     if (data.startsWith('split_mode:')) {
-      const total = state.context.totalCents as number;
-      if (data === 'split_mode:custom') await this.askList(ctx, state, total);
-      else await this.askPeople(ctx, state, total);
+      // A new choice of type starts that type's details afresh
+      const { people, entries, leftover, suggested, ...rest } = c;
+      await this.proceed(ctx, { ...rest, mode: data.endsWith(':custom') ? 'custom' : 'equal' });
     } else if (data.startsWith('split_leftover:')) {
-      await this.askPayee(ctx, state, { leftover: data.endsWith(':even') ? 'even' : 'omit' });
+      await this.proceed(ctx, { ...c, leftover: data.endsWith(':even') ? 'even' : 'omit' });
     } else if (data.startsWith('split_people:')) {
       const n = Number(data.slice('split_people:'.length));
       // Only the number we offered (a stale or odd tap changes nothing)
-      if (n === state.context.suggested) await this.askPayee(ctx, state, { people: n });
+      if (n === c.suggested) await this.proceed(ctx, { ...c, people: n });
     } else if (data === 'split_skip_description') {
-      await this.askConfirm(ctx, state, undefined);
+      const { description, ...rest } = c;
+      await this.proceed(ctx, { ...rest, described: true });
+    } else if (data === 'split_keep') {
+      const { amending, ...rest } = c;
+      await this.proceed(ctx, rest);
+    } else if (data === 'split_amend') {
+      await this.setState({ flow: 'split', step: AMEND, context: c });
+      await this.setButtons(ctx, amendMenu());
+    } else if (data === 'split_back') {
+      await this.setState({ flow: 'split', step: CONFIRM, context: c });
+      await this.setButtons(ctx, summaryButtons());
+    } else if (onMenu) {
+      const pick = data.slice('split_pick:'.length);
+      await this.setButtons(ctx, new InlineKeyboard()); // the menu goes; the question replaces it
+      const first = pick === 'split' ? MODE : STEP_OF_FIELD[pick as Field];
+      const context = { ...c, amending: pick };
+      await this.setState({ flow: 'split', step: first, context });
+      await this.askStep(ctx, first, context);
     } else if (data === 'split_confirm') {
       await this.finish(ctx);
     } else {
@@ -268,6 +369,98 @@ export class SplitCommandHandler {
       await ctx.reply('Cancelled. Nothing was created. Send /split to begin again.');
     }
     return true;
+  }
+
+  /** Remember an accepted answer and which message carried it (so an edit of it can be found). */
+  private withAnswer(c: Ctx, patch: Ctx, field: Field, messageId: number | undefined): Ctx {
+    const answerMsgs = { ...(c.answerMsgs as Record<string, Field> | undefined) };
+    if (messageId !== undefined) {
+      // One message per field: a newer answer replaces the older message's entry
+      for (const [id, f] of Object.entries(answerMsgs)) if (f === field) delete answerMsgs[id];
+      answerMsgs[String(messageId)] = field;
+    }
+    return { ...c, ...patch, answerMsgs };
+  }
+
+  /** Save the context, then ask for what is still needed, or show the summary. */
+  private async proceed(ctx: Context, c: Ctx): Promise<void> {
+    const need = nextNeed(c);
+    if (need.step === CONFIRM) {
+      const { amending, ...context } = c;
+      await this.showSummary(ctx, context);
+      return;
+    }
+    let context = c;
+    if (need.step === PEOPLE) context = { ...c, suggested: await this.suggestPeople(ctx, c) };
+    await this.setState({ flow: 'split', step: need.step, context });
+    await this.askStep(ctx, need.step, context, need.note);
+  }
+
+  /** Members minus this bot, only in a group; a suggestion (it also counts other bots and lurkers). */
+  private async suggestPeople(ctx: Context, c: Ctx): Promise<number | undefined> {
+    if (!isGroup(ctx)) return undefined;
+    const count = await ctx.api.getChatMemberCount(ctx.chat!.id).catch(() => null);
+    const total = c.totalCents as number;
+    return typeof count === 'number' && count - 1 >= 2 && count - 1 <= total
+      ? count - 1
+      : undefined;
+  }
+
+  /** Ask one question. While amending, every prompt also offers Keep as is. */
+  private async askStep(ctx: Context, step: number, c: Ctx, note?: string): Promise<void> {
+    const total = c.totalCents as number | undefined;
+    const keep = (kb?: InlineKeyboard) => {
+      if (!c.amending) return kb;
+      return (kb ? kb.row() : new InlineKeyboard()).text('Keep as is', 'split_keep');
+    };
+    if (step === MODE) {
+      await ctx.reply(`Bill: ${sgd(total!)}. How do you want to split it?`, {
+        reply_markup: keep(
+          new InlineKeyboard()
+            .text('Equally', 'split_mode:equal')
+            .text('Custom amounts', 'split_mode:custom')
+        )!,
+      });
+    } else if (step === LEFTOVER) {
+      const sum = sumCents(c.entries as SplitEntry[]);
+      await ctx.reply(
+        `The list adds up to ${sgd(sum)}, which leaves ${sgd(total! - sum)} of the ${sgd(total!)} bill. What should happen to it?`,
+        {
+          reply_markup: keep(
+            new InlineKeyboard()
+              .text('Split it evenly', 'split_leftover:even')
+              .text('Leave it out', 'split_leftover:omit')
+          )!,
+        }
+      );
+    } else if (step === PEOPLE) {
+      const suggested = c.suggested as number | undefined;
+      await this.ask(
+        ctx,
+        `Bill: ${sgd(total!)}. How many people share it (2 to 100)?`,
+        keep(
+          suggested
+            ? new InlineKeyboard().text(`Split by ${suggested}`, `split_people:${suggested}`)
+            : undefined
+        )
+      );
+    } else if (step === LIST) {
+      await this.ask(
+        ctx,
+        `${note ? `${note}\n\n` : ''}Bill: ${sgd(total!)}. Send who owes what, one person per line: a name, then an amount. Leave yourself out.\n\nAnn 40\nBob 25.50\n\n(Up to 20 people.)`,
+        keep()
+      );
+    } else if (step === PAYEE) {
+      await this.ask(ctx, 'Who should be paid? Send a Singapore mobile number or a UEN.', keep());
+    } else if (step === DESCRIPTION) {
+      await this.ask(
+        ctx,
+        `Add a short description (up to ${MAX_DESCRIPTION} characters), or tap Skip.`,
+        keep(new InlineKeyboard().text('Skip', 'split_skip_description'))
+      );
+    } else {
+      await this.ask(ctx, 'How much is the bill in total, in SGD (e.g. 187.40)?', keep());
+    }
   }
 
   /** Ask a text question. In a group a force-reply prompt reaches the bot even with privacy mode on. */
@@ -283,69 +476,23 @@ export class SplitCommandHandler {
     }
   }
 
-  private async askMode(ctx: Context, state: ConversationState, totalCents: number) {
-    await this.setState({ flow: 'split', step: MODE, context: { ...state.context, totalCents } });
-    await ctx.reply(`Bill: ${sgd(totalCents)}. How do you want to split it?`, {
-      reply_markup: new InlineKeyboard()
-        .text('Equally', 'split_mode:equal')
-        .text('Custom amounts', 'split_mode:custom'),
-    });
-  }
-
-  private async askList(ctx: Context, state: ConversationState, totalCents: number) {
-    await this.setState({ flow: 'split', step: LIST, context: { ...state.context, totalCents } });
-    await this.ask(
-      ctx,
-      `Bill: ${sgd(totalCents)}. Send who owes what, one person per line: a name, then an amount. Leave yourself out.\n\nAnn 40\nBob 25.50\n\n(Up to 20 people.)`
-    );
-  }
-
-  private async askPeople(ctx: Context, state: ConversationState, totalCents: number) {
-    // Members minus this bot; only a suggestion (it also counts other bots and quiet members)
-    let suggested: number | undefined;
-    if (isGroup(ctx)) {
-      const count = await ctx.api.getChatMemberCount(ctx.chat!.id).catch(() => null);
-      if (typeof count === 'number' && count - 1 >= 2 && count - 1 <= totalCents) {
-        suggested = count - 1;
-      }
+  /** Show the summary as the one live one: the earlier summary loses its buttons. */
+  private async showSummary(ctx: Context, c: Ctx): Promise<void> {
+    const old = c.summaryMsg as number | undefined;
+    if (old !== undefined && ctx.chat) {
+      await ctx.api.editMessageReplyMarkup(ctx.chat.id, old).catch(() => undefined);
     }
+    const sent = await ctx.reply(summary(c, isGroup(ctx)), { reply_markup: summaryButtons() });
     await this.setState({
       flow: 'split',
-      step: PEOPLE,
-      context: { ...state.context, totalCents, ...(suggested ? { suggested } : {}) },
+      step: CONFIRM,
+      context: { ...c, summaryMsg: sent.message_id },
     });
-    const text = `Bill: SGD ${formatCents(totalCents)}. How many people share it (2 to 100)?`;
-    await this.ask(
-      ctx,
-      text,
-      suggested
-        ? new InlineKeyboard().text(`Split by ${suggested}`, `split_people:${suggested}`)
-        : undefined
-    );
   }
 
-  private async askPayee(ctx: Context, state: ConversationState, extra: Record<string, unknown>) {
-    await this.setState({
-      flow: 'split',
-      step: PAYEE,
-      context: { ...state.context, ...extra },
-    });
-    await this.ask(ctx, 'Who should be paid? Send a Singapore mobile number or a UEN.');
-  }
-
-  /** Store the description (if any) and show everything entered, for the user to confirm. */
-  private async askConfirm(
-    ctx: Context,
-    state: ConversationState,
-    description: string | undefined
-  ) {
-    const context = { ...state.context, ...(description ? { description } : {}) };
-    await this.setState({ flow: 'split', step: CONFIRM, context });
-    await ctx.reply(summary(context, isGroup(ctx)), {
-      reply_markup: new InlineKeyboard()
-        .text('✅ Confirm', 'split_confirm')
-        .text('❌ Cancel', 'split_cancel'),
-    });
+  /** Replace the buttons under the message that was tapped (best effort). */
+  private async setButtons(ctx: Context, markup: InlineKeyboard): Promise<void> {
+    await ctx.editMessageReplyMarkup({ reply_markup: markup }).catch(() => undefined);
   }
 
   /** Take the buttons off the summary once it has been answered (best effort). */

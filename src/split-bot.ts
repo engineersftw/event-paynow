@@ -40,6 +40,7 @@ export function createSplitBot(env: Env, token: string, config?: BotConfig<Conte
     if (ctx.message.text.startsWith('/')) return;
     await handler(ctx).handleText(ctx);
   });
+  bot.on('edited_message:text', (ctx) => handler(ctx).handleEdit(ctx));
   return bot;
 }
 

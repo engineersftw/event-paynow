@@ -8,6 +8,7 @@ import type { ConversationDO } from '../../src/worker/conversation-do';
 import {
   bmpToRgba,
   callbackUpdate,
+  editedTextUpdate,
   groupTextUpdate,
   TEST_BOT_INFO,
   TelegramStub,
@@ -37,12 +38,14 @@ function bot() {
 type B = ReturnType<typeof bot>;
 
 const say = (b: B, user: number, text: string) => b.handleUpdate(textUpdate(user, text, upd++));
+// A tap lands on the latest message the bot sent, as it does for a user pressing a fresh button
+const lastId = () => stub.lastMessageId();
 const tap = (b: B, user: number, data: string) =>
-  b.handleUpdate(callbackUpdate(user, data, 500, upd++));
+  b.handleUpdate(callbackUpdate(user, data, lastId(), upd++));
 const gsay = (b: B, chat: number, user: number, text: string, topic?: number) =>
   b.handleUpdate(groupTextUpdate(chat, user, text, topic, upd++));
 function gtap(b: B, chat: number, user: number, data: string, topic?: number) {
-  const u = callbackUpdate(user, data, 500, upd++) as unknown as {
+  const u = callbackUpdate(user, data, lastId(), upd++) as unknown as {
     callback_query: { message: Record<string, unknown> };
   };
   u.callback_query.message.chat = { id: chat, type: 'group' };
@@ -95,7 +98,7 @@ describe('Split_PayNow_Bot in a private chat', () => {
     expect(summary).toContain('Payee: Mobile +6591234567');
     expect(summary).toContain('Each share: SGD 46.85');
     expect(summary).not.toContain('over');
-    expect(buttons()).toEqual(['split_confirm', 'split_cancel']);
+    expect(buttons()).toEqual(['split_confirm', 'split_amend', 'split_cancel']);
     await tap(b, u, 'split_confirm');
 
     const { payload, caption } = decode();
@@ -389,6 +392,207 @@ describe('Split_PayNow_Bot custom amounts', () => {
     expect(stub.sentPhotos).toHaveLength(1);
     expect(stub.lastText()).toContain('Sent 1 of 2 QRs');
     expect(stub.lastText()).not.toContain('91234567');
+  });
+});
+
+describe('Split_PayNow_Bot amend and edited messages', () => {
+  const sayId = async (b: B, user: number, text: string) => {
+    const id = upd++;
+    await b.handleUpdate(textUpdate(user, text, id));
+    return id;
+  };
+  const edit = (b: B, chat: number, user: number, id: number, text: string) =>
+    b.handleUpdate(editedTextUpdate(chat, user, id, text, upd++));
+  const tapOn = (b: B, user: number, data: string, messageId: number) =>
+    b.handleUpdate(callbackUpdate(user, data, messageId, upd++));
+  const summaryText = () => stub.sentMessages.findLast((m) => m.text.startsWith('Please check'))!;
+  const qrAmount = () => {
+    const { data, width, height } = bmpToRgba(stub.sentPhotos[0]!.bytes);
+    return jsQR(data, width, height)!.data;
+  };
+
+  /** Equal split of `total` between 2 people, payee 91234567, description skipped: at the summary. */
+  async function toSummary(b: B, u: number, total = '100') {
+    await say(b, u, '/split');
+    const totalId = await sayId(b, u, total);
+    await tap(b, u, 'split_mode:equal');
+    await say(b, u, '2');
+    await say(b, u, '91234567');
+    await tap(b, u, 'split_skip_description');
+    return { totalId };
+  }
+
+  it('Amend total: one live summary, the old Confirm is stale, the new one sends the new amount', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    const oldSummary = summaryText();
+    expect(oldSummary.text).toContain('Each share: SGD 50.00');
+    const oldId = oldSummary.messageId!;
+    await tap(b, u, 'split_amend');
+    expect((await peek(`split-${u}`)).step).toBe(9);
+    await tap(b, u, 'split_pick:total');
+    expect(stub.lastText()).toContain('How much is the bill');
+    expect(buttons()).toEqual(['split_keep']);
+    stub.otherCalls = [];
+    await say(b, u, '120');
+    expect(summaryText().text).toContain('Each share: SGD 60.00');
+    // the earlier summary lost its buttons
+    expect(stub.otherCalls.some((c) => c.method === 'editMessageReplyMarkup')).toBe(true);
+    // its Confirm is dead
+    stub.callbackAnswers = [];
+    await tapOn(b, u, 'split_confirm', oldId);
+    expect(stub.callbackAnswers).toContain('That step is over.');
+    expect(stub.sentPhotos).toHaveLength(0);
+    await tap(b, u, 'split_confirm');
+    expect(qrAmount()).toContain('540560.00');
+  });
+
+  it('Keep as is and Back both return to the summary unchanged', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:payee');
+    expect(stub.lastText()).toContain('Who should be paid');
+    await tap(b, u, 'split_keep');
+    expect(stub.lastText()).toContain('Payee: Mobile +6591234567');
+    expect(buttons()).toEqual(['split_confirm', 'split_amend', 'split_cancel']);
+
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_back');
+    expect((await peek(`split-${u}`)).step).toBe(8);
+    await tap(b, u, 'split_confirm');
+    expect(stub.sentPhotos).toHaveLength(1);
+  });
+
+  it('Amend payee and description', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:payee');
+    await say(b, u, '98765432');
+    expect(stub.lastText()).toContain('+6598765432');
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:description');
+    await say(b, u, 'Lunch');
+    expect(stub.lastText()).toContain('Description: Lunch');
+  });
+
+  it('Amend the split type: equal becomes custom', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:split');
+    expect(buttons()).toEqual(['split_mode:equal', 'split_mode:custom', 'split_keep']);
+    await tap(b, u, 'split_mode:custom');
+    expect(stub.lastText()).toContain('one person per line');
+    await say(b, u, 'Ann 60\nBob 40');
+    expect(stub.lastText()).toContain('Ann: SGD 60.00');
+    expect(stub.lastText()).not.toContain('Each share');
+  });
+
+  it('a total that breaks the list asks for the list again; a gap asks about the leftover; a stored choice is kept', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/split_custom');
+    await say(b, u, '100');
+    await say(b, u, 'Ann 60\nBob 40');
+    await say(b, u, '91234567');
+    await tap(b, u, 'split_skip_description');
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:total');
+    await say(b, u, '80');
+    expect(stub.lastText()).toContain('SGD 20.00 over the bill of SGD 80.00');
+    await say(b, u, 'Ann 50\nBob 30');
+    expect(stub.lastText()).toContain('Ann: SGD 50.00');
+
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:total');
+    await say(b, u, '100'); // list adds up to 80: a gap of 20, no choice yet
+    expect(stub.lastText()).toContain('leaves SGD 20.00');
+    await tap(b, u, 'split_leftover:even');
+    expect(stub.lastText()).toContain('split evenly (SGD 10.00 each)');
+
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:total');
+    await say(b, u, '120'); // gap 40, the earlier choice (even) is kept
+    expect(stub.lastText()).toContain('split evenly (SGD 20.00 each)');
+  });
+
+  it('editing the total at the summary gives a new summary', async () => {
+    const u = uid++;
+    const b = bot();
+    const { totalId } = await toSummary(b, u);
+    await edit(b, u, u, totalId, '150');
+    expect(summaryText().text).toContain('Each share: SGD 75.00');
+    await tap(b, u, 'split_confirm');
+    expect(qrAmount()).toContain('540575.00');
+  });
+
+  it('editing an earlier answer while a later question is open says Updated and does not repeat it', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/split');
+    const totalId = await sayId(b, u, '100');
+    await tap(b, u, 'split_mode:equal');
+    await say(b, u, '2');
+    expect(stub.lastText()).toContain('Who should be paid');
+    const before = stub.sentMessages.length;
+    await edit(b, u, u, totalId, '200');
+    expect(stub.sentMessages.length).toBe(before + 1);
+    expect(stub.lastText()).toBe('Updated.');
+    await say(b, u, '91234567');
+    await tap(b, u, 'split_skip_description');
+    expect(stub.lastText()).toContain('Each share: SGD 100.00');
+  });
+
+  it('refuses an invalid edit and keeps the earlier answer; ignores unrecorded and late edits', async () => {
+    const u = uid++;
+    const b = bot();
+    const { totalId } = await toSummary(b, u);
+    await edit(b, u, u, totalId, 'abc');
+    expect(stub.lastText()).toContain('That edit was not used');
+    expect((await peek(`split-${u}`)).step).toBe(8);
+    stub.reset();
+    await edit(b, u, u, 987654, '5'); // not an answer of this split
+    expect(stub.sentMessages).toHaveLength(0);
+    await tapOn(b, u, 'split_confirm', stub.lastMessageId() - 1); // the summary, before the refusal note
+    expect(stub.sentPhotos).toHaveLength(1);
+    stub.reset();
+    await edit(b, u, u, totalId, '999'); // after the QR
+    expect(stub.sentMessages).toHaveLength(0);
+  });
+
+  it('in a group: Amend works, edits by others are ignored, an edited payee message is deleted', async () => {
+    const chat = -uid++;
+    const owner = uid++;
+    const other = uid++;
+    const b = bot();
+    await gsay(b, chat, owner, '/split');
+    const totalId = upd;
+    await gsay(b, chat, owner, '60');
+    await gtap(b, chat, owner, 'split_mode:equal');
+    await gsay(b, chat, owner, '3');
+    const payeeId = upd;
+    await gsay(b, chat, owner, '91234567');
+    await gtap(b, chat, owner, 'split_skip_description');
+    expect(summaryText().text).toContain('…4567');
+
+    stub.reset();
+    await edit(b, chat, other, totalId, '90'); // someone else's edit
+    expect(stub.sentMessages).toHaveLength(0);
+
+    await edit(b, chat, owner, payeeId, '98765432'); // may still be in the chat if it could not be deleted
+    expect(stub.deletedMessages).toHaveLength(1);
+    expect(summaryText().text).toContain('…5432');
+
+    await gtap(b, chat, owner, 'split_amend');
+    await gtap(b, chat, owner, 'split_pick:total');
+    await gsay(b, chat, owner, '90');
+    expect(summaryText().text).toContain('Each share: SGD 30.00');
   });
 });
 
