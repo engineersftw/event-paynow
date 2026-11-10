@@ -178,9 +178,15 @@ describe('receipt reader', () => {
     const reader = new WorkersAiReceiptReader(ai);
     expect(await reader.read(new Uint8Array([1, 2, 3]))).toEqual({ total: 12.5, items: [] });
     expect(calls.map((c) => c.input.prompt ?? 'scan')).toEqual(['scan', 'agree', 'scan']);
-    expect(String(calls[0]!.input.image)).toContain('data:image/jpeg;base64,');
+    // the photo travels as an image part of the user message (the `image` field is refused live)
+    const part = (
+      calls[0]!.input.messages as Array<{ content: Array<Record<string, unknown>> }>
+    )[0]!.content;
+    expect(part.map((p) => p.type)).toEqual(['text', 'image_url']);
+    expect(JSON.stringify(part[1])).toContain('data:image/jpeg;base64,');
+    expect(calls[0]!.input.image).toBeUndefined();
   });
-  it('lets other errors through and uses image parts for non llama-3.2 models', async () => {
+  it('lets other errors through', async () => {
     const ai = {
       async run(_m: string, input: Record<string, unknown>) {
         const part = (input.messages as Array<{ content: unknown }>)[0]!.content as Array<{

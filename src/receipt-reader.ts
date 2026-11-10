@@ -18,7 +18,7 @@ export interface ReceiptReader {
   read(image: Uint8Array): Promise<unknown>;
 }
 
-/** Documented working call: an `image` data URL beside `messages` (needs a one-time licence step). */
+/** Needs a one-time licence acceptance, which the reader sends itself on the first scan. */
 export const DEFAULT_RECEIPT_MODEL = '@cf/meta/llama-3.2-11b-vision-instruct';
 
 const INSTRUCTION =
@@ -64,20 +64,20 @@ export class WorkersAiReceiptReader implements ReceiptReader {
 
   async read(image: Uint8Array): Promise<unknown> {
     const dataUrl = toDataUrl(image);
-    const input = this.model.includes('llama-3.2')
-      ? { messages: [{ role: 'user', content: INSTRUCTION }], image: dataUrl, max_tokens: 2000 }
-      : {
-          messages: [
-            {
-              role: 'user',
-              content: [
-                { type: 'text', text: INSTRUCTION },
-                { type: 'image_url', image_url: { url: dataUrl } },
-              ],
-            },
+    // The image goes in a message part. Tested against the live Llama 3.2 vision model: an `image`
+    // field beside a single user message (the tutorial's shape) is refused with error 3030.
+    const input = {
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'text', text: INSTRUCTION },
+            { type: 'image_url', image_url: { url: dataUrl } },
           ],
-          max_tokens: 2000,
-        };
+        },
+      ],
+      max_tokens: 2000,
+    };
     let result: unknown;
     try {
       try {
