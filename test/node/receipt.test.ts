@@ -3,12 +3,14 @@ import {
   applyUnassigned,
   assignmentFromClaims,
   claimerName,
+  expandShares,
   MAX_ITEMS,
   missingCents,
   parseAddedItems,
   parseAssignments,
   parseScan,
   receiptWarnings,
+  resolveTyped,
   shareReceipt,
   toEntries,
 } from '../../src/commands/receipt';
@@ -423,7 +425,7 @@ describe('claims', () => {
   const receipt = { items, serviceCents: 0, gstCents: 0, discountCents: 0, totalCents: 6000 };
 
   it('builds people, shared items and the organiser as me', () => {
-    const a = assignmentFromClaims(3, { '0': [1, 2], '1': [2], '2': [9] }, claimers, 9);
+    const a = assignmentFromClaims(items, { '0': [1, 2], '1': [2], '2': [9] }, claimers, 9);
     expect(a.people.map((p) => p.name)).toEqual(['Ann', 'Bob', 'me']);
     expect(a.people[1]).toMatchObject({ userId: 2, username: 'bob_b' });
     expect(a.people[2]!.isMe).toBe(true);
@@ -432,7 +434,7 @@ describe('claims', () => {
   });
 
   it('lists unclaimed items, and they can go to the organiser or be shared', () => {
-    const a = assignmentFromClaims(3, { '0': [1] }, claimers.slice(0, 2), 9);
+    const a = assignmentFromClaims(items, { '0': [1] }, claimers.slice(0, 2), 9);
     expect(a.unassigned).toEqual([1, 2]);
     expect(applyUnassigned(a, 'me').people.at(-1)!.isMe).toBe(true);
     expect(applyUnassigned(a, 'even').items).toEqual([[0], [0, 1], [0, 1]]);
@@ -441,7 +443,7 @@ describe('claims', () => {
   it('gives the same amounts as the typed assignment for the same people', () => {
     const typed = parseAssignments('1 Ann, Bob\n2 Bob\n3 me', 3);
     if (!typed.ok) throw new Error(typed.error);
-    const claimed = assignmentFromClaims(3, { '0': [1, 2], '1': [2], '2': [9] }, claimers, 9);
+    const claimed = assignmentFromClaims(items, { '0': [1, 2], '1': [2], '2': [9] }, claimers, 9);
     const sum = (a: typeof claimed) =>
       shareReceipt(receipt.items, a, receipt.totalCents).shares.map((s) => s.cents);
     expect(sum(claimed)).toEqual(sum(typed));
@@ -454,5 +456,58 @@ describe('claims', () => {
       claimerName(['Ann', 'Ann L.'], { first_name: 'Ann', last_name: 'Lim', username: 'al' })
     ).toBe('@al');
     expect(claimerName(['ann', 'Ann 2'], { first_name: 'Ann' })).toBe('Ann 3');
+  });
+
+  it('shares an item N ways: one share per holder, unfilled shares unassigned', () => {
+    const a = assignmentFromClaims(items, { '0': [1, 2] }, claimers.slice(0, 2), 9, { '0': 3 });
+    expect(a.lines.map((l) => [l.name, l.cents])).toEqual([
+      ['Crab (share 1 of 3)', 1000],
+      ['Crab (share 2 of 3)', 1000],
+      ['Crab (share 3 of 3)', 1000],
+      ['Rice', 1000],
+      ['Beer', 2000],
+    ]);
+    expect(a.items.slice(0, 3)).toEqual([[0], [1], []]);
+    expect(a.unassigned).toEqual([2, 3, 4]);
+    const lineReceipt = { ...receipt, items: a.lines };
+    // the organiser covers the open share, the rice and the beer
+    const covered = applyUnassigned(a, 'me');
+    const cents = shareReceipt(lineReceipt.items, covered, 6000).shares.map((x) => x.cents);
+    expect(cents.reduce((t, c) => t + c, 0)).toBe(6000);
+    expect(cents.slice(0, 2)).toEqual([1000, 1000]);
+  });
+
+  it('puts odd cents on the first shares and leaves normal items alone', () => {
+    const odd = expandShares([{ name: 'Dish', cents: 1000 }], { '0': 3 });
+    expect(odd.lines.map((l) => l.cents)).toEqual([334, 333, 333]);
+    const plain = expandShares(items, {});
+    expect(plain.lines).toEqual(items);
+    expect(plain.first).toEqual([0, 1, 2]);
+  });
+
+  it('reads typed people: me, mentions, usernames and plain names, reusing existing ones', () => {
+    const org = { id: 9, name: 'Olive' };
+    const ok = (t: string, m?: Map<string, number>) => {
+      const r = resolveTyped(claimers, t, m, org);
+      if (!r.ok) throw new Error(r.error);
+      return r.people;
+    };
+    expect(ok('ann').map((p) => p.id)).toEqual([1]); // existing, by name
+    expect(ok('@bob_b').map((p) => p.id)).toEqual([2]); // existing, by username
+    expect(ok('me')[0]).toMatchObject({ id: 9 });
+    const fresh = ok('Uncle Lim, @new_user, Zed Q', new Map([['Zed Q', 77]]));
+    expect(fresh.map((p) => p.id)).toEqual([-1, -2, 77]);
+    expect(fresh[1]).toMatchObject({ username: 'new_user' });
+    // typed people carry no Telegram id: no userId, username kept
+    const a = assignmentFromClaims(items, { '0': [-1], '1': [1] }, [fresh[0]!, claimers[0]!], 9);
+    expect(a.people[0]).toEqual({ name: 'Uncle Lim', isMe: false });
+    expect(a.people[1]).toMatchObject({ userId: 1 });
+  });
+
+  it('refuses a name over 20 characters and an empty message', () => {
+    const org = { id: 9, name: 'Olive' };
+    const long = resolveTyped(claimers, 'x'.repeat(21), undefined, org);
+    expect(long.ok).toBe(false);
+    expect(resolveTyped(claimers, ' , ', undefined, org).ok).toBe(false);
   });
 });

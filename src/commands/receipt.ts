@@ -356,33 +356,120 @@ export function claimerName(
 }
 
 /**
- * The assignment a group's claims make, in the same shape the typed parser returns. `claims[i]`
- * holds the ids of the people who claimed item i (zero-based); the organiser is `me`, everyone
- * else keeps their user id so the QR can be sent to them directly.
+ * Items shared N ways become N share lines (the item's cents split as evenly as possible, odd
+ * cents on the first shares). `first[i]` is the index of item i's first line.
+ */
+export function expandShares(
+  items: ReceiptItem[],
+  ways: Record<string, number> = {}
+): { lines: ReceiptItem[]; first: number[] } {
+  const lines: ReceiptItem[] = [];
+  const first: number[] = [];
+  items.forEach((item, i) => {
+    first.push(lines.length);
+    const n = ways[String(i)];
+    if (!n) {
+      lines.push(item);
+      return;
+    }
+    const base = Math.floor(item.cents / n);
+    const odd = item.cents - base * n;
+    for (let k = 0; k < n; k++) {
+      lines.push({
+        name: `${item.name} (share ${k + 1} of ${n})`,
+        cents: base + (k < odd ? 1 : 0),
+      });
+    }
+  });
+  return { lines, first };
+}
+
+/**
+ * The assignment a group's claims make, in the same shape the typed parser returns, plus the
+ * lines it refers to (the items, with N-way items turned into share lines). `claims[i]` holds the
+ * ids of the people who claimed item i (zero-based); the organiser is `me`, everyone else keeps
+ * their user id (when they have one) so the QR can be sent to them directly. Each holder of an
+ * item shared N ways takes one share; shares nobody holds are unassigned.
  */
 export function assignmentFromClaims(
-  itemCount: number,
+  items: ReceiptItem[],
   claims: Record<string, number[]>,
   claimers: Claimer[],
-  organiserId: number
-): AssignedOk {
+  organiserId: number,
+  ways: Record<string, number> = {}
+): AssignedOk & { lines: ReceiptItem[] } {
   const people: Person[] = claimers.map((c) =>
     c.id === organiserId
       ? { name: 'me', isMe: true }
       : {
           name: c.name,
           isMe: false,
-          userId: c.id,
+          ...(c.id > 0 ? { userId: c.id } : {}),
           ...(c.username ? { username: c.username.toLowerCase() } : {}),
         }
   );
-  const items = Array.from({ length: itemCount }, (_, i) =>
-    (claims[String(i)] ?? [])
+  const { lines, first } = expandShares(items, ways);
+  const assigned: number[][] = lines.map(() => []);
+  items.forEach((_, i) => {
+    const holders = (claims[String(i)] ?? [])
       .map((id) => claimers.findIndex((c) => c.id === id))
-      .filter((p) => p >= 0)
-  );
-  const unassigned = items.flatMap((a, i) => (a.length === 0 ? [i] : []));
-  return { ok: true, people, items, unassigned };
+      .filter((p) => p >= 0);
+    const n = ways[String(i)];
+    if (n) {
+      for (const [k, p] of holders.slice(0, n).entries()) assigned[first[i]! + k] = [p];
+    } else {
+      assigned[first[i]!] = holders;
+    }
+  });
+  const unassigned = assigned.flatMap((a, i) => (a.length === 0 ? [i] : []));
+  return { ok: true, people, items: assigned, unassigned, lines };
+}
+
+/**
+ * The people a typed message names, for the organiser to add to an item: `me`, a person picked
+ * from the member list, an @username or a plain name. Anyone already among the claimers is
+ * reused; new people without a Telegram id get a negative id so they never clash with one.
+ */
+export function resolveTyped(
+  existing: Claimer[],
+  text: string,
+  textMentions: Map<string, number> | undefined,
+  organiser: { id: number; name: string }
+): { ok: true; people: Claimer[] } | { ok: false; error: string } {
+  const names = text
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+  if (names.length === 0) return { ok: false, error: 'Send at least one name.' };
+  const known = [...existing];
+  let next = Math.min(0, ...known.map((c) => c.id)) - 1;
+  const people: Claimer[] = [];
+  const take = (c: Claimer) => {
+    if (!known.some((k) => k.id === c.id)) known.push(c);
+    if (!people.some((p) => p.id === c.id)) people.push(known.find((k) => k.id === c.id)!);
+  };
+  for (const name of names) {
+    const lower = name.toLowerCase();
+    const username = USERNAME.exec(name)?.[1]?.toLowerCase();
+    const userId = textMentions?.get(name);
+    if (lower === 'me') {
+      take(known.find((k) => k.id === organiser.id) ?? { id: organiser.id, name: organiser.name });
+    } else if (userId !== undefined) {
+      take(known.find((k) => k.id === userId) ?? { id: userId, name });
+    } else if (username !== undefined) {
+      take(
+        known.find((k) => k.username?.toLowerCase() === username) ?? {
+          id: next--,
+          name,
+          username,
+        }
+      );
+    } else {
+      if (name.length > 20) return { ok: false, error: `"${name}" is too long for a name.` };
+      take(known.find((k) => k.name.toLowerCase() === lower) ?? { id: next--, name });
+    }
+  }
+  return { ok: true, people };
 }
 
 /**
