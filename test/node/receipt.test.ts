@@ -5,6 +5,7 @@ import {
   claimerName,
   expandShares,
   MAX_ITEMS,
+  memberAmount,
   missingCents,
   parseAddedItems,
   parseAssignments,
@@ -509,5 +510,85 @@ describe('claims', () => {
     const long = resolveTyped(claimers, 'x'.repeat(21), undefined, org);
     expect(long.ok).toBe(false);
     expect(resolveTyped(claimers, ' , ', undefined, org).ok).toBe(false);
+  });
+
+  describe('early amounts', () => {
+    // 30.00 + 10.00 + 20.00 = 60.00 of items on a 72.00 receipt: 12.00 extra
+    const total = 7200;
+    const finalFor = (
+      claims: Record<string, number[]>,
+      people: Array<{ id: number; name: string }>,
+      locked: number[],
+      ways: Record<string, number> = {}
+    ) => {
+      const a = assignmentFromClaims(items, claims, people, 9, ways);
+      const filled = applyUnassigned(a, 'me', new Set(locked));
+      return shareReceipt(a.lines, filled, total, new Set(locked)).shares;
+    };
+
+    it('matches the final amount of a locked member whatever the others claim later', () => {
+      const ann = { id: 1, name: 'Ann' };
+      const bob = { id: 2, name: 'Bob' };
+      const org = { id: 9, name: 'Org' };
+      const early = memberAmount(items, { '0': [1] }, {}, 1, total); // Ann holds the crab alone
+      expect(early).toEqual({ itemsCents: 3000, extrasCents: 600, cents: 3600 });
+      // later, Bob takes the rice, the organiser the beer, and the shares are rounded
+      const done = finalFor({ '0': [1], '1': [2], '2': [9] }, [ann, bob, org], [0]);
+      expect(done[0]!.cents).toBe(early.cents);
+      expect(done.reduce((t, x) => t + x.cents, 0)).toBe(total);
+      // or nobody claims anything else and the organiser covers it
+      const alone = finalFor({ '0': [1] }, [ann], [0]);
+      expect(alone[0]!.cents).toBe(early.cents);
+      expect(alone.reduce((t, x) => t + x.cents, 0)).toBe(total);
+    });
+
+    it('handles a shared item, an item shared N ways and a discount', () => {
+      // Ann and Bob share the 10.00 rice: 5.00 each, plus 20% extra
+      expect(memberAmount(items, { '1': [1, 2] }, {}, 2, total).cents).toBe(600);
+      // the 30.00 crab shared 3 ways costs the holder 10.00 whoever else joins
+      const one = memberAmount(items, { '0': [1] }, { '0': 3 }, 1, total);
+      const three = memberAmount(items, { '0': [1, 2, 3] }, { '0': 3 }, 1, total);
+      expect(one).toEqual(three);
+      expect(one.itemsCents).toBe(1000);
+      // a discount makes the extras negative and the floor takes a cent more
+      const less = memberAmount(items, { '1': [1] }, {}, 1, 5900); // extras -1.00
+      expect(less).toEqual({ itemsCents: 1000, extrasCents: -17, cents: 983 });
+    });
+
+    it('lets the unlocked absorb the rounding cents, and all amounts add up', () => {
+      const people = [
+        { id: 1, name: 'A' },
+        { id: 2, name: 'B' },
+        { id: 3, name: 'C' },
+      ];
+      const odd = [
+        { name: 'x', cents: 1001 },
+        { name: 'y', cents: 1001 },
+        { name: 'z', cents: 1001 },
+      ];
+      const a = assignmentFromClaims(odd, { '0': [1], '1': [2], '2': [3] }, people, 9);
+      const lockedAll = shareReceipt(odd, a, 3333, new Set([0, 1, 2])).shares;
+      // everyone fixed: floors only, the rest is the organiser's remainder (nobody else is left)
+      expect(
+        lockedAll.every(
+          (x, i) => x.cents === memberAmount(odd, { [String(i)]: [i + 1] }, {}, i + 1, 3333).cents
+        )
+      ).toBe(true);
+      const some = shareReceipt(odd, a, 3333, new Set([0])).shares;
+      expect(some.reduce((t, x) => t + x.cents, 0)).toBe(3333);
+      expect(some[0]!.cents).toBe(memberAmount(odd, { '0': [1] }, {}, 1, 3333).cents);
+    });
+
+    it('does not offer a locked member a share of the unclaimed items, and flags them as sent', () => {
+      const ann = { id: 1, name: 'Ann' };
+      const bob = { id: 2, name: 'Bob' };
+      const a = assignmentFromClaims(items, { '0': [1], '1': [2] }, [ann, bob], 9);
+      const even = applyUnassigned(a, 'even', new Set([0]));
+      expect(even.items[2]).toEqual([1]); // the beer goes to Bob only
+      const shares = shareReceipt(a.lines, even, total, new Set([0])).shares;
+      const entries = toEntries(shares, new Set([0]));
+      expect(entries.find((e) => e.name === 'Ann')).toMatchObject({ sent: true });
+      expect(entries.find((e) => e.name === 'Bob')!.sent).toBeUndefined();
+    });
   });
 });

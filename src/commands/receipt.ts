@@ -473,10 +473,46 @@ export function resolveTyped(
 }
 
 /**
+ * One member's amount now, from the claims so far: their items (each item split equally between
+ * its holders, odd cents to the first; an item shared N ways costs the holder one share) plus
+ * their share of what the receipt total adds on top of the items, in proportion to the receipt's
+ * total of all items and rounded down, so it does not depend on what anyone else claims.
+ */
+export function memberAmount(
+  items: ReceiptItem[],
+  claims: Record<string, number[]>,
+  ways: Record<string, number>,
+  memberId: number,
+  totalCents: number
+): { itemsCents: number; extrasCents: number; cents: number } {
+  const { lines, first } = expandShares(items, ways);
+  let itemsCents = 0;
+  items.forEach((item, i) => {
+    const holders = claims[String(i)] ?? [];
+    const k = holders.indexOf(memberId);
+    if (k < 0) return;
+    if (ways[String(i)]) {
+      itemsCents += lines[first[i]! + k]?.cents ?? 0;
+    } else {
+      const base = Math.floor(item.cents / holders.length);
+      itemsCents += base + (k < item.cents - base * holders.length ? 1 : 0);
+    }
+  });
+  const allItems = items.reduce((t, it) => t + it.cents, 0);
+  const extrasCents =
+    allItems === 0 ? 0 : Math.floor(((totalCents - allItems) * itemsCents) / allItems);
+  return { itemsCents, extrasCents, cents: itemsCents + extrasCents };
+}
+
+/**
  * Give the unassigned items to somebody: `me` makes the organiser carry them (counted, not
  * collected); `even` shares each one equally between everyone named in the message.
  */
-export function applyUnassigned(a: AssignedOk, choice: 'me' | 'even'): AssignedOk {
+export function applyUnassigned(
+  a: AssignedOk,
+  choice: 'me' | 'even',
+  locked: ReadonlySet<number> = new Set()
+): AssignedOk {
   if (a.unassigned.length === 0) return a;
   const people = [...a.people];
   let who: number[];
@@ -485,7 +521,8 @@ export function applyUnassigned(a: AssignedOk, choice: 'me' | 'even'): AssignedO
     if (me < 0) me = people.push({ name: 'me', isMe: true }) - 1;
     who = [me];
   } else {
-    who = people.map((_, i) => i);
+    // Sharing evenly leaves out people whose amount is already fixed
+    who = people.map((_, i) => i).filter((i) => !locked.has(i));
   }
   const items = a.items.map((sharers, i) => (a.unassigned.includes(i) ? who : sharers));
   return { ok: true, people, items, unassigned: [] };
@@ -507,7 +544,8 @@ export interface PersonShare {
 export function shareReceipt(
   items: ReceiptItem[],
   assignment: AssignedOk,
-  totalCents: number
+  totalCents: number,
+  locked: ReadonlySet<number> = new Set()
 ): { shares: PersonShare[]; extrasCents: number } {
   const { people } = assignment;
   const sub = people.map(() => 0);
@@ -524,13 +562,14 @@ export function shareReceipt(
   const floors = sub.map((c) => Math.floor((extras * c) / itemsTotal));
   const rems = sub.map((c, i) => extras * c - floors[i]! * itemsTotal);
   let left = extras - floors.reduce((s, c) => s + c, 0);
-  const order = people.map((_, i) => i).sort((a, b) => rems[b]! - rems[a]! || a - b);
+  // Someone whose amount is fixed (they already hold a QR) gets the floor only; the cents the
+  // rounding leaves over go to the others, and to the organiser's own remainder when nobody is left
+  const order = people
+    .map((_, i) => i)
+    .filter((i) => !locked.has(i))
+    .sort((a, b) => rems[b]! - rems[a]! || a - b);
   const bonus = people.map(() => 0);
-  for (const i of order) {
-    if (left <= 0) break;
-    bonus[i] = 1;
-    left--;
-  }
+  for (let k = 0; left > 0 && order.length > 0; k++, left--) bonus[order[k % order.length]!]!++;
   return {
     extrasCents: extras,
     shares: people.map((person, i) => {
@@ -541,13 +580,22 @@ export function shareReceipt(
 }
 
 /** The shares as custom-split entries: everyone but the organiser, nobody who owes nothing. */
-export function toEntries(shares: PersonShare[]): SplitEntry[] {
-  return shares
-    .filter((s) => !s.person.isMe && s.cents > 0)
-    .map((s) => ({
-      name: s.person.name,
-      cents: s.cents,
-      ...(s.person.username !== undefined ? { username: s.person.username } : {}),
-      ...(s.person.userId !== undefined ? { userId: s.person.userId } : {}),
-    }));
+export function toEntries(
+  shares: PersonShare[],
+  locked: ReadonlySet<number> = new Set()
+): SplitEntry[] {
+  return shares.flatMap((s, i) =>
+    s.person.isMe || s.cents <= 0
+      ? []
+      : [
+          {
+            name: s.person.name,
+            cents: s.cents,
+            ...(s.person.username !== undefined ? { username: s.person.username } : {}),
+            ...(s.person.userId !== undefined ? { userId: s.person.userId } : {}),
+            // Already sent their QR when they took it early
+            ...(locked.has(i) ? { sent: true } : {}),
+          },
+        ]
+  );
 }

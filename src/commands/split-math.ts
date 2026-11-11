@@ -27,6 +27,8 @@ export interface SplitEntry {
   username?: string;
   /** Telegram user id when the person was picked from the member list (a text mention). */
   userId?: number;
+  /** True when the person already holds their QR (taken early while items were claimed). */
+  sent?: boolean;
 }
 
 export const MAX_CUSTOM_PEOPLE = 20;
