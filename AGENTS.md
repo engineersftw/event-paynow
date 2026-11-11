@@ -117,6 +117,7 @@ This project uses OpenSpec for change management. All changes are archived:
 51. `ask-payee-first` (7 tasks) — archived 2026-11-11
 52. `add-claim-admin-menu` (9 tasks) — archived 2026-11-11
 53. `add-early-claim-qr` (9 tasks) — archived 2026-11-11
+54. `add-split-landing-page` (9 tasks) — archived 2026-11-11
 
 **Workflow commands:**
 
