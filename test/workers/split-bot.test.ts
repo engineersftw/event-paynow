@@ -1920,7 +1920,7 @@ describe('Split_PayNow_Bot group claiming', () => {
     };
 
   /** Start /split_receipt in a group, scan, Use this, choose to claim; returns what the tests need. */
-  async function startClaiming() {
+  async function startClaiming(answer: 'me' | 'other' = 'me') {
     const chat = -uid++;
     const [org, ann, bob] = [uid++, uid++, uid++];
     NAMES[org] = 'Olive';
@@ -1930,7 +1930,7 @@ describe('Split_PayNow_Bot group claiming', () => {
     stub.reset();
     await gsay(b, chat, org, '/split_receipt');
     await gsay(b, chat, org, '91234567');
-    await gtap(b, chat, org, 'split_payee:me');
+    await gtap(b, chat, org, `split_payee:${answer}`);
     await b.handleUpdate(photoUpdate(chat, org, 'file-1', upd++));
     await gtap(b, chat, org, 'split_scan:use');
     expect(stub.lastText()).toContain('How do you want to share out the items?');
@@ -2301,6 +2301,137 @@ describe('Split_PayNow_Bot group claiming', () => {
       expect(photos.some(([to, cap]) => to === String(chat) && cap.includes('Uncle Lim'))).toBe(
         true
       );
+    });
+  });
+
+  describe('taking the QR early', () => {
+    const decode = (photo: { bytes: Uint8Array }) => {
+      const { data, width, height } = bmpToRgba(photo.bytes);
+      return jsQR(data, width, height)!.data;
+    };
+    const claimText = () =>
+      stub.editedMessages.findLast((e) => e.text.startsWith('Tap the items'))!.text;
+    const qr = (b: B, chat: number, user: number, msg: number) =>
+      tapOn(b, chat, user, 'split_claim:qr', msg);
+
+    it('sends the member their QR by direct message while claiming stays open, and locks their items', async () => {
+      const { b, chat, org, ann, bob, msg } = await startClaiming();
+      await tapOn(b, chat, ann, 'split_claim:0', msg); // the 30.00 crab alone
+      await qr(b, chat, ann, msg);
+      expect(stub.callbackAnswers.at(-1)).toBe('Your QR is in your direct messages.');
+      const photo = stub.sentPhotos.find((p) => p.chatId === String(ann))!;
+      // 30.00 plus 20% for the service charge and GST, whatever the others claim later
+      expect(decode(photo)).toContain('540536.00');
+      expect(photo.caption).toContain('asks you for SGD 36.00');
+      expect(claimText()).toContain('🔒 1. Chilli crab SGD 30.00: Ann (QR sent)');
+      expect((await stateOf(chat)).step).toBe(17); // claiming is still open
+
+      // the locked item cannot be changed by a member or by the organiser's menu
+      await tapOn(b, chat, bob, 'split_claim:0', msg);
+      expect(stub.callbackAnswers.at(-1)).toContain('locked');
+      await tapOn(b, chat, org, 'split_claim:0', msg);
+      expect(stub.lastText()).toContain('This item is locked');
+      expect((await stateOf(chat)).context.claims).toEqual({ '0': [ann] });
+      // a second QR is refused
+      await qr(b, chat, ann, msg);
+      expect(stub.callbackAnswers.at(-1)).toContain('already took your QR');
+      // and the member cannot add more items now
+      await tapOn(b, chat, ann, 'split_claim:1', msg);
+      expect(stub.callbackAnswers.at(-1)).toContain('already have their QR');
+    });
+
+    it('refuses a member who holds nothing, and the organiser who is the payee', async () => {
+      const { b, chat, org, ann, msg } = await startClaiming();
+      await qr(b, chat, ann, msg);
+      expect(stub.callbackAnswers.at(-1)).toBe('Claim an item first.');
+      await orgClaim(b, chat, org, 1, msg);
+      await qr(b, chat, org, msg);
+      expect(stub.callbackAnswers.at(-1)).toContain('You are the payee');
+      expect(stub.sentPhotos).toHaveLength(0);
+    });
+
+    it('gives the organiser their own QR when someone else is the payee', async () => {
+      const { b, chat, org, ann, msg } = await startClaiming('other');
+      await tapOn(b, chat, ann, 'split_claim:0', msg);
+      await orgClaim(b, chat, org, 1, msg); // the 10.00 rice: 12.00 with charges
+      await qr(b, chat, org, msg);
+      const photo = stub.sentPhotos.find((p) => p.chatId === String(org))!;
+      expect(decode(photo)).toContain('540512.00');
+      expect(photo.caption).toContain('Your share: SGD 12.00');
+    });
+
+    it('hands over a start link when the bot cannot message the member', async () => {
+      const { b, chat, bob, msg } = await startClaiming();
+      stub.blockedChats.add(String(bob));
+      await tapOn(b, chat, bob, 'split_claim:1', msg);
+      await qr(b, chat, bob, msg);
+      expect(stub.callbackAnswers.at(-1)).toBe('Open the chat to get your QR.');
+      expect(stub.callbackUrls.at(-1)).toMatch(/^https:\/\/t\.me\/.+\?start=claim_/);
+      expect(stub.sentPhotos).toHaveLength(0);
+      expect(claimText()).toContain('Bob (QR sent)');
+    });
+
+    it('uses the amount as sent at Done, does not send a second QR, and the amounts add up', async () => {
+      const { b, chat, org, ann, bob, msg } = await startClaiming();
+      await tapOn(b, chat, ann, 'split_claim:0', msg);
+      await qr(b, chat, ann, msg); // 36.00
+      await tapOn(b, chat, bob, 'split_claim:1', msg); // 12.00 with charges
+      await orgClaim(b, chat, org, 2, msg); // the beer: 24.00
+      await tapOn(b, chat, org, 'split_claim:done', msg);
+      const summary = await reachSummary(b, chat, org);
+      expect(summary).toContain('Ann: SGD 36.00 (QR already sent)');
+      expect(summary).toContain('Bob: SGD 12.00 (by direct message)');
+      expect(summary).toContain('Your own share, not collected: SGD 24.00');
+      stub.sentPhotos.length = 0;
+      await gtap(b, chat, org, 'split_confirm');
+      const to = stub.sentPhotos.map((p) => p.chatId);
+      expect(to).toEqual([String(bob)]); // Ann already has hers
+      expect(stub.sentMessages.some((m) => m.text.includes('Already sent their QR: Ann'))).toBe(
+        true
+      );
+    });
+
+    it('shares unclaimed items only with members whose amount is not fixed', async () => {
+      const { b, chat, org, ann, bob, msg } = await startClaiming();
+      await tapOn(b, chat, ann, 'split_claim:0', msg);
+      await qr(b, chat, ann, msg); // fixed at 36.00
+      await tapOn(b, chat, bob, 'split_claim:1', msg);
+      await tapOn(b, chat, org, 'split_claim:done', msg); // the beer is unclaimed
+      const buttons = (
+        stub.sentMessages.at(-1)!.replyMarkup as {
+          inline_keyboard: Array<Array<{ callback_data: string }>>;
+        }
+      ).inline_keyboard
+        .flat()
+        .map((k) => k.callback_data);
+      expect(buttons).toContain('split_unassigned:even');
+      await gtap(b, chat, org, 'split_unassigned:even');
+      const summary = await reachSummary(b, chat, org);
+      // Bob alone takes the 20.00 beer: 10.00 + 20.00 plus 20% = 36.00; Ann stays at 36.00
+      expect(summary).toContain('Ann: SGD 36.00 (QR already sent)');
+      expect(summary).toContain('Bob: SGD 36.00');
+    });
+
+    it('does not offer an even share when everyone who claimed has their QR', async () => {
+      const { b, chat, org, ann, bob, msg } = await startClaiming();
+      await tapOn(b, chat, ann, 'split_claim:0', msg);
+      await tapOn(b, chat, bob, 'split_claim:1', msg);
+      await qr(b, chat, ann, msg);
+      await qr(b, chat, bob, msg);
+      await tapOn(b, chat, org, 'split_claim:done', msg);
+      const buttons = (
+        stub.sentMessages.at(-1)!.replyMarkup as {
+          inline_keyboard: Array<Array<{ callback_data: string }>>;
+        }
+      ).inline_keyboard
+        .flat()
+        .map((k) => k.callback_data);
+      expect(buttons).toEqual(['split_unassigned:me', 'split_claim:keep']);
+      await gtap(b, chat, org, 'split_unassigned:me');
+      const summary = await reachSummary(b, chat, org);
+      expect(summary).toContain('Ann: SGD 36.00 (QR already sent)');
+      expect(summary).toContain('Bob: SGD 12.00 (QR already sent)');
+      expect(summary).toContain('Your own share, not collected: SGD 24.00');
     });
   });
 });

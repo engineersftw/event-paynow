@@ -30,6 +30,7 @@ import {
   type Claimer,
   claimerName,
   MAX_CLAIMERS,
+  memberAmount,
   missingCents,
   parseAddedItems,
   parseAssignments,
@@ -208,20 +209,31 @@ function readAnswer(
  * owner or an earlier choice still fits, otherwise the partial assignment for the organiser's
  * choice about the unassigned items.
  */
-function assignmentPatch(a: AssignedOk, c: Ctx, receipt: Receipt, lines?: ReceiptItem[]): Answer {
-  const result = assignmentPatchOf(a, c, receipt);
+function assignmentPatch(
+  a: AssignedOk,
+  c: Ctx,
+  receipt: Receipt,
+  lines?: ReceiptItem[],
+  locked?: ReadonlySet<number>
+): Answer {
+  const result = assignmentPatchOf(a, c, receipt, locked);
   // N-way items are shared out as lines; remember them for the unassigned prompt and its choice
   return result.ok ? { ok: true, patch: { ...result.patch, shareItems: lines } } : result;
 }
 
-function assignmentPatchOf(a: AssignedOk, c: Ctx, receipt: Receipt): Answer {
+function assignmentPatchOf(
+  a: AssignedOk,
+  c: Ctx,
+  receipt: Receipt,
+  locked: ReadonlySet<number> = new Set()
+): Answer {
   const nobody = {
     ok: false as const,
     error: 'Nobody else owes anything. Name at least one other person.',
   };
   if (a.people.every((p) => p.isMe)) return nobody;
   const share = (done: AssignedOk) =>
-    toEntries(shareReceipt(receipt.items, done, receipt.totalCents).shares);
+    toEntries(shareReceipt(receipt.items, done, receipt.totalCents, locked).shares, locked);
 
   if (a.unassigned.length === 0) {
     // Everything has an owner: the receipt total minus the others' shares is the organiser's own
@@ -243,7 +255,7 @@ function assignmentPatchOf(a: AssignedOk, c: Ctx, receipt: Receipt): Answer {
   const choice = c.unassignedChoice as 'me' | 'even' | undefined;
   const sameGap = JSON.stringify(c.gap) === JSON.stringify(a.unassigned);
   if (choice && sameGap) {
-    const entries = share(applyUnassigned(a, choice));
+    const entries = share(applyUnassigned(a, choice, locked));
     if (entries.length === 0) return nobody;
     return {
       ok: true,
@@ -317,7 +329,11 @@ function summary(c: Record<string, unknown>, group: boolean): string {
     const people = listed.length + (r.leftoverCents > 0 && r.extraCents === 0 ? 1 : 0);
     lines.push(`Bill: ${sgd(total)} shared by ${people} people`);
     for (const e of r.entries) {
-      const direct = e.username || e.userId ? ' (by direct message)' : '';
+      const direct = e.sent
+        ? ' (QR already sent)'
+        : e.username || e.userId
+          ? ' (by direct message)'
+          : '';
       lines.push(`${e.name}: ${sgd(e.cents)}${direct}`);
     }
     const paid = c.payeeIsMe === false; // someone else is paid, so the organiser pays too
@@ -404,9 +420,20 @@ const amendMenu = (receipt: boolean) =>
 
 const claimsOf = (c: Ctx) => (c.claims as Record<string, number[]> | undefined) ?? {};
 const claimersOf = (c: Ctx) => (c.claimers as Claimer[] | undefined) ?? [];
+const servedOf = (c: Ctx) => (c.served as Record<string, number> | undefined) ?? {};
 const waysOf = (c: Ctx) => (c.ways as Record<string, number> | undefined) ?? {};
 type Menu = { item: number; msg: number; awaiting?: 'names' | 'ways' };
 const MAX_WAYS = 20;
+
+/** An item is locked once any of its holders has taken their QR. */
+const itemLocked = (c: Ctx, item: number) =>
+  (claimsOf(c)[String(item)] ?? []).some((id) => servedOf(c)[String(id)] !== undefined);
+
+/** The claimers (by position, which is also their place in the assignment) who hold their QR. */
+function lockedPeople(c: Ctx): Set<number> {
+  const served = servedOf(c);
+  return new Set(claimersOf(c).flatMap((x, i) => (served[String(x.id)] !== undefined ? [i] : [])));
+}
 
 /** The claim message: every item with the people who claimed it (and the shares left). */
 function claimText(c: Ctx): string {
@@ -415,14 +442,22 @@ function claimText(c: Ctx): string {
   const ways = waysOf(c);
   const lines = (c.receipt as Receipt).items.map((it, i) => {
     const holders = claims[String(i)] ?? [];
-    const who = holders.map((id) => claimers.find((x) => x.id === id)?.name ?? '?').join(', ');
+    const who = holders
+      .map((id) => {
+        const name = claimers.find((x) => x.id === id)?.name ?? '?';
+        return servedOf(c)[String(id)] !== undefined ? `${name} (QR sent)` : name;
+      })
+      .join(', ');
+    const lock = itemLocked(c, i) ? '🔒 ' : '';
     const n = ways[String(i)];
-    if (n === undefined) return `${i + 1}. ${it.name} ${sgd(it.cents)}: ${who || 'unclaimed'}`;
+    if (n === undefined) {
+      return `${lock}${i + 1}. ${it.name} ${sgd(it.cents)}: ${who || 'unclaimed'}`;
+    }
     const left = n - holders.length;
     const parts = [who, left > 0 ? `${left} left` : ''].filter(Boolean).join(', ');
-    return `${i + 1}. ${it.name} ${sgd(it.cents)} (${n} ways): ${parts}`;
+    return `${lock}${i + 1}. ${it.name} ${sgd(it.cents)} (${n} ways): ${parts}`;
   });
-  return `Tap the items you had; tap again to take one back. An item claimed by several people is split equally. The organiser taps Done when everyone has claimed, and can tap an item to assign it to someone else or share it. This stays open for an hour after the last tap.\n\n${lines.join('\n')}`;
+  return `Tap the items you had; tap again to take one back. An item claimed by several people is split equally. The organiser taps Done when everyone has claimed, and can tap an item to assign it to someone else or share it. Tap Get my QR to pay now: your items are then locked. This stays open for an hour after the last tap.\n\n${lines.join('\n')}`;
 }
 
 /** One button per item (with how many have claimed it) and Done. */
@@ -434,9 +469,10 @@ function claimButtons(c: Ctx): InlineKeyboard {
     const n = (claims[String(i)] ?? []).length;
     const w = ways[String(i)];
     const count = w !== undefined ? ` (${n}/${w})` : n > 0 ? ` (${n})` : '';
-    kb.text(`${i + 1}. ${it.name}${count}`.slice(0, 40), `split_claim:${i}`).row();
+    const lock = itemLocked(c, i) ? '🔒 ' : '';
+    kb.text(`${lock}${i + 1}. ${it.name}${count}`.slice(0, 40), `split_claim:${i}`).row();
   });
-  return kb.text('✅ Done', 'split_claim:done');
+  return kb.text('💳 Get my QR', 'split_claim:qr').row().text('✅ Done', 'split_claim:done');
 }
 
 /** The organiser's menu for one item: what it says and its buttons. */
@@ -448,6 +484,12 @@ function menuView(c: Ctx, organiserId: number): { text: string; kb: InlineKeyboa
   const n = waysOf(c)[String(item)];
   const head = `Item ${item + 1}: ${it.name} ${sgd(it.cents)}${n !== undefined ? ` (${n} ways)` : ''}`;
   const at = (action: string) => `split_who:${item}:${action}`;
+  if (itemLocked(c, item)) {
+    return {
+      text: `🔒 ${head}\n\nThis item is locked: someone on it already has their QR.`,
+      kb: new InlineKeyboard().text('Close', at('close')),
+    };
+  }
   if (menu.awaiting === 'names') {
     return {
       text: `${head}\n\nWho else had it? Send their names or @mentions, separated by commas (reply to this message).`,
@@ -501,8 +543,15 @@ function applyClaim(c: Ctx, item: number, op: ClaimOp): ClaimResult {
   const key = String(item);
   const holders = () => claims[key] ?? [];
   let note = 'Done';
+  // Taking a QR fixes the amounts of everyone on the item: nobody can change it any more
+  if (itemLocked(c, item))
+    return { refuse: 'That item is locked: someone on it already has their QR.' };
+  const served = servedOf(c);
 
   const add = (person: Claimer): string | undefined => {
+    if (served[String(person.id)] !== undefined) {
+      return 'They already have their QR, so their items cannot change.';
+    }
     if (!claimers.some((x) => x.id === person.id)) {
       // A typed @username who now taps themselves becomes the same person
       const typed =
@@ -792,6 +841,7 @@ export class SplitCommandHandler {
     if (!data.startsWith('split_')) return false;
     // Any member of the group may tap an item; everything else is the organiser's
     if (/^split_claim:\d+$/.test(data)) return this.claimTap(ctx, data);
+    if (data === 'split_claim:qr') return this.qrTap(ctx);
     const state = await this.getState();
     if (state.flow === 'split' && !this.isOwner(ctx, state)) {
       await ctx.answerCallbackQuery({
@@ -868,7 +918,12 @@ export class SplitCommandHandler {
       await ctx
         .editMessageText(claim ? 'Everyone claims their own items.' : 'You will type who had what.')
         .catch(() => undefined);
-      const context = { ...c, assignHow: claim ? 'claim' : 'type' };
+      const organiserName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ');
+      const context = {
+        ...c,
+        assignHow: claim ? 'claim' : 'type',
+        ...(claim ? { organiserName, organiserId: ctx.from?.id } : {}),
+      };
       const next = claim ? CLAIM : ASSIGN;
       await this.setState({ flow: 'split', step: next, context });
       await this.askStep(ctx, next, context);
@@ -886,7 +941,8 @@ export class SplitCommandHandler {
         a,
         c,
         { ...receipt, items: a.lines },
-        shared ? a.lines : undefined
+        shared ? a.lines : undefined,
+        lockedPeople(c)
       );
       if (!result.ok) {
         await ctx.reply(result.error);
@@ -915,8 +971,15 @@ export class SplitCommandHandler {
       const partial = c.partial as AssignedOk;
       const receipt = c.receipt as Receipt;
       const lines = (c.shareItems as ReceiptItem[] | undefined) ?? receipt.items;
+      const locked = c.assignHow === 'claim' ? lockedPeople(c) : new Set<number>();
+      if (choice === 'even' && partial.people.every((_, i) => locked.has(i))) {
+        await ctx.reply('Everyone has their QR already, so I cannot share the rest with them.');
+        return true;
+      }
       const entries = toEntries(
-        shareReceipt(lines, applyUnassigned(partial, choice), receipt.totalCents).shares
+        shareReceipt(lines, applyUnassigned(partial, choice, locked), receipt.totalCents, locked)
+          .shares,
+        locked
       );
       if (entries.length === 0) {
         await ctx.reply('Nobody else owes anything. Name at least one other person.');
@@ -972,6 +1035,9 @@ export class SplitCommandHandler {
           ways,
           menu,
           shareItems,
+          served,
+          organiserName,
+          organiserId,
           ...clean
         } = rest;
         await this.proceed(ctx, {
@@ -1151,15 +1217,19 @@ export class SplitCommandHandler {
         {
           reply_markup: keep(
             (() => {
-              const kb = new InlineKeyboard()
-                .text(
+              // People whose amount is fixed (they hold their QR) are not offered a share
+              const locked = claiming ? lockedPeople(c) : new Set<number>();
+              const open = (c.partial as AssignedOk).people.some((_, i) => !locked.has(i));
+              const kb = new InlineKeyboard();
+              if (open) {
+                kb.text(
                   claiming
                     ? 'Split evenly between those who claimed'
                     : 'Split evenly between those named',
                   'split_unassigned:even'
-                )
-                .row()
-                .text('Leave them out: I cover them', 'split_unassigned:me');
+                ).row();
+              }
+              kb.text('Leave them out: I cover them', 'split_unassigned:me');
               return claiming ? kb.row().text('Keep claiming', 'split_claim:keep') : kb;
             })()
           )!,
@@ -1291,13 +1361,21 @@ export class SplitCommandHandler {
     // everyone else is served by the shared chat QRs below
     const isMentioned = (e: SplitEntry) =>
       this.directory !== undefined && (e.username !== undefined || e.userId !== undefined);
-    const mentioned = (final ?? []).filter(isMentioned);
+    // People who took their QR early already have it: they are not sent another
+    const already = (final ?? []).filter((e) => e.sent);
+    const mentioned = (final ?? []).filter((e) => isMentioned(e) && !e.sent);
 
     // Someone else is paid, so the organiser's own amount (their items, or the remainder left
     // out) is theirs to pay: they get a QR for it like everybody else
     let ownJob: { cents: number; lines: string[] } | undefined;
     const selfId = ctx.from?.id;
-    if (listed && c.payeeIsMe === false && c.leftover !== 'even' && selfId !== undefined) {
+    if (
+      listed &&
+      c.payeeIsMe === false &&
+      c.leftover !== 'even' &&
+      selfId !== undefined &&
+      servedOf(c)[String(selfId)] === undefined
+    ) {
       const own = applyLeftover(listed, total, 'omit').leftoverCents;
       if (own > 0) {
         if (this.directory) {
@@ -1311,11 +1389,14 @@ export class SplitCommandHandler {
     if (mentioned.length > 0) {
       await this.deliverMentioned(ctx, mentioned, description, payloadFor, selfId);
     }
+    if (already.length > 0) {
+      await ctx.reply(`Already sent their QR: ${already.map((e) => e.name).join(', ')}.`);
+    }
 
     // One QR per distinct amount (an equal split has exactly one)
     const jobs = final
       ? [
-          ...groupByAmount(final.filter((e) => !isMentioned(e))).map((g) => ({
+          ...groupByAmount(final.filter((e) => !isMentioned(e) && !e.sent)).map((g) => ({
             cents: g.cents,
             lines: [sgd(g.cents), g.names.join(', ')],
           })),
@@ -1414,7 +1495,7 @@ export class SplitCommandHandler {
   private async mutateClaims(
     ctx: Context,
     expectMsg: ((c: Ctx) => number | undefined) | null,
-    change: (c: Ctx) => ClaimResult
+    change: (c: Ctx, state: ConversationState) => ClaimResult
   ): Promise<
     | { kind: 'ok'; context: Ctx; note: string }
     | { kind: 'refused'; text: string }
@@ -1431,7 +1512,7 @@ export class SplitCommandHandler {
       ) {
         return { kind: 'stale' };
       }
-      const result = change(c);
+      const result = change(c, state);
       if ('refuse' in result) return { kind: 'refused', text: result.refuse };
       const status = await this.writeIfRev(
         { flow: 'split', step: CLAIM, context: result.context },
@@ -1500,6 +1581,124 @@ export class SplitCommandHandler {
       await this.refreshClaims(ctx, r.context);
     }
     return true;
+  }
+
+  /**
+   * A member taps Get my QR: fix their amount (and lock their items) in one conditional write, then
+   * send them the QR by direct message, or hand them a start link when the bot cannot message them.
+   */
+  private async qrTap(ctx: Context): Promise<boolean> {
+    const from = ctx.from;
+    if (!from) return true;
+    const r = await this.mutateClaims(
+      ctx,
+      (c) => c.claimMsg as number | undefined,
+      (c, state) => {
+        const served = servedOf(c);
+        if (served[String(from.id)] !== undefined) {
+          return { refuse: 'You already took your QR: check your direct messages.' };
+        }
+        if (state.owner?.userId === from.id && c.payeeIsMe === true) {
+          return { refuse: 'You are the payee, so your own share is not collected.' };
+        }
+        const mine = Object.values(claimsOf(c)).some((ids) => ids.includes(from.id));
+        if (!mine) return { refuse: 'Claim an item first.' };
+        const receipt = c.receipt as Receipt;
+        const { cents } = memberAmount(
+          receipt.items,
+          claimsOf(c),
+          waysOf(c),
+          from.id,
+          receipt.totalCents
+        );
+        if (cents <= 0) return { refuse: 'There is nothing to pay for your items.' };
+        return {
+          context: { ...c, served: { ...served, [String(from.id)]: cents } },
+          note: 'Your QR',
+        };
+      }
+    );
+    if (r.kind === 'stale') {
+      await ctx.answerCallbackQuery({ text: 'That step is over.' });
+    } else if (r.kind === 'busy') {
+      await ctx.answerCallbackQuery({ text: 'Busy. Please tap again.' });
+    } else if (r.kind === 'refused') {
+      await ctx.answerCallbackQuery({ text: r.text, show_alert: true });
+    } else {
+      const cents = servedOf(r.context)[String(from.id)]!;
+      const sent = await this.deliverEarly(ctx, from, cents, r.context);
+      if (sent === 'failed') {
+        // Nothing could be delivered: give the member their items back
+        await this.mutateClaims(ctx, null, (c) => {
+          const { [String(from.id)]: _gone, ...rest } = servedOf(c);
+          return { context: { ...c, served: rest }, note: '' };
+        });
+        await ctx.answerCallbackQuery({
+          text: 'I could not send the QR. Start a chat with me and tap again.',
+          show_alert: true,
+        });
+      } else if (sent === 'dm') {
+        await ctx.answerCallbackQuery({ text: 'Your QR is in your direct messages.' });
+      } else {
+        await ctx.answerCallbackQuery({ text: 'Open the chat to get your QR.', url: sent.url });
+      }
+      await this.refreshClaims(ctx, r.context);
+    }
+    return true;
+  }
+
+  /** The QR for a member who took it early: by direct message, else a start link. */
+  private async deliverEarly(
+    ctx: Context,
+    from: { id: number; first_name: string; username?: string },
+    cents: number,
+    c: Ctx
+  ): Promise<'dm' | 'failed' | { url: string }> {
+    const receipt = c.receipt as Receipt;
+    const description = receipt.merchant
+      ? truncateAnsi(receipt.merchant, MAX_DESCRIPTION)
+      : undefined;
+    const payload = buildPayNowPayload({
+      proxyType: c.payeeType as 'mobile' | 'uen',
+      proxyValue: c.payeeValue as string,
+      amountCents: cents,
+      editable: false,
+      ...(description ? { description } : {}),
+    });
+    const own = c.organiserId === from.id;
+    const organiser = own ? '' : ((c.organiserName as string | undefined) ?? '');
+    const dm = directMessage(organiser, cents, description ?? null);
+    try {
+      const image = await renderQrPng(payload, dm.lines);
+      await ctx.api.sendPhoto(from.id, new InputFile(image, 'paynow-qr.bmp'), {
+        caption: dm.caption,
+      });
+      await countAll(this.counter, [SPLIT_QR_DM]);
+      return 'dm';
+    } catch {
+      // Not started the bot, blocked it, or rate limited: a start link collects it
+    }
+    if (!this.directory || !this.botUsername || !ctx.chat) return 'failed';
+    try {
+      const token = newToken();
+      const name = claimersOf(c).find((x) => x.id === from.id)?.name ?? from.first_name;
+      await this.directory.createClaim({
+        token,
+        username: from.username?.toLowerCase() ?? null,
+        userId: from.id,
+        name,
+        amountCents: cents,
+        description: description ?? null,
+        payload,
+        organiser,
+        chatId: ctx.chat.id,
+        expiresAt: newExpiry(),
+      });
+      await countAll(this.counter, [SPLIT_CLAIM_CREATED]);
+      return { url: `https://t.me/${this.botUsername}?start=claim_${token}` };
+    } catch {
+      return 'failed';
+    }
   }
 
   /** Post the organiser's menu for an item, replacing any earlier one. */
