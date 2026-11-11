@@ -25,6 +25,9 @@ describe('GET /split', () => {
     expect(html).toContain('<img src="/split-logo.png"');
     expect(html).toContain('<link rel="icon" type="image/png" href="/split-logo.png">');
     expect(html).not.toContain('/logo.png'); // not the Event PayNow Bot's logo
+    // the preview image is shown on the page too, below the first button
+    expect(html).toContain('<img class="hero" src="/split-preview.jpg" width="1280" height="720"');
+    expect(html.indexOf('class="cta"')).toBeLessThan(html.indexOf('class="hero"'));
     expect(await (await get('/split/')).text()).toBe(html);
   });
 
