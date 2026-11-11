@@ -1,1 +1,11 @@
-{ "version": 1, "include": ["/*"], "exclude": ["/explainer-poster.jpg", "/logo.png", "/vendor/*"] }
+{
+  "version": 1,
+  "include": ["/*"],
+  "exclude": [
+    "/explainer-poster.jpg",
+    "/logo.png",
+    "/split-logo.png",
+    "/split-preview.jpg",
+    "/vendor/*"
+  ]
+}

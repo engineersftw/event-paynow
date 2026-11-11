@@ -13,3 +13,4 @@ database_id = "c0387aac-9b54-4329-9355-d2e5572e0eab"
 
 [vars]
 BOT_USERNAME = "event_paynow_bot"
+SPLIT_BOT_USERNAME = "Split_PayNow_Bot"
