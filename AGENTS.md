@@ -116,6 +116,7 @@ This project uses OpenSpec for change management. All changes are archived:
 50. `quiet-split-chatter` (3 tasks) — archived 2026-11-10
 51. `ask-payee-first` (7 tasks) — archived 2026-11-11
 52. `add-claim-admin-menu` (9 tasks) — archived 2026-11-11
+53. `add-early-claim-qr` (9 tasks) — archived 2026-11-11
 
 **Workflow commands:**
 
