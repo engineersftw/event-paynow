@@ -184,7 +184,7 @@ Not covered by `/stats`: landing page visits (turn on Cloudflare Web Analytics f
 
 ## Social previews
 
-The landing page and every payment page (`/pay/<event>`) carry Open Graph and Twitter card tags in the server-rendered HTML (crawlers do not run scripts): title, description, canonical URL and an image, all built from the origin the page was requested on. A payment page's title is "Pay for <event name>" (HTML-escaped, shortened to 60 characters); an unknown or closed event, or a database error, falls back to generic wording. The private admin page has no preview tags. The image, `web/public/explainer-poster.jpg` (1280x720, about 60 KB), is the explainer video's title frame, also used as the thumbnail of the click-to-play card on the landing page. It is committed (not built by `npm run video`); to recreate it after rebuilding the video:
+The landing page and every payment page (`/pay/<event>`) carry Open Graph and Twitter card tags in the server-rendered HTML (crawlers do not run scripts): title, description, canonical URL and an image, all built from the origin the page was requested on. A payment page's title is "Pay for <event name>" (HTML-escaped, shortened to 60 characters); an unknown or closed event, or a database error, falls back to generic wording. The private admin page has no preview tags. The image, `web/public/explainer-poster.jpg` (1280x720, about 60 KB), is the explainer video's title frame, also used as the thumbnail of the click-to-play card on the landing page. It is committed (not built by `npm run video`); to recreate it after rebuilding the video: The Split PayNow Bot has its own public page at `/split` (served by the same Pages Function; its own logo `web/public/split-logo.png` and preview image `web/public/split-preview.jpg`, made by `scripts/generate-split-preview.mjs`; the home page links to it). It needs the Pages variable `SPLIT_BOT_USERNAME` (set to `Split_PayNow_Bot` in `web/wrangler.toml`); without it `/split` answers 404 and the home page link is left out. The bot's own Telegram profile picture is set in BotFather (`/setuserpic`).
 
 ```bash
 ffmpeg -i out/explainer/poster.png -vf scale=1280:720:flags=lanczos -pix_fmt yuvj420p -q:v 3 web/public/explainer-poster.jpg
@@ -340,7 +340,7 @@ docs/
 └── testing.md             # Testing strategy
 
 openspec/
-├── specs/                 # Main specs (18 capabilities)
+├── specs/                 # Main specs (19 capabilities)
 └── changes/archive/       # Archived changes
 ```
 

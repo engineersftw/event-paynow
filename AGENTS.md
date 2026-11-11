@@ -117,6 +117,7 @@ This project uses OpenSpec for change management. All changes are archived:
 51. `ask-payee-first` (7 tasks) — archived 2026-11-11
 52. `add-claim-admin-menu` (9 tasks) — archived 2026-11-11
 53. `add-early-claim-qr` (9 tasks) — archived 2026-11-11
+54. `add-split-landing-page` (9 tasks) — archived 2026-11-11
 
 **Workflow commands:**
 
@@ -131,7 +132,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (18 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (19 capabilities)
 
 ## Key Design Decisions
 
@@ -284,7 +285,7 @@ The payer page `/pay/<event-ref>` (same top bar and light/dark toggle as the adm
 
 `/web_admin` (`src/commands/web-admin-handler.ts`) sends url buttons to `${WEB_ADMIN_URL}/events/<ref>`.
 The landing page and the payment pages carry Open Graph / Twitter card tags in their server-rendered head (`socialMeta()` in `src/web/page.ts`; URLs from the request origin; the image is the committed `web/public/explainer-poster.jpg`, excluded from the Function in `_routes.json`; the payment page's event name is looked up in `handleWeb`, escaped, and falls back to generic wording; the admin page has none). Every web page (landing, event admin, payer) ends with the shared attribution footer (`FOOTER_HTML`, links in `LINKEDIN_URL` / `REPO_URL`, `src/web/page.ts`).
-The site root `/` is a public landing page (`renderLandingPage` in `src/web/page.ts`, linking to `https://t.me/${BOT_USERNAME}`, with a click-to-play YouTube explainer card (`videoCard`, id in `EXPLAINER_VIDEO_ID`; the player is loaded from `youtube-nocookie.com` only on click); no static `index.html`).
+The site root `/` is a public landing page (`renderLandingPage` in `src/web/page.ts`, linking to `https://t.me/${BOT_USERNAME}`, with a click-to-play YouTube explainer card (`videoCard`, id in `EXPLAINER_VIDEO_ID`; the player is loaded from `youtube-nocookie.com` only on click); no static `index.html`). The Split PayNow Bot has its own public page at `/split` (`renderSplitLandingPage` in `src/web/page.ts`, `SPLIT_BOT_USERNAME` Pages var, 404 until set; its own logo and 1280x720 preview image are static assets excluded from the Function in `_routes.json`; the home page links to it).
 The Pages project in `web/` has one catch-all Function (`web/functions/[[path]].ts`) delegating to
 `handleWeb()` in `src/web/handler.ts` (testable without Pages): `GET /events/:ref` (HTML shell from `src/web/page.ts`: shadcn-style CSS tokens, compact payment cards, a native `<dialog>` for new requests, paybacks and pending QR/actions behind tap-to-expand buttons so no QR loads with the page; a top bar (`TOPBAR_HTML`, shared with the payer page) with the signed-in name, Sign out and the light/dark toggle (`data-theme`, saved in `localStorage` under one key for both pages; the toggle stays when signed out), then the logo (`web/public/logo.png`) with `Event: <name>`, then one row of Check-In, Pay and New request buttons (mobile layout checked down to 320 px), status-coloured pills and `dd-MMM-YYYY` dates; data
 written with `textContent`), `GET /api/events/:ref?status=&q=&limit=&cursor=` (JSON; pages of 20 via `searchPaymentsByEvent` with a `created_at|id` keyset cursor and `nextCursor`, literal case-insensitive search on payer name or reference, status filter, event-wide totals from `getEventStats`; the page has a search box, status buttons and "Load more", and refreshes the rows already loaded after an action), `GET /api/login` (Telegram Login Widget

@@ -526,17 +526,19 @@ export function socialMeta(m: {
   description: string;
   url: string;
   image: string;
+  imageAlt?: string;
+  siteName?: string;
 }): string {
   const t = escapeAttr(m.title);
   const d = escapeAttr(m.description);
   const u = escapeAttr(m.url);
   const i = escapeAttr(m.image);
-  const alt = escapeAttr(POSTER_ALT);
+  const alt = escapeAttr(m.imageAlt ?? POSTER_ALT);
   return [
     `<meta name="description" content="${d}">`,
     `<link rel="canonical" href="${u}">`,
     '<meta property="og:type" content="website">',
-    `<meta property="og:site_name" content="${escapeAttr(SITE_NAME)}">`,
+    `<meta property="og:site_name" content="${escapeAttr(m.siteName ?? SITE_NAME)}">`,
     '<meta property="og:locale" content="en_SG">',
     `<meta property="og:title" content="${t}">`,
     `<meta property="og:description" content="${d}">`,
@@ -564,25 +566,8 @@ export function videoCard(id: string): string {
   return `<div class="video"><button id="play" class="vcard" type="button" data-video="${id}" aria-label="Play the Event PayNow Bot explainer video"><img class="vposter" src="${POSTER_PATH}" width="1280" height="720" alt="" loading="lazy"><span class="vplay" aria-hidden="true"></span></button><a class="ylink" href="https://youtu.be/${id}">Watch on YouTube</a></div>`;
 }
 
-/** Public home page at `/`: what the bot does and a link to add it on Telegram. No data, no session. */
-export function renderLandingPage(botUsername: string, origin: string): string {
-  const bot = botUsername.replace(/[^A-Za-z0-9_]/g, '');
-  const meta = socialMeta({
-    title: SITE_NAME,
-    description:
-      'Collect PayNow payments for your event from a Telegram group: a QR code for every request, and a clear record of who has paid.',
-    url: `${origin}/`,
-    image: `${origin}${POSTER_PATH}`,
-  });
-  const cta = `<a class="cta" href="https://t.me/${bot}">Add the bot on Telegram</a>`;
-  const video = videoCard(EXPLAINER_VIDEO_ID);
-  return `<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Event PayNow Bot</title><link rel="icon" href="/logo.png">
-${meta}
-${THEME_EARLY}
-<style>
-:root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa}
+/** Base styles of the public pages (home and Split): tokens, dark theme, brand row, lead, button, lists. */
+const LANDING_BASE_CSS = `:root{--bg:#fff;--fg:#09090b;--muted:#f4f4f5;--muted-fg:#71717a;--border:#e4e4e7;--primary:#18181b;--primary-fg:#fafafa}
 @media(prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b}}
 :root[data-theme="dark"]{--bg:#09090b;--fg:#fafafa;--muted:#27272a;--muted-fg:#a1a1aa;--border:#27272a;--primary:#fafafa;--primary-fg:#18181b}
 *{box-sizing:border-box}body{max-width:36rem;margin:0 auto;padding:20px;font:16px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif;background:var(--bg);color:var(--fg)}
@@ -593,7 +578,40 @@ h1{font-size:1.6rem;line-height:1.2;margin:0;letter-spacing:-.02em}h2{font-size:
 .lead{font-size:1.05rem;margin:0 0 18px}.muted{color:var(--muted-fg)}
 .cta{display:block;text-align:center;padding:14px 16px;border-radius:10px;background:var(--primary);color:var(--primary-fg);font-weight:600;text-decoration:none;overflow-wrap:anywhere}
 ul,ol{padding-left:1.2rem;margin:0}li{margin:6px 0}code{background:var(--muted);padding:1px 6px;border-radius:5px;font-size:.9em}
-.end{margin-top:28px}
+.end{margin-top:28px}`;
+
+/** A Telegram username reduced to the characters it can contain; empty when not configured. */
+export const cleanUsername = (value: string | undefined): string =>
+  (value ?? '').replace(/[^A-Za-z0-9_]/g, '');
+
+/** Public home page at `/`: what the bot does and a link to add it on Telegram. No data, no session. */
+export function renderLandingPage(
+  botUsername: string,
+  origin: string,
+  splitUsername?: string
+): string {
+  const bot = botUsername.replace(/[^A-Za-z0-9_]/g, '');
+  const meta = socialMeta({
+    title: SITE_NAME,
+    description:
+      'Collect PayNow payments for your event from a Telegram group: a QR code for every request, and a clear record of who has paid.',
+    url: `${origin}/`,
+    image: `${origin}${POSTER_PATH}`,
+  });
+  const cta = `<a class="cta" href="https://t.me/${bot}">Add the bot on Telegram</a>`;
+  const video = videoCard(EXPLAINER_VIDEO_ID);
+  // The Split page exists only when its bot is configured, so the link does too
+  const splitLink = cleanUsername(splitUsername)
+    ? '<p class="muted">Splitting a bill? <a href="/split">Try the Split PayNow Bot</a>.</p>'
+    : '';
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Event PayNow Bot</title><link rel="icon" href="/logo.png">
+${meta}
+${THEME_EARLY}
+<style>
+${LANDING_BASE_CSS}
+.muted a{color:var(--fg);text-decoration:underline}
 .video{margin-top:18px}
 .vcard{position:relative;display:block;width:100%;aspect-ratio:16/9;padding:0;overflow:hidden;border:1px solid var(--border);border-radius:12px;background:var(--muted);cursor:pointer}
 .vposter{display:block;width:100%;height:100%;object-fit:cover}
@@ -609,6 +627,7 @@ ${FOOTER_CSS}
 <div class="brand"><img src="/logo.png" alt="" width="56" height="56"><h1>Event PayNow Bot</h1></div>
 <p class="lead">Collect PayNow payments for your event from a Telegram group: a QR code for every request, and a clear record of who has paid.</p>
 ${cta}
+${splitLink}
 ${video}
 <h2>What it does</h2>
 <ul>
@@ -632,6 +651,78 @@ const $=id=>document.getElementById(id);
 ${THEME_JS}
 const play=$('play');
 if(play)play.onclick=()=>{const f=document.createElement('iframe');f.className='vframe';f.src='https://www.youtube-nocookie.com/embed/'+encodeURIComponent(play.dataset.video)+'?autoplay=1&rel=0';f.title='Event PayNow Bot explainer video';f.allow='autoplay; encrypted-media; picture-in-picture; fullscreen';f.allowFullscreen=true;f.referrerPolicy='strict-origin-when-cross-origin';play.replaceWith(f)};
+</script></body></html>`;
+}
+
+const SPLIT_NAME = 'Split PayNow Bot';
+const SPLIT_TAGLINE =
+  'Split a bill in Telegram. Everyone gets a PayNow QR for exactly what they owe.';
+
+/**
+ * Public page at `/split`: what the Split PayNow Bot does, how a split goes and what it keeps, with
+ * a link to open it on Telegram. Static text apart from the bot username (reduced to the characters
+ * a username can contain), no data, no session and nothing loaded from another site.
+ */
+export function renderSplitLandingPage(botUsername: string, origin: string): string {
+  const bot = cleanUsername(botUsername);
+  const meta = socialMeta({
+    title: SPLIT_NAME,
+    description: SPLIT_TAGLINE,
+    url: `${origin}/split`,
+    image: `${origin}/split-preview.jpg`,
+    imageAlt:
+      'Split PayNow Bot: split a bill and give everyone a PayNow QR for their share, from Telegram.',
+    siteName: SPLIT_NAME,
+  });
+  const cta = `<a class="cta" href="https://t.me/${bot}">Add the bot on Telegram</a>`;
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${SPLIT_NAME}</title><link rel="icon" type="image/png" href="/split-logo.png">
+${meta}
+${THEME_EARLY}
+<style>
+${LANDING_BASE_CSS}
+.muted a{color:var(--fg);text-decoration:underline}
+${FOOTER_CSS}
+</style></head><body>
+<div class="topbar"><button id="theme" class="icon" aria-label="Switch between light and dark theme"></button></div>
+<div class="brand"><img src="/split-logo.png" alt="" width="56" height="56"><h1>${SPLIT_NAME}</h1></div>
+<p class="lead">${SPLIT_TAGLINE}</p>
+${cta}
+<h2>What it does</h2>
+<ul>
+<li><b>Equal split</b>: give it the total and how many people; it makes one QR for one share, rounded up to the cent.</li>
+<li><b>Custom amounts</b>: list who owes what. @mention people and it sends each of them their own QR by direct message.</li>
+<li><b>Receipt scan</b>: send a photo of the receipt. It reads the items, GST and service charge, and the charges are shared in proportion to what each person had.</li>
+<li><b>Group claiming</b>: in a group, everyone taps the items they had, and anyone can get their own QR straight away.</li>
+</ul>
+<h2>How a split goes</h2>
+<ol>
+<li>Who should be paid (a mobile number or a UEN), and whether that is you.</li>
+<li>The bill: type the total, or send a photo of the receipt.</li>
+<li>How to split it: equally, with custom amounts, or by items.</li>
+<li>Check the summary and tap Confirm. The QRs are made only then.</li>
+</ol>
+<h2>Get started</h2>
+<ul>
+<li>Message the bot, or add it to your Telegram group.</li>
+<li><code>/split</code> for an equal or custom split.</li>
+<li><code>/split_custom</code> to go straight to custom amounts.</li>
+<li><code>/split_receipt</code> to start from a photo of the receipt.</li>
+</ul>
+<h2>What it keeps</h2>
+<ul>
+<li>Nothing beyond the conversation: your answers are forgotten when the split ends, or after 10 minutes (an hour while a group is claiming items).</li>
+<li>Receipt photos are read and never stored.</li>
+<li>If you @mention someone, the bot remembers their username once they have messaged it, and keeps a waiting QR for up to 48 hours. <code>/forget</code> deletes what it remembers about you.</li>
+<li>A QR never shows the payee's number. In a group, the number you type stays in the chat unless the bot may delete messages, so use a private chat if that matters.</li>
+</ul>
+<div class="end">${cta}</div>
+<p class="muted end">Collecting payments for an event instead? See the <a href="/">Event PayNow Bot</a>.</p>
+${FOOTER_HTML}
+<script>
+const $=id=>document.getElementById(id);
+${THEME_JS}
 </script></body></html>`;
 }
 

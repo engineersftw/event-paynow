@@ -10,7 +10,13 @@ import { paymentReferenceFromPayload } from '../sgqr/paynow';
 import { bmpToPng } from '../sgqr/png';
 import { renderQrPng } from '../sgqr/qr-render';
 import { SESSION_MAX_AGE_SEC, signSession, verifySession, verifyTelegramLogin } from './auth';
-import { renderLandingPage, renderPage, renderPayerPage } from './page';
+import {
+  cleanUsername,
+  renderLandingPage,
+  renderPage,
+  renderPayerPage,
+  renderSplitLandingPage,
+} from './page';
 import { postPaymentQr, sendPaymentDm } from './telegram';
 
 /** Bindings of the Pages project (see web/wrangler.toml). */
@@ -19,6 +25,8 @@ export interface WebEnv {
   TELEGRAM_BOT_TOKEN: string;
   SESSION_SECRET: string;
   BOT_USERNAME: string;
+  /** The Split PayNow Bot's username; without it the /split page answers 404. */
+  SPLIT_BOT_USERNAME?: string;
 }
 
 const REF = /^[A-Za-z0-9_-]{1,40}$/;
@@ -145,8 +153,15 @@ export async function handleWeb(
     return payerQrImage(request, env, payerQr[1]!, payerQr[2]!);
   }
 
+  if (url.pathname === '/split' || url.pathname === '/split/') {
+    if (!cleanUsername(env.SPLIT_BOT_USERNAME)) return new Response('Not found', { status: 404 });
+    return new Response(renderSplitLandingPage(env.SPLIT_BOT_USERNAME!, url.origin), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
+  }
+
   if (url.pathname === '/') {
-    return new Response(renderLandingPage(env.BOT_USERNAME, url.origin), {
+    return new Response(renderLandingPage(env.BOT_USERNAME, url.origin, env.SPLIT_BOT_USERNAME), {
       headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
     });
   }
