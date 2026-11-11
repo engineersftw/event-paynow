@@ -114,6 +114,7 @@ This project uses OpenSpec for change management. All changes are archived:
 48. `tidy-split-scan-bubbles` (6 tasks) — archived 2026-11-10
 49. `add-split-claim-items` (12 tasks) — archived 2026-11-10
 50. `quiet-split-chatter` (3 tasks) — archived 2026-11-10
+51. `ask-payee-first` (7 tasks) — archived 2026-11-11
 
 **Workflow commands:**
 

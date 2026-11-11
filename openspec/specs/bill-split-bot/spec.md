@@ -8,11 +8,11 @@ A standalone Telegram bot that splits a bill equally between a number of people 
 
 ### Requirement: The bot asks for the bill, the number of people, the payee and a description
 
-The system SHALL, when a user sends `/split` to Split_PayNow_Bot (or `/start` in a private chat), ask in order for the bill total in SGD, whether to split Equally or with Custom amounts, then either the number of people (equal split) or the list of names and amounts (custom split), then the payee (a Singapore mobile number or a UEN) and an optional short description. The total, the split details and the payee are required. The description SHALL offer a Skip button and SHALL be at most 25 characters. The bot SHALL work in private chats and in group chats.
+The system SHALL, when a user sends `/split` to Split_PayNow_Bot (or `/start` in a private chat), ask in order for the payee (a Singapore mobile number or a UEN), whether the payee is the user, the bill total in SGD, whether to split Equally or with Custom amounts, then either the number of people (equal split) or the list of names and amounts (custom split), and an optional short description. The payee, the total and the split details are required. The description SHALL offer a Skip button and SHALL be at most 25 characters. The bot SHALL work in private chats and in group chats.
 
 #### Scenario: Full conversation in a private chat
 
-- **WHEN** the user sends `/split`, the total `187.40`, taps Equally, sends the number `4`, a valid payee and the description `Dinner`, and then confirms
+- **WHEN** the user sends `/split`, a valid payee, taps Yes, it's me, sends the total `187.40`, taps Equally, sends the number `4` and the description `Dinner`, and then confirms
 - **THEN** the bot replies with a PayNow QR image for one share of the bill
 
 #### Scenario: Skipping the description
@@ -37,7 +37,7 @@ The system SHALL, when a user sends `/split` to Split_PayNow_Bot (or `/start` in
 
 #### Scenario: Full custom conversation
 
-- **WHEN** the user sends `/split`, the total `100`, taps Custom amounts, sends the lines `Ann 60` and `Bob 40`, a valid payee and taps Skip, and then confirms
+- **WHEN** the user sends `/split`, a valid payee, taps Yes, it's me, sends the total `100`, taps Custom amounts, sends the lines `Ann 60` and `Bob 40` and taps Skip, and then confirms
 - **THEN** the bot replies with PayNow QR images for the amounts listed
 
 ### Requirement: A group's member count is offered as the number of people
@@ -209,22 +209,22 @@ The system SHALL, after the bill total is accepted, ask whether to split the bil
 
 ### Requirement: `/split_custom` starts a custom split directly
 
-The system SHALL accept `/split_custom` as a shortcut that asks for the bill total and then goes straight to the custom list, without asking Equally or Custom amounts. After that it SHALL behave exactly as a custom split started from `/split`, in private chats and in groups, with the same owner-only rules in groups.
+The system SHALL accept `/split_custom` as a shortcut that asks for the payee and whether the payee is the user, then the bill total, and then goes straight to the custom list, without asking Equally or Custom amounts. After that it SHALL behave exactly as a custom split started from `/split`, in private chats and in groups, with the same owner-only rules in groups.
 
 #### Scenario: Shortcut skips the choice
 
-- **WHEN** the user sends `/split_custom` and then a valid total
+- **WHEN** the user sends `/split_custom`, answers the payee questions and then sends a valid total
 - **THEN** the bot asks for the list of names and amounts and does not offer Equally or Custom amounts
 
 #### Scenario: Invalid total
 
-- **WHEN** the total after `/split_custom` is not a positive amount with at most two decimals
+- **WHEN** the total after `/split_custom` and the payee questions is not a positive amount with at most two decimals
 - **THEN** the bot explains the format and asks for the total again
 
 #### Scenario: Restarting replaces a split in progress
 
 - **WHEN** the owner sends `/split_custom` while a split of theirs is waiting for an answer
-- **THEN** the earlier answers are discarded and the bot asks for the total again
+- **THEN** the earlier answers are discarded and the bot asks for the payee again
 
 ### Requirement: A custom split takes a list of names and amounts
 
@@ -252,7 +252,7 @@ The system SHALL accept the custom list as one message with one person per line,
 
 ### Requirement: The custom list is checked against the bill total
 
-The system SHALL compare the sum of the listed amounts with the bill total. A sum above the total SHALL be rejected, telling the user by how much it is over, and the list asked for again. A sum equal to the total SHALL continue to the payee question. A sum below the total SHALL ask what to do with the leftover, with two buttons: Split it evenly between the people listed, or Leave it out.
+The system SHALL compare the sum of the listed amounts with the bill total. A sum above the total SHALL be rejected, telling the user by how much it is over, and the list asked for again. A sum equal to the total SHALL continue to the description question. A sum below the total SHALL ask what to do with the leftover, with two buttons: Split it evenly between the people listed, or Leave it out.
 
 #### Scenario: Over the bill
 
@@ -262,7 +262,7 @@ The system SHALL compare the sum of the listed amounts with the bill total. A su
 #### Scenario: Exactly the bill
 
 - **WHEN** the bill is 100.00 and the list adds up to 100.00
-- **THEN** the bot does not ask about a leftover and asks for the payee
+- **THEN** the bot does not ask about a leftover and asks for the description
 
 #### Scenario: Leftover left out
 
@@ -333,8 +333,8 @@ The system SHALL, when the owner edits the text of a message that answered the t
 
 #### Scenario: Edit an earlier answer while a later question is open
 
-- **WHEN** the bot is asking for the payee and the user edits their total message to a valid new total
-- **THEN** the bot confirms the update and keeps waiting for the payee, without repeating the question
+- **WHEN** the bot is asking for the total and the user edits their payee message to a valid new payee
+- **THEN** the bot confirms the update, asks again whether the new payee is the user, and then keeps waiting for the total
 
 #### Scenario: Invalid edit
 
@@ -466,11 +466,11 @@ The system SHALL record a person's Telegram username and user id when they send 
 
 ### Requirement: A receipt photo is read for the bill
 
-The system SHALL accept `/split_receipt`, which asks for a photo of the receipt, and SHALL also accept a photo when the bot is asking for the bill total. It SHALL read the photo with a vision model and extract the line items with prices, the service charge, GST, any discount and the total, in SGD. If the photo is unreadable, has no total, or the reader is unavailable, the bot SHALL say so and offer to type the total instead.
+The system SHALL accept `/split_receipt`, which asks for the payee and whether the payee is the user and then for a photo of the receipt, and SHALL also accept a photo when the bot is asking for the bill total. It SHALL read the photo with a vision model and extract the line items with prices, the service charge, GST, any discount and the total, in SGD. If the photo is unreadable, has no total, or the reader is unavailable, the bot SHALL say so and offer to type the total instead.
 
 #### Scenario: Photo after /split_receipt
 
-- **WHEN** the user sends `/split_receipt` and then a clear receipt photo
+- **WHEN** the user sends `/split_receipt`, answers the payee questions and then sends a clear receipt photo
 - **THEN** the bot shows the numbered items, the charges and the total it read
 
 #### Scenario: Photo instead of a total
@@ -592,11 +592,11 @@ The system SHALL compute each person's amount as their share of the items plus a
 
 ### Requirement: The receipt split continues as a custom split
 
-The system SHALL, once items are assigned, continue as a custom split with the computed amounts: the payee question, the optional description, the summary with Confirm, Amend and Cancel, one QR per distinct amount, and direct messages to mentioned people. Amend SHALL offer Items, which asks for the assignment again, and editing the assignment message SHALL update the split like any other edited answer.
+The system SHALL, once items are assigned, continue as a custom split with the computed amounts: the optional description (the payee was asked first), the summary with Confirm, Amend and Cancel, one QR per distinct amount, and direct messages to mentioned people. Amend SHALL offer Items, which asks for the assignment again, and editing the assignment message SHALL update the split like any other edited answer.
 
 #### Scenario: Full receipt flow
 
-- **WHEN** the user scans a receipt, taps Use this, assigns items to `@ann` and `Bob`, gives a payee and confirms
+- **WHEN** the user scans a receipt, taps Use this, assigns items to `@ann` and `Bob` and confirms
 - **THEN** Ann is sent her QR by direct message and the chat receives a QR for Bob
 
 #### Scenario: Amend items
@@ -658,7 +658,7 @@ The system SHALL keep the organiser's choice when an assignment is edited or ame
 
 ### Requirement: The bot asks whether the payee is the organiser
 
-The system SHALL, after the payee is entered in any split (equal, custom or receipt), ask whether the payee is the organiser, with the buttons "Yes, it's me" and "No, someone else", before the description question. The answer SHALL be kept with the split and SHALL be asked again whenever the payee is changed by amending or editing. Once the question is answered the system SHALL remove its buttons and replace its text with the answer: "Payment was made by you." or "Payment was made by someone else."
+The system SHALL, straight after the payee is entered in any split (equal, custom or receipt), ask whether the payee is the organiser, with the buttons "Yes, it's me" and "No, someone else", before the bill total or the receipt photo is asked for. The answer SHALL be kept with the split and SHALL be asked again whenever the payee is changed by amending or editing. Once the question is answered the system SHALL remove its buttons and replace its text with the answer: "Payment was made by you." or "Payment was made by someone else."
 
 #### Scenario: Question after the payee
 
@@ -957,12 +957,12 @@ The system SHALL identify each claimer by their Telegram user id and show their 
 
 ### Requirement: Only the organiser closes the claiming
 
-The system SHALL let only the organiser close the claim with Done. When every item is claimed, Done SHALL compute the amounts and continue to the payee question. When some items are unclaimed, Done SHALL ask the organiser with the existing unassigned-items choice, worded for claimers: Split evenly between those who claimed, Leave them out: I cover them, or Keep claiming, and SHALL not choose for them. Done SHALL be refused until someone other than the organiser has claimed an item.
+The system SHALL let only the organiser close the claim with Done. When every item is claimed, Done SHALL compute the amounts and continue to the description question. When some items are unclaimed, Done SHALL ask the organiser with the existing unassigned-items choice, worded for claimers: Split evenly between those who claimed, Leave them out: I cover them, or Keep claiming, and SHALL not choose for them. Done SHALL be refused until someone other than the organiser has claimed an item.
 
 #### Scenario: Everything claimed
 
 - **WHEN** every item is claimed and the organiser taps Done
-- **THEN** the claim message is closed and the bot asks for the payee
+- **THEN** the claim message is closed and the bot asks for the description
 
 #### Scenario: Unclaimed items covered by the organiser
 
@@ -1049,3 +1049,22 @@ The system SHALL, in a group chat, ignore the organiser's free text without any 
 
 - **WHEN** the organiser sends the payee in a group while the bot is asking for it
 - **THEN** the answer is read as before
+
+### Requirement: The payee is asked first in every split
+
+The system SHALL, in every split that is started with `/split`, `/split_custom`, `/split_receipt` or `/start` in a private chat, ask for the payee and whether the payee is the user before anything about the bill, and SHALL keep the same order when the answers are amended: a payee changed later is checked first, then the rest of the split continues from where it was. The description SHALL remain the last question.
+
+#### Scenario: Payee before total
+
+- **WHEN** the user sends `/split`
+- **THEN** the first question is who should be paid, then whether the payee is the user, then the bill total
+
+#### Scenario: Payee before the photo
+
+- **WHEN** the user sends `/split_receipt`
+- **THEN** the bot asks for the payee and whether it is the user before it asks for the receipt photo
+
+#### Scenario: Changing the payee later
+
+- **WHEN** the user amends the payee on the summary
+- **THEN** the bot asks for the new payee and whether it is the user, and then shows the summary again
