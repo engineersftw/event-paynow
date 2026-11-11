@@ -86,3 +86,17 @@ The page SHALL use the same visual design, light/dark toggle and footer as the o
 
 - **WHEN** the page loads
 - **THEN** it requests nothing from any other site
+
+### Requirement: The page shows its preview image
+
+The page SHALL show its preview image (the one used for link previews, served from the site) below the first Telegram button, scaled to the width of the page, with a text description of what it shows. It SHALL NOT push the first button out of the first screen of a phone.
+
+#### Scenario: Image on the page
+
+- **WHEN** the page is shown
+- **THEN** the preview image appears below the first button, with alternative text, and is not wider than the page
+
+#### Scenario: Button still first
+
+- **WHEN** the page is opened at 360 px width
+- **THEN** the first button is above the image and visible without scrolling

@@ -655,6 +655,8 @@ if(play)play.onclick=()=>{const f=document.createElement('iframe');f.className='
 }
 
 const SPLIT_NAME = 'Split PayNow Bot';
+const SPLIT_IMAGE_ALT =
+  'Split PayNow Bot: split a bill and give everyone a PayNow QR for their share, from Telegram.';
 const SPLIT_TAGLINE =
   'Split a bill in Telegram. Everyone gets a PayNow QR for exactly what they owe.';
 
@@ -670,8 +672,7 @@ export function renderSplitLandingPage(botUsername: string, origin: string): str
     description: SPLIT_TAGLINE,
     url: `${origin}/split`,
     image: `${origin}/split-preview.jpg`,
-    imageAlt:
-      'Split PayNow Bot: split a bill and give everyone a PayNow QR for their share, from Telegram.',
+    imageAlt: SPLIT_IMAGE_ALT,
     siteName: SPLIT_NAME,
   });
   const cta = `<a class="cta" href="https://t.me/${bot}">Add the bot on Telegram</a>`;
@@ -683,12 +684,14 @@ ${THEME_EARLY}
 <style>
 ${LANDING_BASE_CSS}
 .muted a{color:var(--fg);text-decoration:underline}
+.hero{display:block;width:100%;height:auto;margin-top:18px;border:1px solid var(--border);border-radius:12px}
 ${FOOTER_CSS}
 </style></head><body>
 <div class="topbar"><button id="theme" class="icon" aria-label="Switch between light and dark theme"></button></div>
 <div class="brand"><img src="/split-logo.png" alt="" width="56" height="56"><h1>${SPLIT_NAME}</h1></div>
 <p class="lead">${SPLIT_TAGLINE}</p>
 ${cta}
+<img class="hero" src="/split-preview.jpg" width="1280" height="720" alt="${SPLIT_IMAGE_ALT}">
 <h2>What it does</h2>
 <ul>
 <li><b>Equal split</b>: give it the total and how many people; it makes one QR for one share, rounded up to the cent.</li>
