@@ -96,10 +96,10 @@ const STEP_OF_FIELD: Record<Field, number> = {
 
 export const SPLIT_HELP =
   'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
-  '/split - total, then equal or custom amounts, payee, optional description\n' +
+  '/split - payee first (and whether it is you), then the total, equal or custom amounts and an optional description\n' +
   '/split_custom - same, straight to custom amounts (one line per person: name and amount; @mention someone to send them their QR directly)\n' +
   '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what.\n' +
-  'After the payee I ask whether the payee is you; if someone else paid, you get a QR for your own share too.\n' +
+  'If someone else is the payee, you get a QR for your own share too.\n' +
   '/forget - delete what I remember about you (your username, kept when you /start me)\n' +
   '/cancel - stop\n\n' +
   'On the summary, tap Amend to change an answer, or edit the message you sent. ' +
@@ -261,8 +261,11 @@ function assignmentPatch(a: AssignedOk, c: Ctx, receipt: Receipt): Answer {
 
 /** The first thing still missing or invalid, in question order; CONFIRM when everything is in. */
 function nextNeed(c: Ctx): { step: number; note?: string } {
+  // The payee comes first: it is known before the bill, and it is the one answer that must be exact
+  if (!c.payeeValue) return { step: PAYEE };
+  if (c.payeeIsMe === undefined) return { step: PAYEE_ME };
   const total = c.totalCents as number | undefined;
-  if (total === undefined) return { step: TOTAL };
+  if (total === undefined) return { step: c.entry === 'receipt' ? RECEIPT : TOTAL };
   if (!c.mode) return { step: MODE };
   if (c.mode === 'equal') {
     const people = c.people as number | undefined;
@@ -286,8 +289,6 @@ function nextNeed(c: Ctx): { step: number; note?: string } {
     }
     if (sum < total && !c.leftover) return { step: LEFTOVER };
   }
-  if (!c.payeeValue) return { step: PAYEE };
-  if (c.payeeIsMe === undefined) return { step: PAYEE_ME };
   if (!c.described) return { step: DESCRIPTION };
   return { step: CONFIRM };
 }
@@ -448,11 +449,11 @@ export class SplitCommandHandler {
       await ctx.reply('Receipt scanning is not available. Send /split and type the total instead.');
       return;
     }
-    const context = mode === 'custom' ? { mode } : {};
-    const step = mode === 'receipt' ? RECEIPT : TOTAL;
-    await this.setState({ flow: 'split', step, context });
+    // Everything starts with the payee; a receipt start is remembered so the photo follows it
+    const context = mode === 'custom' ? { mode } : mode === 'receipt' ? { entry: 'receipt' } : {};
+    await this.setState({ flow: 'split', step: PAYEE, context });
     await this.fetch('/owner', { userId: ctx.from.id, topicId: topicOf(ctx) });
-    await this.askStep(ctx, step, context);
+    await this.askStep(ctx, PAYEE, context);
   }
 
   /** A photo: read it as a receipt when the bot is waiting for one (or for the total). */
@@ -797,7 +798,7 @@ export class SplitCommandHandler {
         await this.askStep(ctx, RECEIPT, rest);
       } else if (data === 'split_scan:manual') {
         // Type the total instead: a normal split, without the receipt
-        const { receipt, mode, ...plain } = rest;
+        const { receipt, mode, entry, ...plain } = rest;
         await this.setState({ flow: 'split', step: TOTAL, context: plain });
         await this.askStep(ctx, TOTAL, plain);
       }
