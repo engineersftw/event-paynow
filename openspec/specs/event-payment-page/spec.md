@@ -150,11 +150,11 @@ The system SHALL accept payer-page state-changing requests only as same-origin J
 
 ### Requirement: Anonymous request creation is rate limited
 
-The system SHALL refuse anonymous payment creation for an event once 30 anonymous requests were created for it in the last 10 minutes, answering that the page is busy, and SHALL NOT limit signed-in users by this cap.
+The system SHALL refuse anonymous payment creation for an event once 300 anonymous requests were created for it in the last 10 minutes, answering that the page is busy, and SHALL NOT limit signed-in users by this cap.
 
 #### Scenario: Cap reached
 
-- **WHEN** 30 anonymous requests exist for the event from the last 10 minutes and another visitor submits one
+- **WHEN** 300 anonymous requests exist for the event from the last 10 minutes and another visitor submits one
 - **THEN** the system rejects it as rate limited and creates no payment
 
 #### Scenario: Signed-in users unaffected

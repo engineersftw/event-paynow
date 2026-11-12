@@ -221,7 +221,7 @@ it expires after 12 hours).
 
 The admin page has a Pay button that opens the shareable payer link at `/pay/<event-ref>`. Anyone with that link can create a
 payment request for themselves with no sign-in, without being an event-chat member or administrator (anonymous requests
-are stored with owner `0`, shown to admins like any other, and capped at 30 per event per 10 minutes). Signing in with
+are stored with owner `0`, shown to admins like any other, and capped at 300 per event per 10 minutes). Signing in with
 Telegram is optional. If the
 event has a default amount, the payer page shows it as plain text and uses it as the fixed payable amount. If no
 default is configured, the payer enters a required amount. The generated SGQR QR is displayed inline on the page. For signed-in users the

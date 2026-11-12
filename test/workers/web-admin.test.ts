@@ -494,18 +494,18 @@ describe('anonymous payer requests', () => {
     ).toBe(403);
   });
 
-  it('caps anonymous creation at 30 per 10 minutes per event; signed-in users are exempt', async () => {
+  it('caps anonymous creation at 300 per 10 minutes per event; signed-in users are exempt', async () => {
     const e = await seedEvent('EVTANON005', -64);
     const old = new Date(Date.now() - 11 * 60 * 1000).toISOString();
     const now = new Date().toISOString();
     for (let i = 0; i < 5; i++) await seedPayment(e.id, `ANONOLD${i}00`, 0, 100, { at: old });
-    for (let i = 0; i < 30; i++)
+    for (let i = 0; i < 300; i++)
       await seedPayment(e.id, `ANONNEW${String(i).padStart(3, '0')}`, 0, 100, { at: now });
 
     const blocked = await payerPost(`/api/pay/${e.ref}/payments`, null, anon);
     expect(blocked.status).toBe(429);
     expect(await blocked.json()).toEqual({ error: 'rate_limited' });
-    expect((await repo.listPaymentsByEvent(e.id)).length).toBe(35);
+    expect((await repo.listPaymentsByEvent(e.id)).length).toBe(305);
     expect((await payerPost(`/api/pay/${e.ref}/payments`, 902, anon)).status).toBe(201);
     // Another event is unaffected
     const other = await seedEvent('EVTANON006', -65);
