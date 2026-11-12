@@ -1,5 +1,6 @@
 import type { Api, BotConfig, Context } from 'grammy';
 import { Bot } from 'grammy';
+import { acceptUpdate } from './accept-update';
 import { collectClaim } from './commands/split-claim';
 import { SPLIT_HELP, SplitCommandHandler } from './commands/split-handler';
 import { formatSplitStats } from './commands/split-stats-handler';
@@ -140,35 +141,7 @@ async function getSplitBot(env: Env, token: string): Promise<Bot> {
   return botPromise;
 }
 
-/**
- * Answer Telegram at once and finish the update in the background. A receipt scan can take longer
- * than the 10 seconds a webhook response may wait; when one update failed, Telegram retried it
- * and held the chat's later messages behind it, so the group went silent. The update runs under
- * `waitUntil` (up to 30 more seconds), and a failure is logged instead of being retried forever.
- */
-export async function acceptUpdate(
-  bot: Bot,
-  request: Request,
-  ctx: Pick<ExecutionContext, 'waitUntil'>
-): Promise<Response> {
-  const update = (await request.json()) as Parameters<Bot['handleUpdate']>[0];
-  const started = Date.now();
-  ctx.waitUntil(
-    bot
-      .handleUpdate(update)
-      .then(() => {
-        const ms = Date.now() - started;
-        if (ms > 8000) console.warn(`split update took ${ms} ms`);
-      })
-      .catch((error) => {
-        // The error's own message only: updates carry payee numbers and receipts
-        console.error(
-          `split update failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`
-        );
-      })
-  );
-  return new Response('ok');
-}
+export { acceptUpdate };
 
 export async function handleSplitWebhook(
   request: Request,
@@ -176,5 +149,5 @@ export async function handleSplitWebhook(
   ctx: Pick<ExecutionContext, 'waitUntil'>
 ): Promise<Response> {
   const bot = await getSplitBot(env, env.SPLIT_BOT_TOKEN as string);
-  return acceptUpdate(bot, request, ctx);
+  return acceptUpdate(bot, request, ctx, 'split');
 }

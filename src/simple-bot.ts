@@ -1,5 +1,6 @@
 import type { BotConfig, Context } from 'grammy';
-import { Bot, webhookCallback } from 'grammy';
+import { Bot } from 'grammy';
+import { acceptUpdate } from './accept-update';
 import { SIMPLE_HELP, SimpleCommandHandler } from './commands/simple-handler';
 import { D1UsageRepository } from './db/usage-repository';
 import type { Env } from './env';
@@ -62,7 +63,11 @@ async function getSimpleBot(env: Env, token: string): Promise<Bot> {
   return botPromise;
 }
 
-export async function handleSimpleWebhook(request: Request, env: Env): Promise<Response> {
+export async function handleSimpleWebhook(
+  request: Request,
+  env: Env,
+  ctx: Pick<ExecutionContext, 'waitUntil'>
+): Promise<Response> {
   const bot = await getSimpleBot(env, env.SIMPLE_BOT_TOKEN as string);
-  return webhookCallback(bot, 'cloudflare-mod')(request);
+  return acceptUpdate(bot, request, ctx, 'simple');
 }

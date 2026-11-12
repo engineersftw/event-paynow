@@ -1,5 +1,6 @@
 import type { BotConfig, Context } from 'grammy';
-import { Bot, webhookCallback } from 'grammy';
+import { Bot } from 'grammy';
+import { acceptUpdate } from './accept-update';
 import { isChatAdmin } from './access/chat-admin';
 import { EditEventHandler } from './commands/edit-event-handler';
 import { EndEventHandler } from './commands/end-event-handler';
@@ -276,8 +277,11 @@ async function getBot(env: Env): Promise<Bot> {
  * Secret validation happens in the fetch entrypoint before this is reached,
  * so createBot never runs with an empty/absent token on unauthorized traffic.
  */
-export async function handleWebhook(request: Request, env: Env): Promise<Response> {
+export async function handleWebhook(
+  request: Request,
+  env: Env,
+  ctx: Pick<ExecutionContext, 'waitUntil'>
+): Promise<Response> {
   const bot = await getBot(env);
-  const webhookFn = webhookCallback(bot, 'cloudflare-mod');
-  return webhookFn(request);
+  return acceptUpdate(bot, request, ctx, 'event');
 }

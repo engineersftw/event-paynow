@@ -18,7 +18,7 @@ export default {
       if (!validateSecret(request, env.TELEGRAM_WEBHOOK_SECRET)) {
         return new Response('Unauthorized', { status: 403 });
       }
-      return handleWebhook(request, env);
+      return handleWebhook(request, env, ctx);
     }
 
     // Simple_PayNow_Bot: own secret, 404 until it is configured
@@ -29,7 +29,7 @@ export default {
       if (!validateSecret(request, env.SIMPLE_WEBHOOK_SECRET)) {
         return new Response('Unauthorized', { status: 403 });
       }
-      return handleSimpleWebhook(request, env);
+      return handleSimpleWebhook(request, env, ctx);
     }
 
     // Split_PayNow_Bot: own secret, 404 until it is configured
