@@ -202,7 +202,7 @@ async function payerAccess(
 }
 
 /** Anonymous creations allowed per event in the window (signed-in users are not limited). */
-const ANON_LIMIT = 30;
+const ANON_LIMIT = 300;
 const ANON_WINDOW_MS = 10 * 60 * 1000;
 
 /** PNG bytes as a data URL, so an anonymous payer needs no authenticated image route. */
