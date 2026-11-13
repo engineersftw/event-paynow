@@ -1,4 +1,4 @@
-import { formatCents, parseAmount } from '../sgqr/amount';
+import { formatCents, MAX_CENTS, parseAmount } from '../sgqr/amount';
 import type { SplitEntry } from './split-math';
 
 /** One line of a receipt, price in cents (the line total, not a unit price). */
@@ -25,7 +25,6 @@ export type ScanResult =
 
 export const MAX_ITEMS = 40;
 const MAX_NAME = 30;
-const MAX_CENTS = 10_000_000; // SGD 100,000: anything above is a misread
 
 /** A price the model returned (number or "12.50" / "$12.50") as integer cents, or null. */
 function toCents(value: unknown): number | null {

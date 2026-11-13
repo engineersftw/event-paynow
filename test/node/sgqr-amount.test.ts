@@ -33,6 +33,12 @@ describe('parseAmount', () => {
     expect(parseAmount('-0.01')).toBeNull();
   });
 
+  it('rejects amounts above SGD 100,000', () => {
+    expect(parseAmount('100000')).toBe(10_000_000);
+    expect(parseAmount('100000.01')).toBeNull();
+    expect(parseAmount('99999999999999999999')).toBeNull();
+  });
+
   it('rejects zero', () => {
     expect(parseAmount('0')).toBeNull();
     expect(parseAmount('0.00')).toBeNull();

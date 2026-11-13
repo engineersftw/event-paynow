@@ -1,7 +1,10 @@
+/** SGD 100,000: anything above is a typo or abuse, and long digits turn into `1e+25` in a QR. */
+export const MAX_CENTS = 10_000_000;
+
 /**
  * Parse a decimal amount string to integer cents.
  * Accepts: positive numbers with up to 2 decimal places.
- * Rejects: negative, zero, more than 2 decimals, non-numeric.
+ * Rejects: negative, zero, more than 2 decimals, non-numeric, above SGD 100,000.
  *
  * @returns integer cents, or null if invalid.
  */
@@ -18,7 +21,8 @@ export function parseAmount(input: string): number | null {
   if (!Number.isFinite(num) || num <= 0) return null;
 
   // Convert to cents with rounding to avoid floating-point issues
-  return Math.round(num * 100);
+  const cents = Math.round(num * 100);
+  return cents <= MAX_CENTS ? cents : null;
 }
 
 /**
