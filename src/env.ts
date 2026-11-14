@@ -21,6 +21,8 @@ export interface Env {
   AI?: Ai;
   /** Vision model used for receipts; defaults to Llama 4 Scout. */
   RECEIPT_MODEL?: string;
+  /** Speech-to-text model for voice notes in Split_PayNow_Bot; defaults to Whisper large v3 turbo. */
+  VOICE_MODEL?: string;
   /** Telegram user ids (comma-separated) allowed to use the hidden /stats command; none when unset. */
   STATS_USER_IDS?: string;
 }
