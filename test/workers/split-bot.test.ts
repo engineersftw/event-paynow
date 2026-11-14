@@ -923,6 +923,57 @@ describe('Split_PayNow_Bot receipt scan', () => {
     await tap(b, org, 'split_skip_description');
   }
 
+  it('rounds every share up to the cent and shows what it was rounded up from', async () => {
+    // Huevos: 17.00 + 21.00 + 19.00 = 57.00, service charge 5.70, GST 5.64, total 68.34
+    scanned = {
+      merchant: 'Huevos',
+      items: [
+        { name: 'Chipotle Chicken Tacos', price: 17 },
+        { name: 'Birria Beef Tacos', price: 21 },
+        { name: 'Baja Fish Tacos', price: 19 },
+      ],
+      serviceCharge: 5.7,
+      gst: 5.64,
+      total: 68.34,
+    };
+    const org = uid++;
+    await toSummary(receiptBot(), org, '1,3 Dylan, Ash, me\n2 Dylan, me');
+    const text = stub.lastText();
+    expect(text).toContain('Bill: SGD 68.34 shared by 3 people');
+    expect(text).toContain('Dylan: SGD 26.98 (rounded up from SGD 26.976)');
+    expect(text).toContain('Ash: SGD 14.39 (rounded up from SGD 14.387)');
+    expect(text).toContain('Your own share, not collected: SGD 26.98 (rounded up from SGD 26.976)');
+    expect(text).toContain('Amounts add up to SGD 68.35, SGD 0.01 over, from rounding up');
+  });
+
+  it('sends QRs for the rounded-up amounts, the organiser own share included, when someone else is paid', async () => {
+    scanned = {
+      items: [
+        { name: 'Chipotle Chicken Tacos', price: 17 },
+        { name: 'Birria Beef Tacos', price: 21 },
+        { name: 'Baja Fish Tacos', price: 19 },
+      ],
+      serviceCharge: 5.7,
+      gst: 5.64,
+      total: 68.34,
+    };
+    const org = uid++;
+    const b = receiptBot();
+    await say(b, org, '/split_receipt');
+    await say(b, org, '91234567');
+    await tap(b, org, 'split_payee:other');
+    await photo(b, org);
+    await tap(b, org, 'split_scan:use');
+    await say(b, org, '1,3 Dylan, Ash, me\n2 Dylan, me');
+    await tap(b, org, 'split_skip_description');
+    expect(stub.lastText()).toContain(
+      'Your own share, which you pay the payee: SGD 26.98 (rounded up from SGD 26.976) (you get a QR)'
+    );
+    await tap(b, org, 'split_confirm');
+    const amounts = qrs().map((q) => /54\d\d(\d+\.\d\d)/.exec(q.payload)?.[1]);
+    expect([...amounts].sort()).toEqual(['14.39', '26.98', '26.98']); // Ash, Dylan, and the organiser's own
+  });
+
   it('reads the receipt, shares GST and service charge pro rata, and DMs the mentioned person', async () => {
     const [ann, org] = [uid++, uid++];
     const b = receiptBot();
@@ -1444,9 +1495,10 @@ describe('Split_PayNow_Bot receipt scan', () => {
       // Bob: 9.50 of the 117.10 of items, plus 9.50/117.10 of the 23.30 charges (1.89), then Ann the rest
       const summary = stub.lastText();
       const amounts = [...summary.matchAll(/(Ann|Bob): SGD (\d+\.\d\d)/g)].map((m) => Number(m[2]));
-      expect(amounts.reduce((x, y) => x + y, 0)).toBeCloseTo(140.4, 2);
-      expect(summary).toContain('Bob: SGD 11.39');
-      expect(summary).toContain('Ann: SGD 129.01');
+      expect(amounts.reduce((x, y) => x + y, 0)).toBeCloseTo(140.41, 2); // each share rounded up
+      expect(summary).toContain('Bob: SGD 11.40 (rounded up from SGD 11.390)');
+      expect(summary).toContain('Ann: SGD 129.01 (rounded up from SGD 129.009)');
+      expect(summary).toContain('Amounts add up to SGD 140.41, SGD 0.01 over, from rounding up');
     });
 
     it('a new photo discards the added items', async () => {

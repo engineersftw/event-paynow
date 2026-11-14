@@ -33,6 +33,7 @@ import {
   MAX_CLAIMERS,
   memberAmount,
   missingCents,
+  type PersonShare,
   parseAddedItems,
   parseAssignments,
   parseScan,
@@ -121,6 +122,20 @@ const topicOf = (ctx: Context) =>
   0;
 
 const sgd = (cents: number) => `SGD ${formatCents(cents)}`;
+
+/** The organiser's own share of a receipt (never collected from them, but paid to the payee when someone else is). */
+type OwnShare = { cents: number; exact?: string };
+
+/** An amount for the summary; a receipt share that was rounded up says what it was rounded up from. */
+const amountText = (a: { cents: number; exact?: string }) =>
+  a.exact ? `${sgd(a.cents)} (rounded up from SGD ${a.exact})` : sgd(a.cents);
+
+const ownOf = (shares: PersonShare[]): OwnShare | undefined => {
+  const me = shares.find((s) => s.person.isMe);
+  return me && me.cents > 0
+    ? { cents: me.cents, ...(me.exact !== undefined ? { exact: me.exact } : {}) }
+    : undefined;
+};
 
 /** Text mentions (people picked from the member list) in a message: displayed text to user id. */
 function textMentionsOf(message: Message | undefined): Map<string, number> {
@@ -235,17 +250,20 @@ function assignmentPatchOf(
     error: 'Nobody else owes anything. Name at least one other person.',
   };
   if (a.people.every((p) => p.isMe)) return nobody;
-  const share = (done: AssignedOk) =>
-    toEntries(shareReceipt(receipt.items, done, receipt.totalCents, locked).shares, locked);
+  const share = (done: AssignedOk) => {
+    const { shares } = shareReceipt(receipt.items, done, receipt.totalCents);
+    return { entries: toEntries(shares, locked), own: ownOf(shares) };
+  };
 
   if (a.unassigned.length === 0) {
-    // Everything has an owner: the receipt total minus the others' shares is the organiser's own
-    const entries = share(a);
+    // Everything has an owner: each person, the organiser included, owes their own share
+    const { entries, own } = share(a);
     if (entries.length === 0) return nobody;
     return {
       ok: true,
       patch: {
         entries,
+        own,
         leftover: 'omit',
         partial: undefined,
         gap: undefined,
@@ -258,12 +276,13 @@ function assignmentPatchOf(
   const choice = c.unassignedChoice as 'me' | 'even' | undefined;
   const sameGap = JSON.stringify(c.gap) === JSON.stringify(a.unassigned);
   if (choice && sameGap) {
-    const entries = share(applyUnassigned(a, choice, locked));
+    const { entries, own } = share(applyUnassigned(a, choice, locked));
     if (entries.length === 0) return nobody;
     return {
       ok: true,
       patch: {
         entries,
+        own,
         leftover: 'omit',
         partial: a,
         gap: a.unassigned,
@@ -275,6 +294,7 @@ function assignmentPatchOf(
     ok: true,
     patch: {
       entries: undefined,
+      own: undefined,
       partial: a,
       gap: a.unassigned,
       unassignedChoice: undefined,
@@ -304,7 +324,8 @@ function nextNeed(c: Ctx): { step: number; note?: string } {
       return { step: c.assignHow === 'claim' ? CLAIM : ASSIGN };
     }
     const sum = sumCents(entries);
-    if (sum > total) {
+    // A receipt's shares are each rounded up, so they may add up to a few cents over the bill
+    if (sum > total && !c.receipt) {
       return {
         step: LIST,
         note: `The list adds up to ${sgd(sum)}, which is ${sgd(sum - total)} over the bill of ${sgd(total)}. Send the whole list again.`,
@@ -328,8 +349,13 @@ function summary(c: Record<string, unknown>, group: boolean): string {
   const listed = c.entries as SplitEntry[] | undefined;
   if (listed) {
     const r = applyLeftover(listed, total, (c.leftover as 'even' | 'omit' | undefined) ?? 'omit');
+    // A receipt gives the organiser their own share, rounded up like everybody's; any other list
+    // leaves them the remainder
+    const own = c.receipt ? (c.own as OwnShare | undefined) : undefined;
     // The organiser counts when an amount for them is shown (own share, or a leftover they carry)
-    const people = listed.length + (r.leftoverCents > 0 && r.extraCents === 0 ? 1 : 0);
+    const people =
+      listed.length +
+      (c.receipt ? (own ? 1 : 0) : r.leftoverCents > 0 && r.extraCents === 0 ? 1 : 0);
     lines.push(`Bill: ${sgd(total)} shared by ${people} people`);
     for (const e of r.entries) {
       const direct = e.sent
@@ -337,15 +363,17 @@ function summary(c: Record<string, unknown>, group: boolean): string {
         : e.username || e.userId
           ? ' (by direct message)'
           : '';
-      lines.push(`${e.name}: ${sgd(e.cents)}${direct}`);
+      lines.push(`${e.name}: ${amountText(e)}${direct}`);
     }
     const paid = c.payeeIsMe === false; // someone else is paid, so the organiser pays too
-    if (r.leftoverCents > 0 && c.receipt) {
-      lines.push(
-        paid
-          ? `Your own share, which you pay the payee: ${sgd(r.leftoverCents)} (you get a QR)`
-          : `Your own share, not collected: ${sgd(r.leftoverCents)}`
-      );
+    if (c.receipt) {
+      if (own) {
+        lines.push(
+          paid
+            ? `Your own share, which you pay the payee: ${amountText(own)} (you get a QR)`
+            : `Your own share, not collected: ${amountText(own)}`
+        );
+      }
     } else if (r.leftoverCents > 0) {
       lines.push(
         r.extraCents > 0
@@ -355,10 +383,11 @@ function summary(c: Record<string, unknown>, group: boolean): string {
             : `Leftover ${sgd(r.leftoverCents)} left out: you cover it`
       );
     }
-    if (r.overCents > 0) {
-      lines.push(
-        `Amounts add up to ${sgd(total + r.overCents)}, ${sgd(r.overCents)} over, from rounding up`
-      );
+    const over = c.receipt
+      ? listed.reduce((t, e) => t + e.cents, 0) + (own?.cents ?? 0) - total
+      : r.overCents;
+    if (over > 0) {
+      lines.push(`Amounts add up to ${sgd(total + over)}, ${sgd(over)} over, from rounding up`);
     }
   } else {
     const people = c.people as number;
@@ -1081,17 +1110,24 @@ export class SplitCommandHandler {
         await ctx.reply('Everyone has their QR already, so I cannot share the rest with them.');
         return true;
       }
-      const entries = toEntries(
-        shareReceipt(lines, applyUnassigned(partial, choice, locked), receipt.totalCents, locked)
-          .shares,
-        locked
+      const { shares } = shareReceipt(
+        lines,
+        applyUnassigned(partial, choice, locked),
+        receipt.totalCents
       );
+      const entries = toEntries(shares, locked);
       if (entries.length === 0) {
         await ctx.reply('Nobody else owes anything. Name at least one other person.');
         await this.setState({ flow: 'split', step: ASSIGN, context: c });
         return true;
       }
-      await this.proceed(ctx, { ...c, entries, leftover: 'omit', unassignedChoice: choice });
+      await this.proceed(ctx, {
+        ...c,
+        entries,
+        own: ownOf(shares),
+        leftover: 'omit',
+        unassignedChoice: choice,
+      });
     } else if (
       data === 'split_scan:add' ||
       data === 'split_scan:oneline' ||
@@ -1163,7 +1199,7 @@ export class SplitCommandHandler {
       }
     } else if (data.startsWith('split_mode:')) {
       // A new choice of type starts that type's details afresh
-      const { people, entries, leftover, suggested, ...rest } = c;
+      const { people, entries, leftover, suggested, own, ...rest } = c;
       await this.proceed(ctx, { ...rest, mode: data.endsWith(':custom') ? 'custom' : 'equal' });
     } else if (data.startsWith('split_leftover:')) {
       await this.proceed(ctx, { ...c, leftover: data.endsWith(':even') ? 'even' : 'omit' });
@@ -1485,7 +1521,9 @@ export class SplitCommandHandler {
       selfId !== undefined &&
       servedOf(c)[String(selfId)] === undefined
     ) {
-      const own = applyLeftover(listed, total, 'omit').leftoverCents;
+      const own = c.receipt
+        ? ((c.own as OwnShare | undefined)?.cents ?? 0)
+        : applyLeftover(listed, total, 'omit').leftoverCents;
       if (own > 0) {
         if (this.directory) {
           const first = ctx.from?.first_name || 'You';

@@ -179,10 +179,33 @@ describe('shareReceipt', () => {
     expect(r.shares.map((s) => s.cents)).toEqual([3600, 1200]);
     expect(r.extrasCents).toBe(800);
   });
-  it('splits a shared item equally, odd cents to the first people listed', () => {
+  it('rounds every share up to the cent and says what it was rounded up from', () => {
     const a = assign('1 Ann, Bob, Cy', 1);
     const r = shareReceipt(items(1000), a, 1000);
-    expect(r.shares.map((s) => s.cents)).toEqual([334, 333, 333]);
+    expect(r.shares.map((s) => s.cents)).toEqual([334, 334, 334]); // 10.00 / 3 = 3.333
+    expect(r.shares.map((s) => s.exact)).toEqual(['3.333', '3.333', '3.333']);
+    // a share that needs no rounding carries no note
+    expect(shareReceipt(items(1000), assign('1 Ann, Bob', 1), 1000).shares[0]).toMatchObject({
+      cents: 500,
+    });
+    expect(
+      shareReceipt(items(1000), assign('1 Ann, Bob', 1), 1000).shares[0]!.exact
+    ).toBeUndefined();
+  });
+  it('gives the same amount to people with the same items, whatever the order of the names', () => {
+    // Huevos receipt: 17.00 + 21.00 + 19.00 = 57.00, total 68.34; Ash has items 1 and 3, Dylan and me also 2
+    const huevos = items(1700, 2100, 1900);
+    for (const [x, y, z] of [
+      ['Dylan', 'Ash', 'me'],
+      ['Ash', 'Dylan', 'me'],
+      ['me', 'Dylan', 'Ash'],
+    ]) {
+      const r = shareReceipt(huevos, assign(`1,3 ${x}, ${y}, ${z}\n2 Dylan, me`, 3), 6834);
+      const by = Object.fromEntries(r.shares.map((s) => [s.person.name, s]));
+      expect(by.Ash).toMatchObject({ cents: 1439, exact: '14.387' });
+      expect(by.Dylan).toMatchObject({ cents: 2698, exact: '26.976' });
+      expect(by.me).toMatchObject({ cents: 2698, exact: '26.976' });
+    }
   });
   it('counts the organiser but does not collect from them', () => {
     const a = assign('1 Ann\n2 me', 2);
@@ -195,7 +218,7 @@ describe('shareReceipt', () => {
     const r = shareReceipt(items(3000, 1000), a, 3600); // 10% off
     expect(r.shares.map((s) => s.cents)).toEqual([2700, 900]);
   });
-  it('always adds up exactly to the receipt total', () => {
+  it('never collects less than the receipt total, and at most a cent more per person', () => {
     for (const total of [9999, 10001, 12345, 777]) {
       for (const prices of [
         [333, 334, 335],
@@ -204,7 +227,9 @@ describe('shareReceipt', () => {
       ]) {
         const a = assign('1 Ann, Bob\n2 Bob, Cy\n3 me, Ann, Cy', 3);
         const r = shareReceipt(items(...prices), a, total);
-        expect(r.shares.reduce((s, x) => s + x.cents, 0)).toBe(total);
+        const sum = r.shares.reduce((s, x) => s + x.cents, 0);
+        expect(sum).toBeGreaterThanOrEqual(total);
+        expect(sum - total).toBeLessThan(r.shares.length);
       }
     }
   });
@@ -311,20 +336,22 @@ describe('unassigned items', () => {
     expect(a.people.map((p) => p.name)).toEqual(['Ann', 'me']);
     expect(a.items[1]).toEqual([1]);
   });
-  it('Split evenly: each gap item is shared by everyone named, odd cents to the first', () => {
+  it('Split evenly: each gap item is shared by everyone named, each share rounded up', () => {
     const a = applyUnassigned(assign('1 Ann\n3 Bob', 3), 'even');
     expect(a.items[1]).toEqual([0, 1]);
     const r = shareReceipt(items(3000, 901, 2000), a, 5901);
-    expect(r.shares.map((s) => s.cents)).toEqual([3451, 2450]);
+    expect(r.shares.map((s) => s.cents)).toEqual([3451, 2451]); // 3450.5 and 2450.5 each
   });
-  it('Split evenly includes me when named, and the amounts always add up', () => {
+  it('Split evenly includes me when named, and the amounts never fall short of the total', () => {
     const a = applyUnassigned(assign('1 Ann\n3 me', 3), 'even');
     expect(a.items[1]).toEqual([0, 1]);
     for (const total of [5000, 5333, 6001]) {
       for (const choice of ['me', 'even'] as const) {
         const done = applyUnassigned(assign('1 Ann\n2 Bob', 3), choice);
         const r = shareReceipt(items(1500, 2500, 1001), done, total);
-        expect(r.shares.reduce((x, y) => x + y.cents, 0)).toBe(total);
+        const sum = r.shares.reduce((x, y) => x + y.cents, 0);
+        expect(sum).toBeGreaterThanOrEqual(total);
+        expect(sum - total).toBeLessThan(r.shares.length);
       }
     }
   });
@@ -537,7 +564,7 @@ describe('claims', () => {
     ) => {
       const a = assignmentFromClaims(items, claims, people, 9, ways);
       const filled = applyUnassigned(a, 'me', new Set(locked));
-      return shareReceipt(a.lines, filled, total, new Set(locked)).shares;
+      return shareReceipt(a.lines, filled, total).shares;
     };
 
     it('matches the final amount of a locked member whatever the others claim later', () => {
@@ -545,7 +572,7 @@ describe('claims', () => {
       const bob = { id: 2, name: 'Bob' };
       const org = { id: 9, name: 'Org' };
       const early = memberAmount(items, { '0': [1] }, {}, 1, total); // Ann holds the crab alone
-      expect(early).toEqual({ itemsCents: 3000, extrasCents: 600, cents: 3600 });
+      expect(early).toEqual({ cents: 3600 }); // 30.00 x 72.00 / 60.00, nothing to round
       // later, Bob takes the rice, the organiser the beer, and the shares are rounded
       const done = finalFor({ '0': [1], '1': [2], '2': [9] }, [ann, bob, org], [0]);
       expect(done[0]!.cents).toBe(early.cents);
@@ -563,13 +590,13 @@ describe('claims', () => {
       const one = memberAmount(items, { '0': [1] }, { '0': 3 }, 1, total);
       const three = memberAmount(items, { '0': [1, 2, 3] }, { '0': 3 }, 1, total);
       expect(one).toEqual(three);
-      expect(one.itemsCents).toBe(1000);
-      // a discount makes the extras negative and the floor takes a cent more
-      const less = memberAmount(items, { '1': [1] }, {}, 1, 5900); // extras -1.00
-      expect(less).toEqual({ itemsCents: 1000, extrasCents: -17, cents: 983 });
+      expect(one.cents).toBe(1200); // 10.00 plus 20% extra
+      // a discount makes the extras negative: 10.00 x 59.00 / 60.00 = 9.833, rounded up
+      const less = memberAmount(items, { '1': [1] }, {}, 1, 5900);
+      expect(less).toEqual({ cents: 984, exact: '9.833' });
     });
 
-    it('lets the unlocked absorb the rounding cents, and all amounts add up', () => {
+    it('gives every member the same amount early as in the final split, rounded up', () => {
       const people = [
         { id: 1, name: 'A' },
         { id: 2, name: 'B' },
@@ -581,16 +608,14 @@ describe('claims', () => {
         { name: 'z', cents: 1001 },
       ];
       const a = assignmentFromClaims(odd, { '0': [1], '1': [2], '2': [3] }, people, 9);
-      const lockedAll = shareReceipt(odd, a, 3333, new Set([0, 1, 2])).shares;
-      // everyone fixed: floors only, the rest is the organiser's remainder (nobody else is left)
-      expect(
-        lockedAll.every(
-          (x, i) => x.cents === memberAmount(odd, { [String(i)]: [i + 1] }, {}, i + 1, 3333).cents
-        )
-      ).toBe(true);
-      const some = shareReceipt(odd, a, 3333, new Set([0])).shares;
-      expect(some.reduce((t, x) => t + x.cents, 0)).toBe(3333);
-      expect(some[0]!.cents).toBe(memberAmount(odd, { '0': [1] }, {}, 1, 3333).cents);
+      const shares = shareReceipt(odd, a, 3334).shares;
+      expect(shares.map((x) => x.cents)).toEqual([1112, 1112, 1112]); // 1111.33 each
+      shares.forEach((x, i) => {
+        expect(memberAmount(odd, { [String(i)]: [i + 1] }, {}, i + 1, 3334)).toEqual({
+          cents: x.cents,
+          exact: x.exact,
+        });
+      });
     });
 
     it('does not offer a locked member a share of the unclaimed items, and flags them as sent', () => {
@@ -599,7 +624,7 @@ describe('claims', () => {
       const a = assignmentFromClaims(items, { '0': [1], '1': [2] }, [ann, bob], 9);
       const even = applyUnassigned(a, 'even', new Set([0]));
       expect(even.items[2]).toEqual([1]); // the beer goes to Bob only
-      const shares = shareReceipt(a.lines, even, total, new Set([0])).shares;
+      const shares = shareReceipt(a.lines, even, total).shares;
       const entries = toEntries(shares, new Set([0]));
       expect(entries.find((e) => e.name === 'Ann')).toMatchObject({ sent: true });
       expect(entries.find((e) => e.name === 'Bob')!.sent).toBeUndefined();

@@ -571,9 +571,9 @@ The system SHALL ask who had each item and accept one message in either of two f
 - **WHEN** the message names only `me`
 - **THEN** the bot says nobody else owes anything and asks for the message again
 
-### Requirement: Charges are shared in proportion and the amounts add up to the receipt
+### Requirement: Charges are shared in proportion and every share is rounded up to the cent
 
-The system SHALL compute each person's amount as their share of the items plus a share of the difference between the receipt total and the sum of the items (service charge, GST, rounding, and any discount as a negative amount), in proportion to each person's item share, with cents allocated so that all amounts, including the organiser's, add up exactly to the receipt total. The organiser's own amount SHALL be shown, and SHALL be collected only when the payee is someone else.
+The system SHALL compute each person's amount as their share of the items plus a share of the difference between the receipt total and the sum of the items (service charge, GST, rounding, and any discount as a negative amount), in proportion to each person's item share, and round each person's amount UP to the next whole cent, so nobody pays less than their exact share and the amounts, including the organiser's, MAY add up to a few cents more than the receipt total. The summary SHALL show, beside every amount that was rounded up, the unrounded amount to three decimals (for example `SGD 26.98 (rounded up from SGD 26.976)`), and SHALL say how many cents over the receipt total the amounts add up to. The organiser's own amount SHALL be shown, and SHALL be collected only when the payee is someone else. The amounts SHALL NOT depend on the order in which the people are named.
 
 #### Scenario: Pro-rata charges
 
@@ -582,8 +582,18 @@ The system SHALL compute each person's amount as their share of the items plus a
 
 #### Scenario: Shared item
 
-- **WHEN** a 9.00 item is shared by three people
-- **THEN** each person's item share is 3.00 and any odd cent goes to the first people listed
+- **WHEN** a 10.00 item is shared by three people and the receipt total equals the items
+- **THEN** each person owes 3.34 and the summary shows `SGD 3.34 (rounded up from SGD 3.333)` for each
+
+#### Scenario: Rounded up, a few cents over
+
+- **WHEN** the receipt total is 68.34 for items of 57.00, Ash had items worth 12.00 and Dylan and the organiser 22.50 each
+- **THEN** Ash owes 14.39 (rounded up from 14.387), Dylan and the organiser 26.98 each (rounded up from 26.976), and the summary says the amounts add up to 68.35, 0.01 over
+
+#### Scenario: Same items, same amount
+
+- **WHEN** two people have the same items, whichever of them is named first
+- **THEN** they owe the same amount
 
 #### Scenario: Organiser's share
 
@@ -1006,7 +1016,7 @@ The system SHALL let only the organiser close the claim with Done. When every it
 
 ### Requirement: Claims become the same amounts as a typed assignment
 
-The system SHALL compute each claimer's amount exactly as for a typed assignment: each item shared equally between its claimers (an item shared N ways costs each holder one Nth, and unfilled shares are handled as unclaimed items), the difference between the receipt total and the items shared in proportion, and all amounts, including the organiser's, adding up to the receipt total. The split SHALL then continue as a custom split with the claimers as the people to collect from.
+The system SHALL compute each claimer's amount exactly as for a typed assignment: each item shared equally between its claimers (an item shared N ways costs each holder one Nth, and unfilled shares are handled as unclaimed items), the difference between the receipt total and the items shared in proportion, each rounded up to the cent, so they may add up to a few cents more than the receipt total. The split SHALL then continue as a custom split with the claimers as the people to collect from.
 
 #### Scenario: Claimed amounts
 
@@ -1193,7 +1203,7 @@ The system SHALL, when the organiser taps Shared by all, ask how many ways to sp
 
 ### Requirement: A member can get their own QR before the claiming is closed
 
-The system SHALL show a Get my QR button on the claim message. When a member who holds at least one item taps it, the system SHALL send them a PayNow QR for their own amount to the payee already given, without waiting for the organiser's Done. The amount SHALL be the member's items (each item split equally between its holders) plus their proportional share of the difference between the receipt total and the items, calculated from the receipt's total of all items so that it does not depend on what other members claim. The QR SHALL be sent by direct message; when the bot cannot message the member, the tap SHALL open the bot with a start link so the member collects it with the existing Get my QR flow. A member who holds nothing SHALL be told to claim an item first, and the organiser SHALL be told there is nothing to collect when the organiser is the payee. The QR SHALL carry the merchant name from the receipt as its description when one was read, and no description otherwise.
+The system SHALL show a Get my QR button on the claim message. When a member who holds at least one item taps it, the system SHALL send them a PayNow QR for their own amount to the payee already given, without waiting for the organiser's Done. The amount SHALL be the member's items (each item split equally between its holders) plus their proportional share of the difference between the receipt total and the items, calculated from the receipt's total of all items so that it does not depend on what other members claim, and rounded up to the cent. The QR SHALL be sent by direct message; when the bot cannot message the member, the tap SHALL open the bot with a start link so the member collects it with the existing Get my QR flow. A member who holds nothing SHALL be told to claim an item first, and the organiser SHALL be told there is nothing to collect when the organiser is the payee. The QR SHALL carry the merchant name from the receipt as its description when one was read, and no description otherwise.
 
 #### Scenario: Member takes their QR early
 
@@ -1222,7 +1232,7 @@ The system SHALL show a Get my QR button on the claim message. When a member who
 
 ### Requirement: Taking the QR locks the member's items and fixes their amount
 
-The system SHALL, when a member takes their QR, lock the items they hold so that nobody can add or remove holders on them, mark the member as having their QR in the claim message, and fix the member's amount at the one on the QR. A member who has taken their QR SHALL NOT be able to take a second one. When the claiming is closed the locked amounts SHALL be used as sent, the cents the rounding leaves over SHALL go to the people who have not taken a QR, or to the organiser when everyone has, and a member who already received their QR SHALL NOT be sent another. Unclaimed items SHALL NOT be shared with a member whose amount is fixed.
+The system SHALL, when a member takes their QR, lock the items they hold so that nobody can add or remove holders on them, mark the member as having their QR in the claim message, and fix the member's amount at the one on the QR. A member who has taken their QR SHALL NOT be able to take a second one. When the claiming is closed the locked amounts SHALL be used as sent, and a member who already received their QR SHALL NOT be sent another. Unclaimed items SHALL NOT be shared with a member whose amount is fixed.
 
 #### Scenario: Items locked
 
@@ -1249,10 +1259,10 @@ The system SHALL, when a member takes their QR, lock the items they hold so that
 - **WHEN** items are unclaimed and everyone who claimed has taken their QR
 - **THEN** the organiser is not offered to share them evenly with those members and can only cover them
 
-#### Scenario: Totals still add up
+#### Scenario: Same rounded-up rule
 
 - **WHEN** some members took their QR early and the claiming is closed
-- **THEN** all amounts, including the organiser's, add up to the receipt total
+- **THEN** every amount, including the organiser's, is rounded up to the cent like a typed assignment, and the summary says how many cents over the receipt total they add up to
 
 ### Requirement: A voice note can answer who had which item
 
