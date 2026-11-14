@@ -33,13 +33,18 @@ const INSTRUCTION =
 
 type Runner = { run(model: string, input: unknown): Promise<unknown> };
 
-/** Base64 data URL without blowing the argument limit on large photos. */
-export function toDataUrl(bytes: Uint8Array, mime = 'image/jpeg'): string {
+/** Base64 text without blowing the argument limit on large files. */
+export function toBase64(bytes: Uint8Array): string {
   let binary = '';
   for (let i = 0; i < bytes.length; i += 0x8000) {
     binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
   }
-  return `data:${mime};base64,${btoa(binary)}`;
+  return btoa(binary);
+}
+
+/** A data URL for a photo. */
+export function toDataUrl(bytes: Uint8Array, mime = 'image/jpeg'): string {
+  return `data:${mime};base64,${toBase64(bytes)}`;
 }
 
 /** First JSON object in a model reply (it may add prose or a code fence around it). */

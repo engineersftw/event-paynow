@@ -28,6 +28,8 @@ SPLIT_BOT_USERNAME = "Split_PayNow_Bot"
 # Vision model for Split_PayNow_Bot receipt scans (Workers AI). Llama 4 Scout read a real 10-item receipt
 # completely in every test run (about 8 s, 70 neurons a scan); Llama 3.2 11B missed one or two items every time.
 RECEIPT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"
+# Speech-to-text for voice notes that answer "who had what" (Workers AI; the same Llama then writes the lines).
+VOICE_MODEL = "@cf/openai/whisper-large-v3-turbo"
 # WEB_ADMIN_URL = "https://event-paynow-web.pages.dev"  # set after creating the Pages project
 
 # Set via `wrangler secret put TELEGRAM_BOT_TOKEN`

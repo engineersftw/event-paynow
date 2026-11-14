@@ -22,6 +22,7 @@ import { type ReceiptReader, ReceiptReaderError } from '../receipt-reader';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
 import { renderQrPng } from '../sgqr/qr-render';
+import type { VoiceReader } from '../voice-reader';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
 import {
   type AssignedOk,
@@ -75,6 +76,8 @@ const PAYEE_ME = 14; // is the payee the organiser? if not, the organiser pays t
 const MAX_DESCRIPTION = 25;
 // Each round of simultaneous taps lets one write through, so this many taps at once all fit
 const MAX_TAP_RETRIES = 25;
+const VOICE_MAX_SECONDS = 60; // a longer voice note is refused before any download or AI call
+const VOICE_MAX_BYTES = 1_000_000;
 const IDLE_MS = 10 * 60 * 1000;
 const CLAIM_IDLE_MS = 60 * 60 * 1000; // people finish dinner at different speeds
 
@@ -101,7 +104,7 @@ export const SPLIT_HELP =
   'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
   '/split - payee first (and whether it is you), then the total, equal or custom amounts and an optional description\n' +
   '/split_custom - same, straight to custom amounts (one line per person: name and amount; @mention someone to send them their QR directly)\n' +
-  '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what.\n' +
+  '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what; you can also answer that question with a voice note.\n' +
   'If someone else is the payee, you get a QR for your own share too.\n' +
   '/forget - delete what I remember about you (your username, kept when you /start me)\n' +
   '/cancel - stop\n\n' +
@@ -650,6 +653,8 @@ export class SplitCommandHandler {
     /** `reader` turns a photo into receipt data; `download` fetches a Telegram file's bytes. */
     private readonly receipts: {
       reader?: ReceiptReader;
+      /** Turns a voice note into assignment lines; voice is off without it. */
+      voice?: VoiceReader;
       download?: (api: Api, fileId: string) => Promise<Uint8Array>;
     } = {},
     /** Anonymous daily counts for the owner's /stats; absent in tests that do not need it. */
@@ -733,6 +738,105 @@ export class SplitCommandHandler {
     // The notice has done its job; a failure keeps it, so the failure message has context
     await ctx.api.deleteMessage(reading.chat.id, reading.message_id).catch(() => undefined);
     await this.showReview(ctx, { ...state.context, scan: { receipt: scan.receipt } });
+  }
+
+  /**
+   * A voice note answering "who had what": heard, turned into the typed lines and offered back with
+   * a button. Nothing is applied until the organiser taps it. The audio and the heard text are
+   * never stored or logged; only the made lines wait in the conversation state.
+   */
+  async handleVoice(ctx: Context): Promise<void> {
+    const note = ctx.message?.voice;
+    const state = await this.getState();
+    if (!note || state.flow !== 'split' || !this.isOwner(ctx, state)) return;
+    const reply = (text: string) => ctx.reply(text);
+    if (state.step !== ASSIGN) {
+      // In a group the organiser's chat is mostly for other people: no nagging
+      if (!isGroup(ctx))
+        await reply(
+          'I only take a voice note when I ask who had which item. Please type your answer.'
+        );
+      return;
+    }
+    const { voice, download } = this.receipts;
+    if (!voice || !download) {
+      await reply('Voice notes are not available. Please type who had what.');
+      return;
+    }
+    if (note.duration > VOICE_MAX_SECONDS || (note.file_size ?? 0) > VOICE_MAX_BYTES) {
+      await reply(
+        `Voice notes can be at most ${VOICE_MAX_SECONDS} seconds. Send a shorter one or type it.`
+      );
+      return;
+    }
+    const items = (state.context.receipt as Receipt).items.map((it) => it.name);
+    const retry = 'Send another voice note or type it.';
+    const listening = await ctx.reply('Listening… this takes a few seconds.');
+    const gone = () =>
+      ctx.api.deleteMessage(listening.chat.id, listening.message_id).catch(() => undefined);
+    let result: { heard: string; lines: string };
+    try {
+      result = await voice.hear(await download(ctx.api, note.file_id), items);
+    } catch (error) {
+      // Only the stage and the error's own message: never audio or what was said
+      console.error(
+        `split voice failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`
+      );
+      await reply(`Voice is not working right now. Please type who had what.`);
+      return;
+    }
+    await gone();
+    if (!result.heard) {
+      await reply(`I heard nothing. ${retry}`);
+      return;
+    }
+    const heard = `I heard: "${result.heard.slice(0, 400)}"`;
+    const receipt = state.context.receipt as Receipt;
+    const parsed = result.lines ? parseAssignments(result.lines, receipt.items.length) : undefined;
+    if (!parsed?.ok) {
+      const why = parsed ? `: ${parsed.error}` : '';
+      await reply(`${heard}\n\nI could not turn that into an assignment${why}. ${retry}`);
+      return;
+    }
+    // A newer voice note replaces the older lines; the older button stops working
+    const old = (state.context.voice as { msg: number } | undefined)?.msg;
+    if (old !== undefined && ctx.chat) {
+      await ctx.api.editMessageReplyMarkup(ctx.chat.id, old).catch(() => undefined);
+    }
+    await reply(heard);
+    const sent = await ctx.reply(result.lines, {
+      reply_markup: new InlineKeyboard().text('Use these lines', 'split_voice:use'),
+    });
+    await ctx.reply('Tap Use these lines, or send another voice note or type the lines.');
+    await this.setState({
+      flow: 'split',
+      step: ASSIGN,
+      context: { ...state.context, voice: { lines: result.lines, msg: sent.message_id } },
+    });
+  }
+
+  /** The Use these lines tap: the lines go through the same check as a typed assignment. */
+  private async voiceUse(ctx: Context, state: ConversationState): Promise<boolean> {
+    const pending = state.context.voice as { lines: string; msg: number } | undefined;
+    if (
+      state.flow !== 'split' ||
+      state.step !== ASSIGN ||
+      !pending ||
+      ctx.callbackQuery?.message?.message_id !== pending.msg
+    ) {
+      await ctx.answerCallbackQuery({ text: 'That voice note is no longer waiting.' });
+      return true;
+    }
+    await ctx.answerCallbackQuery();
+    const answer = readAnswer('assign', pending.lines, state.context);
+    if (!answer.ok) {
+      await ctx.reply(answer.error);
+      return true;
+    }
+    if (ctx.chat)
+      await ctx.api.editMessageReplyMarkup(ctx.chat.id, pending.msg).catch(() => undefined);
+    await this.proceed(ctx, this.withAnswer(state.context, answer.patch, 'assign', undefined));
+    return true;
   }
 
   /** Show the scan for review (warnings worked out afresh) and wait for the user's choice. */
@@ -853,6 +957,7 @@ export class SplitCommandHandler {
       return true;
     }
     if (data.startsWith('split_who:')) return this.menuTap(ctx, data);
+    if (data === 'split_voice:use') return this.voiceUse(ctx, state);
     const c = state.context;
     const step = state.flow === 'split' ? state.step : 0;
     const onSummary = data === 'split_confirm' || data === 'split_cancel' || data === 'split_amend';
@@ -1117,12 +1222,13 @@ export class SplitCommandHandler {
   private async proceed(ctx: Context, c: Ctx): Promise<void> {
     const need = nextNeed(c);
     if (need.step === CONFIRM) {
-      const { amending, ...context } = c;
+      const { amending, voice, ...context } = c;
       await this.showSummary(ctx, context);
       return;
     }
-    let context = c;
-    if (need.step === PEOPLE) context = { ...c, suggested: await this.suggestPeople(ctx, c) };
+    const { voice, ...rest } = c; // any accepted answer drops the pending voice lines
+    let context: Ctx = rest;
+    if (need.step === PEOPLE) context = { ...rest, suggested: await this.suggestPeople(ctx, c) };
     await this.setState({ flow: 'split', step: need.step, context });
     await this.askStep(ctx, need.step, context, need.note);
   }
@@ -1257,7 +1363,10 @@ export class SplitCommandHandler {
       await ctx.reply(items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n'));
       await this.ask(
         ctx,
-        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back (a colon after a name is optional):\n\nAnn\n1. …\n\nAll\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you. If you are the one being paid, your share is not collected; otherwise I send you a QR for it.',
+        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back (a colon after a name is optional):\n\nAnn\n1. …\n\nAll\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you. If you are the one being paid, your share is not collected; otherwise I send you a QR for it.' +
+          (this.receipts.voice
+            ? '\n\nYou can also send a voice note: say who had which item.'
+            : ''),
         keep()
       );
     } else if (step === PAYEE_ME) {
@@ -1840,7 +1949,10 @@ export class SplitCommandHandler {
       state.step === HOW ||
       state.step === CLAIM ||
       (state.step === UNASSIGNED && state.context.assignHow === 'claim');
-    await this.fetch('/state', { ...state, idleMs: claiming ? CLAIM_IDLE_MS : IDLE_MS });
+    // Pending voice lines only make sense while the assignment is being asked
+    const { voice, ...rest } = state.context;
+    const context = state.step === ASSIGN ? state.context : rest;
+    await this.fetch('/state', { ...state, context, idleMs: claiming ? CLAIM_IDLE_MS : IDLE_MS });
   }
 
   /** Write the state only if nobody wrote since `rev` was read; the HTTP status says which. */

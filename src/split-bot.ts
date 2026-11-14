@@ -13,6 +13,7 @@ import {
   type ReceiptReader,
   WorkersAiReceiptReader,
 } from './receipt-reader';
+import { DEFAULT_VOICE_MODEL, type VoiceReader, WorkersAiVoiceReader } from './voice-reader';
 import type { ConversationDO } from './worker/conversation-do';
 
 /**
@@ -23,6 +24,8 @@ import type { ConversationDO } from './worker/conversation-do';
 export interface SplitBotDeps {
   /** Reads a receipt photo; defaults to Workers AI when the `AI` binding exists. */
   reader?: ReceiptReader;
+  /** Turns a voice note into assignment lines; defaults to Workers AI when the `AI` binding exists. */
+  voice?: VoiceReader;
   /** Downloads a Telegram file; defaults to the Bot API file endpoint. */
   download?: (api: Api, fileId: string) => Promise<Uint8Array>;
 }
@@ -51,6 +54,15 @@ export function createSplitBot(
     (env.AI
       ? new WorkersAiReceiptReader(env.AI, env.RECEIPT_MODEL ?? DEFAULT_RECEIPT_MODEL)
       : undefined);
+  const voice =
+    deps.voice ??
+    (env.AI
+      ? new WorkersAiVoiceReader(
+          env.AI,
+          env.VOICE_MODEL ?? DEFAULT_VOICE_MODEL,
+          env.RECEIPT_MODEL ?? DEFAULT_RECEIPT_MODEL
+        )
+      : undefined);
   const download =
     deps.download ?? ((api: Api, fileId: string) => downloadTelegramFile(token, api, fileId));
 
@@ -62,7 +74,7 @@ export function createSplitBot(
       stub as unknown as ConversationDO,
       directory,
       env.SPLIT_BOT_USERNAME,
-      { ...(reader ? { reader } : {}), download },
+      { ...(reader ? { reader } : {}), ...(voice ? { voice } : {}), download },
       usage
     );
   };
@@ -119,6 +131,7 @@ export function createSplitBot(
     await handler(ctx).handleText(ctx);
   });
   bot.on('message:photo', (ctx) => handler(ctx).handlePhoto(ctx));
+  bot.on('message:voice', (ctx) => handler(ctx).handleVoice(ctx));
   bot.on('edited_message:text', (ctx) => handler(ctx).handleEdit(ctx));
   return bot;
 }

@@ -488,6 +488,32 @@ export function photoUpdate(chatId: number, userId: number, fileId: string, upda
   } as unknown as Update;
 }
 
+/** A voice note (the file id stands in for the audio); private when chat and user are the same. */
+export function voiceUpdate(
+  chatId: number,
+  userId: number,
+  fileId: string,
+  opts: { duration?: number; fileSize?: number } = {},
+  updateId = 1
+): Update {
+  return {
+    update_id: updateId,
+    message: {
+      message_id: updateId,
+      date: Math.floor(Date.now() / 1000),
+      chat: { id: chatId, type: chatId === userId ? 'private' : 'group' },
+      from: { id: userId, is_bot: false, first_name: `User${userId}` },
+      voice: {
+        file_id: fileId,
+        file_unique_id: 'v',
+        duration: opts.duration ?? 8,
+        mime_type: 'audio/ogg',
+        file_size: opts.fileSize ?? 20_000,
+      },
+    },
+  } as unknown as Update;
+}
+
 /** An edit of the text of an earlier message (private chat, or a group when `chatId` differs from the user). */
 export function editedTextUpdate(
   chatId: number,
