@@ -21,4 +21,4 @@
 
 - [x] 4.1 Update the README (split bot section, `VOICE_MODEL`), `AGENTS.md` and `docs/architecture.md`, and `/help` if it lists input kinds
 - [x] 4.2 Run `npm run build`, `npm run check` and `npm test`; fix anything they report
-- [ ] 4.3 After deploy, send one real voice note to the live Split bot and record whether the lines were right
+- [x] 4.3 After deploy, send one real voice note to the live Split bot and record whether the lines were right (Done: a real voice note found the "(shared)" suffix bug, fixed in the follow-up PR; the corrected lines were checked live.)

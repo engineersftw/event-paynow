@@ -118,7 +118,7 @@ This project uses OpenSpec for change management. All changes are archived:
 52. `add-claim-admin-menu` (9 tasks) — archived 2026-11-11
 53. `add-early-claim-qr` (9 tasks) — archived 2026-11-11
 54. `add-split-landing-page` (9 tasks) — archived 2026-11-11
-55. `add-split-voice-assignment` (13 tasks, 12 done; the live voice check is open) — archived 2026-11-14
+55. `add-split-voice-assignment` (13 tasks) — archived 2026-11-14
 
 **Workflow commands:**
 
