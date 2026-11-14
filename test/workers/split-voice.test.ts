@@ -72,9 +72,9 @@ const speak = (b: B, user: number, opts?: { duration?: number; fileSize?: number
 async function toAssign(b: B, user: number) {
   await say(b, user, '/split_receipt');
   await say(b, user, '91234567');
-  await tap(b, user, 'split_payee:me');
   await b.handleUpdate(photoUpdate(user, user, 'file-1', upd++));
   await tap(b, user, 'split_scan:use');
+  await tap(b, user, 'split_skip_description');
   expect(stub.lastText()).toContain('Who had what?');
 }
 
@@ -94,17 +94,15 @@ describe('Split_PayNow_Bot voice assignment', () => {
     expect(asked(/I heard: "crab and beer are Ann, rice is mine"/)).toBe(true);
     const lines = bubble('1,3 Ann\n2 me');
     expect(JSON.stringify(lines.replyMarkup)).toContain('split_voice:use');
-    expect(asked(/short description/i)).toBe(false); // nothing applied yet
+    expect(asked(/Please check the split/)).toBe(false); // nothing applied yet
 
     await tapOn(b, u, 'split_voice:use', lines.messageId);
-    expect(asked(/short description/i)).toBe(true); // now the next question
-    await tap(b, u, 'split_skip_description');
+    expect(asked(/Please check the split/)).toBe(true); // now the next question
     const viaVoice = stub.sentMessages.findLast((m) => m.text.startsWith('Please check'))!.text;
 
     // the same lines typed in another chat give the same summary
     await toAssign(b, typed);
     await say(b, typed, '1,3 Ann\n2 me');
-    await tap(b, typed, 'split_skip_description');
     const viaText = stub.sentMessages.findLast((m) => m.text.startsWith('Please check'))!.text;
     expect(viaVoice).toBe(viaText);
   });
@@ -119,7 +117,6 @@ describe('Split_PayNow_Bot voice assignment', () => {
     await toAssign(b, u);
     await speak(b, u);
     await tapOn(b, u, 'split_voice:use', bubble(heard.lines).messageId);
-    await tap(b, u, 'split_skip_description');
     const summary = stub.sentMessages.findLast((m) => m.text.startsWith('Please check'))!.text;
     expect(summary).not.toContain('(shared)');
     expect(summary).toContain('shared by 2 people');
@@ -138,7 +135,7 @@ describe('Split_PayNow_Bot voice assignment', () => {
 
     await tapOn(b, u, 'split_voice:use', first.messageId); // stale button
     expect(stub.callbackAnswers.at(-1)).toContain('no longer waiting');
-    expect(asked(/short description/i)).toBe(false);
+    expect(asked(/Please check the split/)).toBe(false);
 
     await say(b, u, '3 Cy'); // typed text replaces the pending lines too
     await tapOn(b, u, 'split_voice:use', second.messageId);
@@ -158,7 +155,7 @@ describe('Split_PayNow_Bot voice assignment', () => {
       stub.sentMessages.some((m) => JSON.stringify(m.replyMarkup ?? '').includes('voice:use'))
     ).toBe(false);
     await say(b, u, '1,3 Ann\n2 me'); // still waiting for the assignment
-    expect(asked(/short description/i)).toBe(true);
+    expect(asked(/Please check the split/)).toBe(true);
   });
 
   it('says so when nothing was heard, nothing could be made, or the model fails', async () => {
@@ -179,7 +176,7 @@ describe('Split_PayNow_Bot voice assignment', () => {
     expect(stub.lastText()).toContain('Voice is not working right now');
 
     await say(b, u, '1,3 Ann\n2 me'); // the step is unchanged
-    expect(asked(/short description/i)).toBe(true);
+    expect(asked(/Please check the split/)).toBe(true);
   });
 
   it('refuses a long or large voice note before any download or model call', async () => {

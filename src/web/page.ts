@@ -695,14 +695,15 @@ ${cta}
 <h2>What it does</h2>
 <ul>
 <li><b>Equal split</b>: give it the total and how many people; it makes one QR for one share, rounded up to the cent.</li>
-<li><b>Custom amounts</b>: list who owes what. @mention people and it sends each of them their own QR by direct message.</li>
+<li><b>Custom amounts</b>: list who owes what. Every QR is posted in the chat with the names it is for, yours included.</li>
 <li><b>Receipt scan</b>: send a photo of the receipt. It reads the items, GST and service charge, and the charges are shared in proportion to what each person had.</li>
 <li><b>Group claiming</b>: in a group, everyone taps the items they had, and anyone can get their own QR straight away.</li>
 </ul>
 <h2>How a split goes</h2>
 <ol>
-<li>Who should be paid (a mobile number or a UEN), and whether that is you.</li>
+<li>Who should be paid (a mobile number or a UEN).</li>
 <li>The bill: type the total, or send a photo of the receipt.</li>
+<li>A short description for the QRs (a receipt gives one if you skip).</li>
 <li>How to split it: equally, with custom amounts, or by items.</li>
 <li>Check the summary and tap Confirm. The QRs are made only then.</li>
 </ol>
@@ -717,7 +718,7 @@ ${cta}
 <ul>
 <li>Nothing beyond the conversation: your answers are forgotten when the split ends, or after 10 minutes (an hour while a group is claiming items).</li>
 <li>Receipt photos are read and never stored.</li>
-<li>If you @mention someone, the bot remembers their username once they have messaged it, and keeps a waiting QR for up to 48 hours. <code>/forget</code> deletes what it remembers about you.</li>
+<li>If you message the bot privately it may remember your username. <code>/forget</code> deletes what it remembers about you.</li>
 <li>A QR never shows the payee's number. In a group, the number you type stays in the chat unless the bot may delete messages, so use a private chat if that matters.</li>
 </ul>
 <div class="end">${cta}</div>
