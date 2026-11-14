@@ -72,8 +72,6 @@ export function createSplitBot(
     const stub = env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`split-${id}`));
     return new SplitCommandHandler(
       stub as unknown as ConversationDO,
-      directory,
-      env.SPLIT_BOT_USERNAME,
       { ...(reader ? { reader } : {}), ...(voice ? { voice } : {}), download },
       usage
     );

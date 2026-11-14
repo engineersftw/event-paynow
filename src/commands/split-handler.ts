@@ -2,15 +2,11 @@ import type { Api, Context } from 'grammy';
 import { InlineKeyboard, InputFile } from 'grammy';
 import type { Message } from 'grammy/types';
 import { detectProxyType } from '../db/proxy-validation';
-import type { SplitDirectory } from '../db/split-repository';
 import {
-  SPLIT_CLAIM_CREATED,
   SPLIT_CONFIRMED,
-  SPLIT_PAYEE_OTHER,
   SPLIT_PLACE_GROUP,
   SPLIT_PLACE_PRIVATE,
   SPLIT_QR_CHAT,
-  SPLIT_QR_DM,
   SPLIT_SCAN_FAILED,
   SPLIT_SCAN_OK,
   SPLIT_TYPE_CUSTOM,
@@ -44,7 +40,7 @@ import {
   shareReceipt,
   toEntries,
 } from './receipt';
-import { countAll, directMessage, newExpiry, newToken, postWaiting } from './split-claim';
+import { countAll } from './split-claim';
 import {
   applyLeftover,
   groupByAmount,
@@ -72,7 +68,6 @@ const UNASSIGNED = 13; // items nobody was given: split evenly or the organiser 
 const ADD_ITEM = 15; // the user is adding an item the scan missed
 const HOW = 16; // group only: type who had what, or let everyone claim
 const CLAIM = 17; // the claim message is open and any member can tap items
-const PAYEE_ME = 14; // is the payee the organiser? if not, the organiser pays their own share too
 
 const MAX_DESCRIPTION = 25;
 // Each round of simultaneous taps lets one write through, so this many taps at once all fit
@@ -103,10 +98,10 @@ const STEP_OF_FIELD: Record<Field, number> = {
 
 export const SPLIT_HELP =
   'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
-  '/split - payee first (and whether it is you), then the total, equal or custom amounts and an optional description\n' +
-  '/split_custom - same, straight to custom amounts (one line per person: name and amount; @mention someone to send them their QR directly)\n' +
+  '/split - payee first, then the total, an optional description, and equal or custom amounts\n' +
+  '/split_custom - same, straight to custom amounts (one line per person: name and amount)\n' +
   '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what; you can also answer that question with a voice note.\n' +
-  'If someone else is the payee, you get a QR for your own share too.\n' +
+  'Every QR is posted in the chat, with the names it is for. You get a QR for your own share too.\n' +
   '/forget - delete what I remember about you (your username, kept when you /start me)\n' +
   '/cancel - stop\n\n' +
   'On the summary, tap Amend to change an answer, or edit the message you sent. ' +
@@ -200,8 +195,7 @@ function readAnswer(
     return payee
       ? {
           ok: true,
-          // A new payee means asking again whether it is the organiser
-          patch: { payeeType: payee.type, payeeValue: payee.normalized, payeeIsMe: undefined },
+          patch: { payeeType: payee.type, payeeValue: payee.normalized },
         }
       : {
           ok: false,
@@ -306,9 +300,10 @@ function assignmentPatchOf(
 function nextNeed(c: Ctx): { step: number; note?: string } {
   // The payee comes first: it is known before the bill, and it is the one answer that must be exact
   if (!c.payeeValue) return { step: PAYEE };
-  if (c.payeeIsMe === undefined) return { step: PAYEE_ME };
   const total = c.totalCents as number | undefined;
   if (total === undefined) return { step: c.entry === 'receipt' ? RECEIPT : TOTAL };
+  // Right after the total (a typed one, or the accepted scan), so every QR carries it, early ones too
+  if (!c.described) return { step: DESCRIPTION };
   if (!c.mode) return { step: MODE };
   if (c.mode === 'equal') {
     const people = c.people as number | undefined;
@@ -333,7 +328,6 @@ function nextNeed(c: Ctx): { step: number; note?: string } {
     }
     if (sum < total && !c.leftover) return { step: LEFTOVER };
   }
-  if (!c.described) return { step: DESCRIPTION };
   return { step: CONFIRM };
 }
 
@@ -358,29 +352,15 @@ function summary(c: Record<string, unknown>, group: boolean): string {
       (c.receipt ? (own ? 1 : 0) : r.leftoverCents > 0 && r.extraCents === 0 ? 1 : 0);
     lines.push(`Bill: ${sgd(total)} shared by ${people} people`);
     for (const e of r.entries) {
-      const direct = e.sent
-        ? ' (QR already sent)'
-        : e.username || e.userId
-          ? ' (by direct message)'
-          : '';
-      lines.push(`${e.name}: ${amountText(e)}${direct}`);
+      lines.push(`${e.name}: ${amountText(e)}${e.sent ? ' (QR already sent)' : ''}`);
     }
-    const paid = c.payeeIsMe === false; // someone else is paid, so the organiser pays too
     if (c.receipt) {
-      if (own) {
-        lines.push(
-          paid
-            ? `Your own share, which you pay the payee: ${amountText(own)} (you get a QR)`
-            : `Your own share, not collected: ${amountText(own)}`
-        );
-      }
+      if (own) lines.push(`Your own share: ${amountText(own)} (you get a QR)`);
     } else if (r.leftoverCents > 0) {
       lines.push(
         r.extraCents > 0
           ? `Leftover ${sgd(r.leftoverCents)} split evenly (${sgd(r.extraCents)} each)`
-          : paid
-            ? `Leftover ${sgd(r.leftoverCents)} is yours to pay: you get a QR`
-            : `Leftover ${sgd(r.leftoverCents)} left out: you cover it`
+          : `Leftover ${sgd(r.leftoverCents)} left out: your own share (you get a QR)`
       );
     }
     const over = c.receipt
@@ -394,9 +374,7 @@ function summary(c: Record<string, unknown>, group: boolean): string {
     const { shareCents, collectedCents, overCents } = splitEqually(total, people);
     lines.push(
       `Bill: ${sgd(total)} between ${people} people`,
-      c.payeeIsMe === false
-        ? `Each share: ${sgd(shareCents)} (all ${people} people pay the payee this)`
-        : `Each share: ${sgd(shareCents)} (everyone else pays you this)`
+      `Each share: ${sgd(shareCents)} (everyone pays this)`
     );
     if (overCents > 0) {
       lines.push(
@@ -406,6 +384,12 @@ function summary(c: Record<string, unknown>, group: boolean): string {
   }
   lines.push(`Description: ${(c.description as string | undefined) ?? 'none'}`);
   return lines.join('\n');
+}
+
+/** The receipt's merchant as a description (cut to what a QR can carry), when a receipt gave one. */
+function receiptDescription(c: Ctx): string | undefined {
+  const merchant = (c.receipt as Receipt | undefined)?.merchant;
+  return merchant ? truncateAnsi(merchant, MAX_DESCRIPTION) || undefined : undefined;
 }
 
 /** The review's buttons; adding a missing item is offered only when the numbers show a gap. */
@@ -674,11 +658,8 @@ function applyClaim(c: Ctx, item: number, op: ClaimOp): ClaimResult {
  * it can answer (the DO records the owner). Nothing is persisted beyond the conversation.
  */
 export class SplitCommandHandler {
-  /** `directory` and `botUsername` are needed for mentions; plain splits work without them. */
   constructor(
     private readonly conversationDO: ConversationDO,
-    private readonly directory?: SplitDirectory,
-    private readonly botUsername?: string,
     /** `reader` turns a photo into receipt data; `download` fetches a Telegram file's bytes. */
     private readonly receipts: {
       reader?: ReceiptReader;
@@ -991,41 +972,39 @@ export class SplitCommandHandler {
     const step = state.flow === 'split' ? state.step : 0;
     const onSummary = data === 'split_confirm' || data === 'split_cancel' || data === 'split_amend';
     const onMenu = data.startsWith('split_pick:') || data === 'split_back';
-    const expected = data.startsWith('split_payee:')
-      ? PAYEE_ME
-      : data.startsWith('split_how:')
-        ? HOW
-        : data === 'split_claim:done'
-          ? CLAIM
-          : data === 'split_claim:keep' || data.startsWith('split_unassigned:')
-            ? UNASSIGNED
-            : data.startsWith('split_scan:')
-              ? data === 'split_scan:add'
-                ? step === REVIEW
-                  ? REVIEW
+    const expected = data.startsWith('split_how:')
+      ? HOW
+      : data === 'split_claim:done'
+        ? CLAIM
+        : data === 'split_claim:keep' || data.startsWith('split_unassigned:')
+          ? UNASSIGNED
+          : data.startsWith('split_scan:')
+            ? data === 'split_scan:add'
+              ? step === REVIEW
+                ? REVIEW
+                : -1
+              : data === 'split_scan:oneline' || data === 'split_scan:back'
+                ? step === ADD_ITEM
+                  ? ADD_ITEM
                   : -1
-                : data === 'split_scan:oneline' || data === 'split_scan:back'
-                  ? step === ADD_ITEM
-                    ? ADD_ITEM
-                    : -1
-                  : step === RECEIPT || step === REVIEW
-                    ? step
-                    : -1
-              : data.startsWith('split_mode:')
-                ? MODE
-                : data.startsWith('split_people:')
-                  ? PEOPLE
-                  : data.startsWith('split_leftover:')
-                    ? LEFTOVER
-                    : data === 'split_skip_description'
-                      ? DESCRIPTION
-                      : onSummary
-                        ? CONFIRM
-                        : onMenu
-                          ? AMEND
-                          : data === 'split_keep' && c.amending
-                            ? step
-                            : -1;
+                : step === RECEIPT || step === REVIEW
+                  ? step
+                  : -1
+            : data.startsWith('split_mode:')
+              ? MODE
+              : data.startsWith('split_people:')
+                ? PEOPLE
+                : data.startsWith('split_leftover:')
+                  ? LEFTOVER
+                  : data === 'split_skip_description'
+                    ? DESCRIPTION
+                    : onSummary
+                      ? CONFIRM
+                      : onMenu
+                        ? AMEND
+                        : data === 'split_keep' && c.amending
+                          ? step
+                          : -1;
     // Summary and menu buttons only count on the latest summary message
     const onLatest =
       !(onSummary || onMenu) ||
@@ -1094,12 +1073,6 @@ export class SplitCommandHandler {
       const { partial, gap, unassignedChoice, shareItems, ...rest } = c;
       await this.setState({ flow: 'split', step: CLAIM, context: rest });
       await this.askStep(ctx, CLAIM, rest);
-    } else if (data.startsWith('split_payee:')) {
-      const mine = data.endsWith(':me');
-      await ctx
-        .editMessageText(mine ? 'Payment was made by you.' : 'Payment was made by someone else.')
-        .catch(() => undefined);
-      await this.proceed(ctx, { ...c, payeeIsMe: mine });
     } else if (data.startsWith('split_unassigned:')) {
       const choice = data.endsWith(':even') ? 'even' : 'me';
       const partial = c.partial as AssignedOk;
@@ -1208,8 +1181,14 @@ export class SplitCommandHandler {
       // Only the number we offered (a stale or odd tap changes nothing)
       if (n === c.suggested) await this.proceed(ctx, { ...c, people: n });
     } else if (data === 'split_skip_description') {
+      // Skipping takes the receipt's merchant when there is one, otherwise no description
       const { description, ...rest } = c;
-      await this.proceed(ctx, { ...rest, described: true });
+      const fallback = receiptDescription(c);
+      await this.proceed(ctx, {
+        ...rest,
+        ...(fallback ? { description: fallback } : {}),
+        described: true,
+      });
     } else if (data === 'split_keep') {
       const { amending, ...rest } = c;
       await this.proceed(ctx, rest);
@@ -1399,27 +1378,20 @@ export class SplitCommandHandler {
       await ctx.reply(items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n'));
       await this.ask(
         ctx,
-        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back (a colon after a name is optional):\n\nAnn\n1. …\n\nAll\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you. If you are the one being paid, your share is not collected; otherwise I send you a QR for it.' +
+        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back (a colon after a name is optional):\n\nAnn\n1. …\n\nAll\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you, and your share gets a QR too.' +
           (this.receipts.voice
             ? '\n\nYou can also send a voice note: say who had which item.'
             : ''),
         keep()
-      );
-    } else if (step === PAYEE_ME) {
-      await ctx.reply(
-        'Is this payee you?\n\nIf someone else paid the bill, you owe a share too and I will send you your own QR.',
-        {
-          reply_markup: new InlineKeyboard()
-            .text("Yes, it's me", 'split_payee:me')
-            .text('No, someone else', 'split_payee:other'),
-        }
       );
     } else if (step === PAYEE) {
       await this.ask(ctx, 'Who should be paid? Send a Singapore mobile number or a UEN.', keep());
     } else if (step === DESCRIPTION) {
       await this.ask(
         ctx,
-        `Add a short description (up to ${MAX_DESCRIPTION} characters), or tap Skip.`,
+        `Add a short description (up to ${MAX_DESCRIPTION} characters), or tap Skip${
+          receiptDescription(c) ? ` to use "${receiptDescription(c)}"` : ''
+        }.`,
         keep(new InlineKeyboard().text('Skip', 'split_skip_description'))
       );
     } else {
@@ -1483,7 +1455,6 @@ export class SplitCommandHandler {
       SPLIT_CONFIRMED,
       c.receipt ? SPLIT_TYPE_RECEIPT : c.entries ? SPLIT_TYPE_CUSTOM : SPLIT_TYPE_EQUAL,
       ctx.chat?.type === 'private' ? SPLIT_PLACE_PRIVATE : SPLIT_PLACE_GROUP,
-      ...(c.payeeIsMe === false ? [SPLIT_PAYEE_OTHER] : []),
     ]);
     const description = c.description as string | undefined;
     const caution = 'Scan with your banking app. Check the payee name before you pay.';
@@ -1502,21 +1473,13 @@ export class SplitCommandHandler {
         ...(description ? { description } : {}),
       });
 
-    // Mentioned people get their own QR by direct message (or a button to collect it);
-    // everyone else is served by the shared chat QRs below
-    const isMentioned = (e: SplitEntry) =>
-      this.directory !== undefined && (e.username !== undefined || e.userId !== undefined);
-    // People who took their QR early already have it: they are not sent another
+    // Everyone's QR goes in the chat, one per distinct amount with the names that owe it. People
+    // who took their QR early already have it; the organiser's own share is one more payer.
+    const payers = (final ?? []).filter((e) => !e.sent);
     const already = (final ?? []).filter((e) => e.sent);
-    const mentioned = (final ?? []).filter((e) => isMentioned(e) && !e.sent);
-
-    // Someone else is paid, so the organiser's own amount (their items, or the remainder left
-    // out) is theirs to pay: they get a QR for it like everybody else
-    let ownJob: { cents: number; lines: string[] } | undefined;
     const selfId = ctx.from?.id;
     if (
       listed &&
-      c.payeeIsMe === false &&
       c.leftover !== 'even' &&
       selfId !== undefined &&
       servedOf(c)[String(selfId)] === undefined
@@ -1524,17 +1487,8 @@ export class SplitCommandHandler {
       const own = c.receipt
         ? ((c.own as OwnShare | undefined)?.cents ?? 0)
         : applyLeftover(listed, total, 'omit').leftoverCents;
-      if (own > 0) {
-        if (this.directory) {
-          const first = ctx.from?.first_name || 'You';
-          mentioned.push({ name: first, cents: own, userId: selfId });
-        } else {
-          ownJob = { cents: own, lines: [sgd(own), 'Your share'] };
-        }
-      }
-    }
-    if (mentioned.length > 0) {
-      await this.deliverMentioned(ctx, mentioned, description, payloadFor, selfId);
+      const name = (c.organiserName as string | undefined) ?? ctx.from?.first_name ?? 'You';
+      if (own > 0) payers.push({ name, cents: own });
     }
     if (already.length > 0) {
       await ctx.reply(`Already sent their QR: ${already.map((e) => e.name).join(', ')}.`);
@@ -1542,13 +1496,10 @@ export class SplitCommandHandler {
 
     // One QR per distinct amount (an equal split has exactly one)
     const jobs = final
-      ? [
-          ...groupByAmount(final.filter((e) => !isMentioned(e) && !e.sent)).map((g) => ({
-            cents: g.cents,
-            lines: [sgd(g.cents), g.names.join(', ')],
-          })),
-          ...(ownJob ? [ownJob] : []),
-        ]
+      ? groupByAmount(payers).map((g) => ({
+          cents: g.cents,
+          lines: [sgd(g.cents), g.names.join(', ')],
+        }))
       : (() => {
           const people = c.people as number;
           const share = splitEqually(total, people).shareCents;
@@ -1574,63 +1525,6 @@ export class SplitCommandHandler {
           : `Sent ${sent} of ${jobs.length} QRs; the other ${jobs.length - sent} could not be sent. Please send /split to try again.`
       );
     }
-  }
-
-  /**
-   * Send each mentioned person their QR by direct message. Anyone unknown to the bot, or who
-   * refuses the message, is put on one waiting message with a Get my QR button instead.
-   */
-  private async deliverMentioned(
-    ctx: Context,
-    people: SplitEntry[],
-    description: string | undefined,
-    payloadFor: (cents: number) => string,
-    selfId?: number
-  ): Promise<void> {
-    const directory = this.directory!;
-    const organiser = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ');
-    const known = await directory.findContacts(
-      people.filter((p) => p.userId === undefined).map((p) => p.username as string)
-    );
-    const sentTo: string[] = [];
-    const waiting: Parameters<typeof postWaiting>[2] = [];
-    for (const p of people) {
-      const id = p.userId ?? known.get(p.username as string);
-      const payload = payloadFor(p.cents);
-      // The organiser's own QR says "Your share"; an empty organiser name marks it in a claim
-      const own = selfId !== undefined && p.userId === selfId;
-      const dm = directMessage(own ? '' : organiser, p.cents, description ?? null);
-      try {
-        if (id === undefined) throw new Error('unknown');
-        const image = await renderQrPng(payload, dm.lines);
-        await ctx.api.sendPhoto(id, new InputFile(image, 'paynow-qr.bmp'), {
-          caption: dm.caption,
-        });
-        sentTo.push(own ? 'you' : p.name);
-        await countAll(this.counter, [SPLIT_QR_DM]);
-      } catch {
-        // Not started the bot, blocked it, or rate limited: they collect it with a button
-        waiting.push({
-          token: newToken(),
-          username: p.username ?? null,
-          userId: p.userId ?? null,
-          name: p.name,
-          amountCents: p.cents,
-          description: description ?? null,
-          payload,
-          organiser: own ? '' : organiser,
-          chatId: ctx.chat!.id,
-          expiresAt: newExpiry(),
-        });
-      }
-    }
-    if (sentTo.length > 0)
-      await ctx.reply(`Sent their QR by direct message: ${sentTo.join(', ')}.`);
-    await postWaiting(ctx, directory, waiting, this.botUsername);
-    await countAll(
-      this.counter,
-      waiting.map(() => SPLIT_CLAIM_CREATED)
-    );
   }
 
   /**
@@ -1732,7 +1626,7 @@ export class SplitCommandHandler {
 
   /**
    * A member taps Get my QR: fix their amount (and lock their items) in one conditional write, then
-   * send them the QR by direct message, or hand them a start link when the bot cannot message them.
+   * post their QR in the chat, with their name and the split's description.
    */
   private async qrTap(ctx: Context): Promise<boolean> {
     const from = ctx.from;
@@ -1740,13 +1634,10 @@ export class SplitCommandHandler {
     const r = await this.mutateClaims(
       ctx,
       (c) => c.claimMsg as number | undefined,
-      (c, state) => {
+      (c) => {
         const served = servedOf(c);
         if (served[String(from.id)] !== undefined) {
-          return { refuse: 'You already took your QR: check your direct messages.' };
-        }
-        if (state.owner?.userId === from.id && c.payeeIsMe === true) {
-          return { refuse: 'You are the payee, so your own share is not collected.' };
+          return { refuse: 'You already took your QR: it is in the chat.' };
         }
         const mine = Object.values(claimsOf(c)).some((ids) => ids.includes(from.id));
         if (!mine) return { refuse: 'Claim an item first.' };
@@ -1775,36 +1666,31 @@ export class SplitCommandHandler {
       const cents = servedOf(r.context)[String(from.id)]!;
       const sent = await this.deliverEarly(ctx, from, cents, r.context);
       if (sent === 'failed') {
-        // Nothing could be delivered: give the member their items back
+        // Nothing could be posted: give the member their items back
         await this.mutateClaims(ctx, null, (c) => {
           const { [String(from.id)]: _gone, ...rest } = servedOf(c);
           return { context: { ...c, served: rest }, note: '' };
         });
         await ctx.answerCallbackQuery({
-          text: 'I could not send the QR. Start a chat with me and tap again.',
+          text: 'I could not post the QR. Please tap again.',
           show_alert: true,
         });
-      } else if (sent === 'dm') {
-        await ctx.answerCallbackQuery({ text: 'Your QR is in your direct messages.' });
       } else {
-        await ctx.answerCallbackQuery({ text: 'Open the chat to get your QR.', url: sent.url });
+        await ctx.answerCallbackQuery({ text: 'Your QR is posted in the chat.' });
       }
       await this.refreshClaims(ctx, r.context);
     }
     return true;
   }
 
-  /** The QR for a member who took it early: by direct message, else a start link. */
+  /** The QR for a member who took it early, posted in the chat with their name and the description. */
   private async deliverEarly(
     ctx: Context,
-    from: { id: number; first_name: string; username?: string },
+    from: { id: number; first_name: string },
     cents: number,
     c: Ctx
-  ): Promise<'dm' | 'failed' | { url: string }> {
-    const receipt = c.receipt as Receipt;
-    const description = receipt.merchant
-      ? truncateAnsi(receipt.merchant, MAX_DESCRIPTION)
-      : undefined;
+  ): Promise<'posted' | 'failed'> {
+    const description = c.description as string | undefined;
     const payload = buildPayNowPayload({
       proxyType: c.payeeType as 'mobile' | 'uen',
       proxyValue: c.payeeValue as string,
@@ -1812,43 +1698,20 @@ export class SplitCommandHandler {
       editable: false,
       ...(description ? { description } : {}),
     });
-    const own = c.organiserId === from.id;
-    const organiser = own ? '' : ((c.organiserName as string | undefined) ?? '');
-    const dm = directMessage(organiser, cents, description ?? null);
+    const name = claimersOf(c).find((x) => x.id === from.id)?.name ?? from.first_name;
+    const lines = [...(description ? [description] : []), sgd(cents), name];
     try {
-      const image = await renderQrPng(payload, dm.lines);
-      await ctx.api.sendPhoto(from.id, new InputFile(image, 'paynow-qr.bmp'), {
-        caption: dm.caption,
+      const image = await renderQrPng(payload, lines);
+      await ctx.replyWithPhoto(new InputFile(image, 'paynow-qr.bmp'), {
+        caption: `${lines.join('\n')}\n\nScan with your banking app. Check the payee name before you pay.`,
       });
-      await countAll(this.counter, [SPLIT_QR_DM]);
-      return 'dm';
-    } catch {
-      // Not started the bot, blocked it, or rate limited: a start link collects it
-    }
-    if (!this.directory || !this.botUsername || !ctx.chat) return 'failed';
-    try {
-      const token = newToken();
-      const name = claimersOf(c).find((x) => x.id === from.id)?.name ?? from.first_name;
-      await this.directory.createClaim({
-        token,
-        username: from.username?.toLowerCase() ?? null,
-        userId: from.id,
-        name,
-        amountCents: cents,
-        description: description ?? null,
-        payload,
-        organiser,
-        chatId: ctx.chat.id,
-        expiresAt: newExpiry(),
-      });
-      await countAll(this.counter, [SPLIT_CLAIM_CREATED]);
-      return { url: `https://t.me/${this.botUsername}?start=claim_${token}` };
+      await countAll(this.counter, [SPLIT_QR_CHAT]);
+      return 'posted';
     } catch {
       return 'failed';
     }
   }
 
-  /** Post the organiser's menu for an item, replacing any earlier one. */
   private async openMenu(ctx: Context, item: number, before: Ctx): Promise<boolean> {
     const organiserId = ctx.from!.id;
     const old = before.menu as Menu | undefined;

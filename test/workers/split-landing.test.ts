@@ -53,10 +53,13 @@ describe('GET /split', () => {
       '<code>/split_receipt</code>',
       'Receipt photos are read and never stored',
       '<code>/forget</code>',
-      'whether that is you',
+      'Every QR is posted in the chat',
+      'A short description for the QRs',
     ]) {
       expect(html).toContain(text);
     }
+    expect(html).not.toContain('whether that is you');
+    expect(html).not.toContain('by direct message');
   });
 
   it('has its own preview tags, image and site name', async () => {
