@@ -473,11 +473,37 @@ export function resolveTyped(
   return { ok: true, people };
 }
 
+const gcd = (a: bigint, b: bigint): bigint => (b === 0n ? a : gcd(b, a % b));
+
 /**
- * One member's amount now, from the claims so far: their items (each item split equally between
- * its holders, odd cents to the first; an item shared N ways costs the holder one share) plus
- * their share of what the receipt total adds on top of the items, in proportion to the receipt's
- * total of all items and rounded down, so it does not depend on what anyone else claims.
+ * Someone's exact share of the receipt total: each of their items is `cents / n` (n people hold
+ * it), and all items together are scaled by receipt total / items, so the service charge, GST,
+ * rounding and any discount are shared in proportion. Rounded UP to a whole cent, so nobody pays
+ * less than their share and the payee may collect a few cents more than the bill. `exact` is the
+ * unrounded amount in dollars (cut to three decimals), only when rounding changed it.
+ */
+function exactShare(
+  parts: Array<{ cents: number; n: number }>,
+  totalCents: number,
+  itemsTotal: number
+): { cents: number; exact?: string } {
+  if (itemsTotal <= 0 || parts.length === 0) return { cents: 0 };
+  let den = 1n;
+  for (const { n } of parts) den = (den / gcd(den, BigInt(n))) * BigInt(n);
+  const items = parts.reduce((t, { cents, n }) => t + BigInt(cents) * (den / BigInt(n)), 0n);
+  const top = items * BigInt(totalCents); // cents * den * itemsTotal
+  const bottom = den * BigInt(itemsTotal);
+  const cents = Number((top + bottom - 1n) / bottom);
+  if (top % bottom === 0n) return { cents };
+  // Dollars, cut (not rounded) to three decimals, so the note never reads as the cent it went up to
+  const t = (top * 1000n) / (100n * bottom);
+  return { cents, exact: `${t / 1000n}.${(t % 1000n).toString().padStart(3, '0')}` };
+}
+
+/**
+ * One member's amount now, from the claims so far: each item they hold split equally between its
+ * holders (an item shared N ways costs the holder one share), shared out as `exactShare` does. It
+ * uses the receipt's total of all items, so it does not depend on what anyone else claims.
  */
 export function memberAmount(
   items: ReceiptItem[],
@@ -485,24 +511,24 @@ export function memberAmount(
   ways: Record<string, number>,
   memberId: number,
   totalCents: number
-): { itemsCents: number; extrasCents: number; cents: number } {
+): { cents: number; exact?: string } {
   const { lines, first } = expandShares(items, ways);
-  let itemsCents = 0;
+  const parts: Array<{ cents: number; n: number }> = [];
   items.forEach((item, i) => {
     const holders = claims[String(i)] ?? [];
     const k = holders.indexOf(memberId);
     if (k < 0) return;
-    if (ways[String(i)]) {
-      itemsCents += lines[first[i]! + k]?.cents ?? 0;
-    } else {
-      const base = Math.floor(item.cents / holders.length);
-      itemsCents += base + (k < item.cents - base * holders.length ? 1 : 0);
-    }
+    parts.push(
+      ways[String(i)]
+        ? { cents: lines[first[i]! + k]?.cents ?? 0, n: 1 }
+        : { cents: item.cents, n: holders.length }
+    );
   });
-  const allItems = items.reduce((t, it) => t + it.cents, 0);
-  const extrasCents =
-    allItems === 0 ? 0 : Math.floor(((totalCents - allItems) * itemsCents) / allItems);
-  return { itemsCents, extrasCents, cents: itemsCents + extrasCents };
+  return exactShare(
+    parts,
+    totalCents,
+    items.reduce((t, it) => t + it.cents, 0)
+  );
 }
 
 /**
@@ -531,52 +557,36 @@ export function applyUnassigned(
 
 export interface PersonShare {
   person: Person;
-  itemsCents: number;
-  extrasCents: number;
   cents: number;
+  /** The unrounded amount in dollars, when rounding up changed it. */
+  exact?: string;
 }
 
 /**
- * Each item is split equally between its people (odd cents to the first listed); whatever the
- * receipt total adds on top of the items (service charge, GST, rounding, minus any discount) is
- * shared in proportion to each person's items, by largest remainder, so every amount, the
- * organiser's included, adds up exactly to the receipt total.
+ * Each person pays their `exactShare` of the receipt total, rounded up to the cent. The shares can
+ * add up to a few cents more than the total; `extrasCents` is what the receipt adds on top of the
+ * items (service charge, GST, rounding, minus any discount).
  */
 export function shareReceipt(
   items: ReceiptItem[],
   assignment: AssignedOk,
-  totalCents: number,
-  locked: ReadonlySet<number> = new Set()
+  totalCents: number
 ): { shares: PersonShare[]; extrasCents: number } {
   const { people } = assignment;
-  const sub = people.map(() => 0);
+  const parts = people.map(() => [] as Array<{ cents: number; n: number }>);
+  let itemsTotal = 0;
   items.forEach((item, i) => {
     const sharers = assignment.items[i]!;
-    const base = Math.floor(item.cents / sharers.length);
-    const odd = item.cents - base * sharers.length;
-    sharers.forEach((p, j) => {
-      sub[p]! += base + (j < odd ? 1 : 0);
-    });
+    if (sharers.length === 0) return;
+    itemsTotal += item.cents;
+    for (const p of sharers) parts[p]!.push({ cents: item.cents, n: sharers.length });
   });
-  const itemsTotal = sub.reduce((s, c) => s + c, 0);
-  const extras = totalCents - itemsTotal;
-  const floors = sub.map((c) => Math.floor((extras * c) / itemsTotal));
-  const rems = sub.map((c, i) => extras * c - floors[i]! * itemsTotal);
-  let left = extras - floors.reduce((s, c) => s + c, 0);
-  // Someone whose amount is fixed (they already hold a QR) gets the floor only; the cents the
-  // rounding leaves over go to the others, and to the organiser's own remainder when nobody is left
-  const order = people
-    .map((_, i) => i)
-    .filter((i) => !locked.has(i))
-    .sort((a, b) => rems[b]! - rems[a]! || a - b);
-  const bonus = people.map(() => 0);
-  for (let k = 0; left > 0 && order.length > 0; k++, left--) bonus[order[k % order.length]!]!++;
   return {
-    extrasCents: extras,
-    shares: people.map((person, i) => {
-      const extrasCents = floors[i]! + bonus[i]!;
-      return { person, itemsCents: sub[i]!, extrasCents, cents: sub[i]! + extrasCents };
-    }),
+    extrasCents: totalCents - itemsTotal,
+    shares: people.map((person, i) => ({
+      person,
+      ...exactShare(parts[i]!, totalCents, itemsTotal),
+    })),
   };
 }
 
@@ -592,6 +602,7 @@ export function toEntries(
           {
             name: s.person.name,
             cents: s.cents,
+            ...(s.exact !== undefined ? { exact: s.exact } : {}),
             ...(s.person.username !== undefined ? { username: s.person.username } : {}),
             ...(s.person.userId !== undefined ? { userId: s.person.userId } : {}),
             // Already sent their QR when they took it early

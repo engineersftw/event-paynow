@@ -23,6 +23,8 @@ export function splitEqually(totalCents: number, people: number) {
 export interface SplitEntry {
   name: string;
   cents: number;
+  /** The unrounded amount in dollars (e.g. "26.976") when a receipt share was rounded up to the cent. */
+  exact?: string;
   /** Lowercase Telegram username (no @) when the person was mentioned as @username. */
   username?: string;
   /** Telegram user id when the person was picked from the member list (a text mention). */
