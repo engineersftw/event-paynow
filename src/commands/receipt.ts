@@ -231,10 +231,12 @@ export function parseAssignments(
     }
     return who;
   };
+  // A trailing note in brackets ("Bob (shared)", "all (shared by everyone named)", as the prompt
+  // shows it) is not part of the name
   const splitNames = (s: string) =>
     s
       .split(',')
-      .map((x) => x.trim())
+      .map((x) => x.replace(/\s*\([^)]*\)$/, '').trim())
       .filter(Boolean);
 
   // Header format: a line naming people, then item lines ("1. Pizza SGD 18.80") copied from the list

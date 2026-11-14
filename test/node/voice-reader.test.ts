@@ -3,8 +3,8 @@ import { cleanLines, VoiceReaderError, WorkersAiVoiceReader } from '../../src/vo
 
 describe('cleanLines', () => {
   it('keeps only the lines that start with an item number', () => {
-    expect(cleanLines('Here you go:\n```\n1,3 Ann\n2 Ann, Bob (shared)\n```\nHope it helps')).toBe(
-      '1,3 Ann\n2 Ann, Bob (shared)'
+    expect(cleanLines('Here you go:\n```\n1,3 Ann\n2 Ann, Bob\n```\nHope it helps')).toBe(
+      '1,3 Ann\n2 Ann, Bob'
     );
   });
 

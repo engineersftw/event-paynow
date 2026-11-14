@@ -1261,7 +1261,7 @@ While the bot waits for the assignment of a scanned receipt's items, a voice not
 #### Scenario: Spoken assignment
 
 - **WHEN** the receipt has items 1 Pizza, 2 Beer, 3 Salad and the organiser sends a voice note saying "the pizza and the salad were Ann's, the beer was shared by Ann and Bob"
-- **THEN** the bot replies with what it heard and the lines `1,3 Ann` and `2 Ann, Bob (shared)` in their own message with a **Use these lines** button, and the assignment is still waiting
+- **THEN** the bot replies with what it heard and the lines `1,3 Ann` and `2 Ann, Bob` in their own message with a **Use these lines** button, and the assignment is still waiting
 
 #### Scenario: Confirming
 

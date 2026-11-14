@@ -90,6 +90,20 @@ describe('parseAssignments', () => {
     expect(a.people[2]!.isMe).toBe(true);
     expect(a.items).toEqual([[0], [0, 1], [0], [2], [0, 1, 2], [0, 1, 2]]);
   });
+  it('ignores a trailing note in brackets, as the prompt shows it', () => {
+    const a = assign(
+      '1,3 Dylan, Ash, me\n2 Dylan, me (shared)\n4 all (shared by everyone named)',
+      4
+    );
+    expect(a.people.map((p) => p.name)).toEqual(['Dylan', 'Ash', 'me']);
+    expect(a.items).toEqual([
+      [0, 1, 2],
+      [0, 2],
+      [0, 1, 2],
+      [0, 1, 2],
+    ]);
+    expect(assign('Sam (paid)\n1. Pizza', 1).people.map((p) => p.name)).toEqual(['Sam']);
+  });
   it('reads mentions and keeps identities', () => {
     const a = assign('1 @Ann_Lee\n2 Zed Q', 2, new Map([['Zed Q', 77]]));
     expect(a.people[0]).toMatchObject({ name: '@Ann_Lee', username: 'ann_lee' });

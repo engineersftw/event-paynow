@@ -109,6 +109,22 @@ describe('Split_PayNow_Bot voice assignment', () => {
     expect(viaVoice).toBe(viaText);
   });
 
+  it('counts "me (shared)" as the organiser, not as another person', async () => {
+    const b = makeBot();
+    const u = uid++;
+    heard = {
+      heard: 'crab and rice are Dylan and me',
+      lines: '1,3 Dylan, me\n2 Dylan, me (shared)',
+    };
+    await toAssign(b, u);
+    await speak(b, u);
+    await tapOn(b, u, 'split_voice:use', bubble(heard.lines).messageId);
+    await tap(b, u, 'split_skip_description');
+    const summary = stub.sentMessages.findLast((m) => m.text.startsWith('Please check'))!.text;
+    expect(summary).not.toContain('(shared)');
+    expect(summary).toContain('shared by 2 people');
+  });
+
   it('drops the old lines when a newer voice note or typed text comes', async () => {
     const b = makeBot();
     const u = uid++;
