@@ -212,37 +212,26 @@ export class ConversationDO {
   }
 
   /**
-   * Get current conversation state.
+   * Get current conversation state. Reading an active conversation counts as activity (it
+   * refreshes `lastActivity` and the expiry alarm); a chat with no conversation is only read:
+   * nothing is stored and no alarm is set. Corrupted data is the one case that writes, to reset it.
    */
   private async getState(): Promise<Response> {
-    const storedValue = await this.state.storage.get<string>('conversation');
+    const stored = await this.state.storage.get<string>('conversation');
+    let state = stored ? this.serializer.deserialize(stored) : null;
 
-    let state: ConversationState;
-
-    if (!storedValue) {
-      // No state exists - create initial state
+    if (stored && !state) {
+      console.warn('Corrupted state detected, resetting to initial');
       state = this.serializer.initialState();
       await this.saveState(state);
-    } else {
-      // storedValue is already the actual object, not a JSON string
-      const deserialized = this.serializer.deserialize(storedValue);
-
-      if (!deserialized) {
-        // Corrupted state - reset to initial
-        console.warn('Corrupted state detected, resetting to initial');
-        state = this.serializer.initialState();
-        await this.saveState(state);
-      } else {
-        state = deserialized;
-      }
     }
+    state ??= this.serializer.initialState();
 
-    // Update last activity
-    state.lastActivity = new Date().toISOString();
-    await this.saveState(state);
-
-    // Schedule alarm for idle expiry
-    await this.scheduleAlarm(state.idleMs);
+    if (state.flow !== 'idle') {
+      state.lastActivity = new Date().toISOString();
+      await this.saveState(state);
+      await this.scheduleAlarm(state.idleMs);
+    }
 
     return new Response(JSON.stringify(state), {
       headers: { 'Content-Type': 'application/json' },

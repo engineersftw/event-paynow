@@ -79,6 +79,30 @@ describe('ConversationDO', () => {
       expect(state.lastActivity).toBeDefined();
     });
 
+    it('reading a chat with no conversation stores nothing and sets no alarm', async () => {
+      const response = await conversationDO.fetch(
+        new Request('http://localhost/state', { method: 'GET' })
+      );
+      expect((await response.json()).flow).toBe('idle');
+      expect(await conversationDO.state.storage.get('conversation')).toBeUndefined();
+      expect(await conversationDO.state.storage.getAlarm()).toBeNull();
+    });
+
+    it('reading an active conversation refreshes its activity and expiry', async () => {
+      const old = '2024-01-01T00:00:00Z';
+      await conversationDO.state.storage.put(
+        'conversation',
+        JSON.stringify({ flow: 'init', step: 1, context: {}, lastActivity: old })
+      );
+      const response = await conversationDO.fetch(
+        new Request('http://localhost/state', { method: 'GET' })
+      );
+      expect((await response.json()).lastActivity).not.toBe(old);
+      const stored = JSON.parse((await conversationDO.state.storage.get<string>('conversation'))!);
+      expect(stored.lastActivity).not.toBe(old);
+      expect(await conversationDO.state.storage.getAlarm()).not.toBeNull();
+    });
+
     it('should return existing state if already created', async () => {
       // Create initial state
       const request1 = new Request('http://localhost/state', { method: 'GET' });
@@ -249,8 +273,16 @@ describe('ConversationDO', () => {
 
   describe('alarm handling', () => {
     it('should schedule alarm after state access', async () => {
-      const request = new Request('http://localhost/state', { method: 'GET' });
-      await conversationDO.fetch(request);
+      await conversationDO.state.storage.put(
+        'conversation',
+        JSON.stringify({
+          flow: 'start',
+          step: 2,
+          context: {},
+          lastActivity: '2024-01-01T00:00:00Z',
+        })
+      );
+      await conversationDO.fetch(new Request('http://localhost/state', { method: 'GET' }));
 
       const alarm = await conversationDO.state.storage.getAlarm();
       expect(alarm).not.toBeNull();
