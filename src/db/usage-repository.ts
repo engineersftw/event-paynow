@@ -15,13 +15,9 @@ export const SPLIT_TYPE_CUSTOM = 'split_type_custom';
 export const SPLIT_TYPE_RECEIPT = 'split_type_receipt';
 export const SPLIT_PLACE_PRIVATE = 'split_place_private';
 export const SPLIT_PLACE_GROUP = 'split_place_group';
-export const SPLIT_PAYEE_OTHER = 'split_payee_other';
 export const SPLIT_QR_CHAT = 'split_qr_chat';
-export const SPLIT_QR_DM = 'split_qr_dm';
 export const SPLIT_SCAN_OK = 'split_scan_ok';
 export const SPLIT_SCAN_FAILED = 'split_scan_failed';
-export const SPLIT_CLAIM_CREATED = 'split_claim_created';
-export const SPLIT_CLAIM_COLLECTED = 'split_claim_collected';
 
 /** Counts one occurrence of a metric on a day. */
 export interface UsageCounter {
@@ -64,15 +60,25 @@ export interface SplitUsageSnapshot {
   confirmed: { total: number; last7: number; last30: number };
   types: { equal: number; custom: number; receipt: number };
   places: { private: number; group: number };
-  payeeOther: number;
-  qrs: { chat: number; dm: number };
+  qrs: { chat: number };
   scans: { ok: number; failed: number };
-  claims: { created: number; collected: number; waiting: number };
-  contacts: number;
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SGT_OFFSET_MS = 8 * 60 * 60 * 1000;
+
+/** Add one to each metric for today. Best effort: counting must never affect the user, and logs nothing. */
+export async function countAll(counter: UsageCounter | undefined, metrics: string[]) {
+  if (!counter) return;
+  const day = sgDay();
+  for (const metric of metrics) {
+    try {
+      await counter.increment(metric, day);
+    } catch {
+      // swallowed on purpose
+    }
+  }
+}
 
 /** The Singapore calendar day (YYYY-MM-DD) of an instant. */
 export function sgDay(at: Date = new Date()): string {
@@ -93,28 +99,21 @@ export class D1UsageRepository implements UsageCounter {
       .run();
   }
 
-  /** Split_PayNow_Bot's figures: the counters, and how many contacts and unexpired waiting QRs exist now. */
+  /** Split_PayNow_Bot's figures, all from the anonymous daily counters. */
   async splitSnapshot(now: Date = new Date()): Promise<SplitUsageSnapshot> {
     const day7 = sgDay(new Date(now.getTime() - 6 * DAY_MS)); // today and the 6 days before
     const day30 = sgDay(new Date(now.getTime() - 29 * DAY_MS));
-    const [counters, live] = await this.d1.batch([
-      this.d1
-        .prepare(
-          `SELECT metric,
-                  SUM(count) AS total,
-                  COALESCE(SUM(CASE WHEN day >= ?1 THEN count END), 0) AS last7,
-                  COALESCE(SUM(CASE WHEN day >= ?2 THEN count END), 0) AS last30
-           FROM usage_counters WHERE substr(metric, 1, 6) = 'split_' GROUP BY metric`
-        )
-        .bind(day7, day30),
-      this.d1
-        .prepare(
-          `SELECT (SELECT COUNT(*) FROM split_contacts) AS contacts,
-                  (SELECT COUNT(*) FROM split_claims WHERE expires_at > ?1) AS waiting`
-        )
-        .bind(now.toISOString()),
-    ]);
-    const rows = (counters?.results ?? []) as Array<{
+    const counters = await this.d1
+      .prepare(
+        `SELECT metric,
+                SUM(count) AS total,
+                COALESCE(SUM(CASE WHEN day >= ?1 THEN count END), 0) AS last7,
+                COALESCE(SUM(CASE WHEN day >= ?2 THEN count END), 0) AS last30
+         FROM usage_counters WHERE substr(metric, 1, 6) = 'split_' GROUP BY metric`
+      )
+      .bind(day7, day30)
+      .all();
+    const rows = (counters.results ?? []) as Array<{
       metric: string;
       total: number;
       last7: number;
@@ -123,7 +122,6 @@ export class D1UsageRepository implements UsageCounter {
     const by = new Map(rows.map((r) => [r.metric, r]));
     const n = (m: string) => by.get(m)?.total ?? 0;
     const confirmed = by.get(SPLIT_CONFIRMED);
-    const state = (live?.results[0] ?? {}) as { contacts?: number; waiting?: number };
     return {
       confirmed: {
         total: confirmed?.total ?? 0,
@@ -136,15 +134,8 @@ export class D1UsageRepository implements UsageCounter {
         receipt: n(SPLIT_TYPE_RECEIPT),
       },
       places: { private: n(SPLIT_PLACE_PRIVATE), group: n(SPLIT_PLACE_GROUP) },
-      payeeOther: n(SPLIT_PAYEE_OTHER),
-      qrs: { chat: n(SPLIT_QR_CHAT), dm: n(SPLIT_QR_DM) },
+      qrs: { chat: n(SPLIT_QR_CHAT) },
       scans: { ok: n(SPLIT_SCAN_OK), failed: n(SPLIT_SCAN_FAILED) },
-      claims: {
-        created: n(SPLIT_CLAIM_CREATED),
-        collected: n(SPLIT_CLAIM_COLLECTED),
-        waiting: state.waiting ?? 0,
-      },
-      contacts: state.contacts ?? 0,
     };
   }
 

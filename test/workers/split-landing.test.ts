@@ -52,12 +52,13 @@ describe('GET /split', () => {
       '<code>/split_custom</code>',
       '<code>/split_receipt</code>',
       'Receipt photos are read and never stored',
-      '<code>/forget</code>',
+      'A QR waits in a send queue only for the moment',
       'Every QR is posted in the chat',
       'A short description for the QRs',
     ]) {
       expect(html).toContain(text);
     }
+    expect(html).not.toContain('<code>/forget</code>');
     expect(html).not.toContain('whether that is you');
     expect(html).not.toContain('by direct message');
   });

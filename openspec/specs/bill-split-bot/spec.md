@@ -167,7 +167,7 @@ The system SHALL, in a group chat, accept text and button taps for a split only 
 
 ### Requirement: The bot stores nothing and is off until configured
 
-The system SHALL keep a split's answers only in the chat's Durable Object until the QR is sent, the user cancels or the conversation expires after 10 minutes of inactivity (one hour while items are being claimed), and SHALL NOT log the bill, payee, description or identities. The only data it keeps beyond that is the contact record (username and user id, until `/forget`), a waiting QR (until collected or 48 hours), and a QR waiting in the send queue (its QR data, which includes the payee, the amount, the description and the names it is for), which SHALL be removed once it is posted or given up and SHALL NOT be logged. The bot's webhook SHALL answer 404 until its token, webhook secret and username are configured, and SHALL reject a request with a wrong secret token.
+The system SHALL keep a split's answers only in the chat's Durable Object until the QR is sent, the user cancels or the conversation expires after 10 minutes of inactivity (one hour while items are being claimed), and SHALL NOT log the bill, payee, description or identities. The only data it keeps beyond that is a QR waiting in the send queue (its QR data, which includes the payee, the amount, the description and the names it is for), which SHALL be removed once it is posted or given up and SHALL NOT be logged, and the anonymous daily counts. It SHALL NOT remember usernames or user ids. The bot's webhook SHALL answer 404 until its token, webhook secret and username are configured, and SHALL reject a request with a wrong secret token.
 
 #### Scenario: Not configured
 
@@ -186,8 +186,8 @@ The system SHALL keep a split's answers only in the chat's Durable Object until 
 
 #### Scenario: Nothing kept for an equal split
 
-- **WHEN** an equal split or a custom split with no mentions is confirmed
-- **THEN** no contact record or waiting QR is written
+- **WHEN** any split is confirmed
+- **THEN** nothing is written to the database except the anonymous daily counts
 
 ### Requirement: Questions in a group are asked as replies
 
@@ -397,39 +397,6 @@ The system SHALL accept, in place of a name in a custom list, an @username (for 
 
 - **WHEN** the list contains `@Ann 10` and `@ann 20`
 - **THEN** the bot rejects the list because the name is repeated
-
-### Requirement: Waiting QRs expire and are used once
-
-The system SHALL keep a waiting QR only until it is collected or 48 hours after the split was confirmed, whichever comes first, and SHALL send each waiting QR at most once. An expired or already collected request SHALL be answered with a short notice and no QR.
-
-#### Scenario: Collected twice
-
-- **WHEN** the same person opens their button a second time
-- **THEN** the bot says the request is already collected and sends nothing
-
-#### Scenario: Expired
-
-- **WHEN** a person opens a button 49 hours after the split
-- **THEN** the bot says the request has expired and sends nothing
-
-### Requirement: The bot remembers who has started it, and can forget them
-
-The system SHALL record a person's Telegram username and user id when they send `/start` to the bot in a private chat, replacing any earlier record for that username or that user. A person with no username SHALL NOT be recorded. `/forget` in a private chat SHALL delete the person's record and reply that it is gone.
-
-#### Scenario: Recorded on start
-
-- **WHEN** a user with the username ann sends `/start` to the bot in a private chat
-- **THEN** a later split that mentions @ann can send Ann a direct message
-
-#### Scenario: Username changes hands
-
-- **WHEN** a different user with the username ann sends `/start`
-- **THEN** the record for ann now holds the new user's id
-
-#### Scenario: Forget
-
-- **WHEN** the user sends `/forget`
-- **THEN** their record is deleted and mentions of them are treated as unknown
 
 ### Requirement: A receipt photo is read for the bill
 

@@ -2,7 +2,6 @@ import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import {
   D1UsageRepository,
-  SPLIT_CLAIM_CREATED,
   SPLIT_CONFIRMED,
   SPLIT_QR_CHAT,
   SPLIT_TYPE_RECEIPT,
@@ -27,8 +26,8 @@ describe('D1UsageRepository.splitSnapshot', () => {
   it('is all zeros on an empty database', async () => {
     const s = await repo().splitSnapshot(NOW);
     expect(s.confirmed).toEqual({ total: 0, last7: 0, last30: 0 });
-    expect(s.contacts).toBe(0);
-    expect(s.claims).toEqual({ created: 0, collected: 0, waiting: 0 });
+    expect(s.qrs).toEqual({ chat: 0 });
+    expect(s.scans).toEqual({ ok: 0, failed: 0 });
   });
 
   it('sums the counters and applies the 7 and 30 day windows', async () => {
@@ -45,28 +44,5 @@ describe('D1UsageRepository.splitSnapshot', () => {
     expect(s.confirmed).toEqual({ total: 16, last7: 3, last30: 8 });
     expect(s.types.receipt).toBe(3);
     expect(s.qrs.chat).toBe(5);
-  });
-
-  it('counts remembered people and unexpired waiting QRs only', async () => {
-    await env.paynow_db
-      .prepare(
-        "INSERT INTO split_contacts (username, user_id, updated_at) VALUES ('a_user', 1, 'x'), ('b_user', 2, 'x')"
-      )
-      .run();
-    const claim = (token: string, expires: string) =>
-      env.paynow_db
-        .prepare(
-          `INSERT INTO split_claims (token, name, amount_cents, payload, organiser, chat_id, expires_at)
-           VALUES (?1, 'n', 100, 'p', 'o', 1, ?2)`
-        )
-        .bind(token, expires)
-        .run();
-    await claim('live', new Date(NOW.getTime() + 3600_000).toISOString());
-    await claim('dead', new Date(NOW.getTime() - 3600_000).toISOString());
-    await count(SPLIT_CLAIM_CREATED, dayAgo(0), 2);
-    const s = await repo().splitSnapshot(NOW);
-    expect(s.contacts).toBe(2);
-    expect(s.claims.waiting).toBe(1);
-    expect(s.claims.created).toBe(2);
   });
 });

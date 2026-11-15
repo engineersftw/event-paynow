@@ -716,9 +716,8 @@ ${cta}
 </ul>
 <h2>What it keeps</h2>
 <ul>
-<li>Nothing beyond the conversation: your answers are forgotten when the split ends, or after 10 minutes (an hour while a group is claiming items).</li>
+<li>Nothing beyond the conversation: your answers are forgotten when the split ends, or after 10 minutes (an hour while a group is claiming items). A QR waits in a send queue only for the moment until it is posted.</li>
 <li>Receipt photos are read and never stored.</li>
-<li>If you message the bot privately it may remember your username. <code>/forget</code> deletes what it remembers about you.</li>
 <li>A QR never shows the payee's number. In a group, the number you type stays in the chat unless the bot may delete messages, so use a private chat if that matters.</li>
 </ul>
 <div class="end">${cta}</div>

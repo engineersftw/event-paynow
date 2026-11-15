@@ -149,24 +149,19 @@ The report SHALL show, for Split_PayNow_Bot: the splits confirmed in total and i
 - **WHEN** no split has been counted
 - **THEN** the report says no splits have been counted yet
 
-### Requirement: The Split report shows QR codes, scans and waiting QRs
+### Requirement: The Split report shows QR codes and scans
 
-The report SHALL also show the QR codes sent to the chat and by direct message, the receipt scans read and failed with the success rate, the waiting QRs created and collected and how many are still waiting now, and how many people are remembered for direct messages.
+The report SHALL also show the QR codes posted in the chat and the receipt scans read and failed with the success rate.
 
 #### Scenario: QR codes
 
-- **WHEN** 4 QR codes went to chats and 3 were sent by direct message
-- **THEN** the report shows 4 to the chat and 3 by direct message
+- **WHEN** 4 QR codes were posted in chats
+- **THEN** the report shows 4 QR codes posted in the chat
 
 #### Scenario: Scans
 
 - **WHEN** 2 receipt scans were read and 1 failed
 - **THEN** the report shows 2 read, 1 failed and a success rate of 67%
-
-#### Scenario: Live numbers
-
-- **WHEN** 2 waiting QRs have not been collected or expired and 5 people are remembered
-- **THEN** the report shows 2 waiting and 5 people remembered
 
 ### Requirement: The Split report shows no personal data
 
@@ -179,7 +174,7 @@ The report SHALL show only numbers and SHALL NOT show names, usernames, user ids
 
 ### Requirement: Split_PayNow_Bot's use is counted anonymously by day
 
-The system SHALL count, per calendar day in Singapore time and in the existing daily counters: each confirmed split by type, by place and, when it applies, by someone else being the payee; each QR sent to the chat and each sent by direct message; each receipt scan read or failed; and each waiting QR created and collected. A count SHALL NOT include any payee, amount, description, name, user id or chat id, and a failure to count SHALL NOT stop the split or the QR from being sent.
+The system SHALL count, per calendar day in Singapore time and in the existing daily counters: each confirmed split by type and by place; each QR posted in the chat; and each receipt scan read or failed. A count SHALL NOT include any payee, amount, description, name, user id or chat id, and a failure to count SHALL NOT stop the split or the QR from being sent.
 
 #### Scenario: Counting a confirmed split
 
@@ -188,8 +183,8 @@ The system SHALL count, per calendar day in Singapore time and in the existing d
 
 #### Scenario: Counting QRs
 
-- **WHEN** a split sends two QRs to the chat and one by direct message
-- **THEN** the day's chat QR count goes up by two and the direct message count by one
+- **WHEN** a split posts two QRs in the chat
+- **THEN** the day's chat QR count goes up by two
 
 #### Scenario: Counting must not break the bot
 

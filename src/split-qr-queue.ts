@@ -1,7 +1,6 @@
 import { Api, GrammyError } from 'grammy';
 import { qrPhoto } from './commands/qr-photo';
-import { countAll } from './commands/split-claim';
-import { D1UsageRepository, SPLIT_QR_CHAT } from './db/usage-repository';
+import { countAll, D1UsageRepository, SPLIT_QR_CHAT } from './db/usage-repository';
 import type { Env } from './env';
 
 /**

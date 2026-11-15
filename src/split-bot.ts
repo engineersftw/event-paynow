@@ -1,11 +1,9 @@
 import type { Api, BotConfig, Context } from 'grammy';
 import { Bot } from 'grammy';
 import { acceptUpdate } from './accept-update';
-import { collectClaim } from './commands/split-claim';
 import { SPLIT_HELP, SplitCommandHandler } from './commands/split-handler';
 import { formatSplitStats } from './commands/split-stats-handler';
 import { parseUserIds } from './commands/stats-handler';
-import { D1SplitDirectory } from './db/split-repository';
 import { D1UsageRepository } from './db/usage-repository';
 import type { Env } from './env';
 import {
@@ -50,7 +48,6 @@ export function createSplitBot(
 ): Bot {
   const bot = new Bot(token, config);
 
-  const directory = new D1SplitDirectory(env.paynow_db);
   const usage = new D1UsageRepository(env.paynow_db); // anonymous daily counts only
   const reader =
     deps.reader ??
@@ -91,20 +88,7 @@ export function createSplitBot(
   bot.command('split_receipt', (ctx) => handler(ctx).start(ctx, 'receipt'));
   bot.command('start', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
-    // A person who starts the bot becomes reachable by @username in later splits
-    if (ctx.from?.username)
-      await directory.saveContact(ctx.from.username.toLowerCase(), ctx.from.id);
-    if (ctx.match.startsWith('claim_')) {
-      await collectClaim(
-        ctx,
-        directory,
-        ctx.match.slice('claim_'.length),
-        env.SPLIT_BOT_USERNAME,
-        usage
-      );
-    } else {
-      await handler(ctx).start(ctx);
-    }
+    await handler(ctx).start(ctx);
   });
   // Hidden (not in /help or the BotFather list): usage numbers for the ids in STATS_USER_IDS, the same
   // list as Event PayNow Bot's /stats, private chats only. Anyone else gets no reply at all.
@@ -112,14 +96,6 @@ export function createSplitBot(
     if (ctx.chat.type !== 'private' || !ctx.from) return;
     if (!parseUserIds(env.STATS_USER_IDS).has(ctx.from.id)) return;
     await ctx.reply(formatSplitStats(await usage.splitSnapshot()));
-  });
-  bot.command('forget', async (ctx) => {
-    if (ctx.chat.type !== 'private' || !ctx.from) {
-      await ctx.reply('Send /forget to me in a private chat.');
-      return;
-    }
-    await directory.forget(ctx.from.id);
-    await ctx.reply('Forgotten. I no longer remember your username.');
   });
   bot.command('help', (ctx) => ctx.reply(SPLIT_HELP));
   bot.command('cancel', (ctx) => handler(ctx).cancel(ctx));

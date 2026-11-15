@@ -3,6 +3,7 @@ import { InlineKeyboard } from 'grammy';
 import type { Message } from 'grammy/types';
 import { detectProxyType } from '../db/proxy-validation';
 import {
+  countAll,
   SPLIT_CONFIRMED,
   SPLIT_PLACE_GROUP,
   SPLIT_PLACE_PRIVATE,
@@ -41,7 +42,6 @@ import {
   shareReceipt,
   toEntries,
 } from './receipt';
-import { countAll } from './split-claim';
 import {
   applyLeftover,
   groupByAmount,
@@ -106,7 +106,6 @@ export const SPLIT_HELP =
   '/split_custom - same, straight to custom amounts (one line per person: name and amount)\n' +
   '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what; you can also answer that question with a voice note (there is a button for it).\n' +
   'Every QR is posted in the chat, with the names it is for. You get a QR for your own share too.\n' +
-  '/forget - delete what I remember about you (your username, kept when you /start me)\n' +
   '/cancel - stop\n\n' +
   'On the summary, tap Amend to change an answer, or edit the message you sent. ' +
   'In a group, reply to my questions and I offer the group size as the number of people. ' +
