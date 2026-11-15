@@ -20,4 +20,4 @@
 
 - [x] 4.1 Update README (Split receipt section and `/help` text), AGENTS.md and docs/architecture.md for the menu and the voice prompt
 - [x] 4.2 Run `npm run build`, `npm run check` and `npm test`; fix anything they report
-- [ ] 4.3 After deploy, run one receipt split in a private chat and in a group: the menu shows voice, a voice note is read, Type instead works
+- [x] 4.3 After deploy, run one receipt split in a private chat and in a group: the menu shows voice, a voice note is read, Type instead works (Done: checked live.)

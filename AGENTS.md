@@ -121,6 +121,7 @@ This project uses OpenSpec for change management. All changes are archived:
 55. `add-split-voice-assignment` (13 tasks) — archived 2026-11-14
 56. `post-split-qrs-in-chat` (15 tasks) — archived 2026-11-15
 57. `queue-split-qr-sends` (13 tasks) — archived 2026-11-15
+58. `add-split-voice-menu` (12 tasks) — archived 2026-11-15
 
 **Workflow commands:**
 
