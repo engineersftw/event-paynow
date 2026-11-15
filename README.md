@@ -357,7 +357,7 @@ docs/
 └── testing.md             # Testing strategy
 
 openspec/
-├── specs/                 # Main specs (19 capabilities)
+├── specs/                 # Main specs (20 capabilities)
 └── changes/archive/       # Archived changes
 ```
 

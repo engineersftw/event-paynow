@@ -124,6 +124,7 @@ This project uses OpenSpec for change management. All changes are archived:
 57. `queue-split-qr-sends` (13 tasks) — archived 2026-11-15
 58. `add-split-voice-menu` (12 tasks) — archived 2026-11-15
 59. `run-split-ai-in-workflow` (13 tasks) — archived 2026-11-15
+60. `add-split-claim-app` (21 tasks) — archived 2026-11-15
 
 **Workflow commands:**
 
@@ -138,7 +139,7 @@ This project uses OpenSpec for change management. All changes are archived:
 - `design.md` — Technical design decisions
 - `tasks.md` — Implementation checklist
 
-**Main specs:** `openspec/specs/<capability>/spec.md` (19 capabilities)
+**Main specs:** `openspec/specs/<capability>/spec.md` (20 capabilities)
 
 ## Key Design Decisions
 

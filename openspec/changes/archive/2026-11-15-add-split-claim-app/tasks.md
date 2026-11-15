@@ -37,7 +37,7 @@
 
 - [x] 7.1 Update README (the Mini App, the BotFather `/newapp` steps with the 640x360 picture, `SPLIT_APP_NAME`, project structure), AGENTS.md (the new files, the claim logic's new home, the deploy-filter note), `docs/architecture.md`, and the `/split` landing page text and its test (what the app is, and that it stores nothing); verify the landing test passes
 - [x] 7.2 Run `npm run build`, `npm run check` and `npm test`; fix anything they report
-- [ ] 7.3 Deploy, create the Mini App in BotFather, set `SPLIT_APP_NAME`, and in a real group run one claim split: a member claims, the organiser edits in the app (toggle, add by name, share 3 ways, remove all), Done in the chat still works, and a member opening the app is told it is for the organiser
+- [x] 7.3 Deploy, create the Mini App in BotFather, set `SPLIT_APP_NAME`, and in a real group run one claim split: a member claims, the organiser edits in the app (toggle, add by name, share 3 ways, remove all), Done in the chat still works, and a member opening the app is told it is for the organiser
 
 ## 8. Changes from the first live run
 
