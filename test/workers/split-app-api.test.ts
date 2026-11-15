@@ -338,6 +338,8 @@ describe('Split Mini App interface: with the chat', () => {
     const shown = stub.editedMessages.at(-1)!;
     expect(shown.chatId).toBe(String(chatId));
     expect(shown.text).toContain('3. Beer SGD 8.00: Uncle Lim');
+    expect(shown.text).toContain('The organiser can fix who had what with Edit in app.');
+    expect(shown.text).not.toContain('assign it to someone else');
     const buttons = shown.replyMarkup!.inline_keyboard.flat() as Array<{
       text: string;
       url?: string;

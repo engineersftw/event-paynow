@@ -187,7 +187,7 @@ async function refreshClaimMessage(
       ? appLink(env.SPLIT_BOT_USERNAME, env.SPLIT_APP_NAME, s.chatId, s.topicId)
       : undefined;
   await api
-    .editMessageText(s.chatId, c.claimMsg as number, claimText(c), {
+    .editMessageText(s.chatId, c.claimMsg as number, claimText(c, link), {
       reply_markup: claimButtons(c, link),
     })
     .catch(() => undefined);

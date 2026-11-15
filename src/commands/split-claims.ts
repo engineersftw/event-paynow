@@ -38,8 +38,11 @@ export function lockedPeople(c: Ctx): Set<number> {
   return new Set(claimersOf(c).flatMap((x, i) => (served[String(x.id)] !== undefined ? [i] : [])));
 }
 
-/** The claim message: every item with the people who claimed it (and the shares left). */
-export function claimText(c: Ctx): string {
+/**
+ * The claim message: every item with the people who claimed it (and the shares left). It names the
+ * Mini App for the organiser only when the app link is given, i.e. when the app is configured.
+ */
+export function claimText(c: Ctx, appUrl?: string): string {
   const claims = claimsOf(c);
   const claimers = claimersOf(c);
   const ways = waysOf(c);
@@ -60,7 +63,7 @@ export function claimText(c: Ctx): string {
     const parts = [who, left > 0 ? `${left} left` : ''].filter(Boolean).join(', ');
     return `${lock}${i + 1}. ${it.name} ${sgd(it.cents)} (${n} ways): ${parts}`;
   });
-  return `Tap the items you had; tap again to take one back. An item claimed by several people is split equally. The organiser taps Done when everyone has claimed, and can tap an item to assign it to someone else or share it. Tap Get my QR to pay now: your items are then locked. This stays open for an hour after the last tap.\n\n${lines.join('\n')}`;
+  return `Tap the items you had; tap again to take one back. An item claimed by several people is split equally. The organiser taps Done when everyone has claimed.${appUrl ? ' The organiser can fix who had what with Edit in app.' : ''} Tap Get my QR to pay now: your items are then locked. This stays open for an hour after the last tap.\n\n${lines.join('\n')}`;
 }
 
 /**
