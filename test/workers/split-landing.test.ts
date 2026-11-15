@@ -55,6 +55,8 @@ describe('GET /split', () => {
       'A QR waits in a send queue only for the moment',
       'holds only ids, never the photo, the audio or what was read',
       'Every QR is posted in the chat',
+      'fix or fill in who had what on one screen inside Telegram',
+      'keeps nothing of its own',
       'A short description for the QRs',
     ]) {
       expect(html).toContain(text);

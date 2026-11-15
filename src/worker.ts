@@ -1,6 +1,7 @@
 import { handleWebhook, validateSecret } from './bot';
 import type { Env } from './env';
 import { handleSimpleWebhook } from './simple-bot';
+import { handleSplitAppApi, handleSplitAppPage, SPLIT_APP_API } from './split-app/api';
 import { handleSplitWebhook } from './split-bot';
 import { handleSplitQrBatch, SPLIT_QR_QUEUE, type SplitQrMessage } from './split-qr-queue';
 
@@ -43,6 +44,14 @@ export default {
       }
       return handleSplitWebhook(request, env, ctx);
     }
+
+    // The Split Mini App's interface for the claim organiser: 404 until the app is configured
+    if (
+      (url.pathname === '/split-app' || url.pathname === '/split-app/') &&
+      request.method === 'GET'
+    )
+      return handleSplitAppPage(env);
+    if (url.pathname.startsWith(`${SPLIT_APP_API}/`)) return handleSplitAppApi(request, env);
 
     return new Response('Not found', { status: 404 });
   },

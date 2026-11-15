@@ -1747,9 +1747,9 @@ describe('Split_PayNow_Bot group claiming', () => {
     total: 72,
   };
   const reader = { read: async () => RECEIPT };
-  const claimBot = () =>
+  const claimBot = (extra: Record<string, string> = {}) =>
     createSplitBot(
-      { ...env, AI: undefined } as never,
+      { ...env, AI: undefined, ...extra } as never,
       'split-token',
       {
         botInfo: TEST_BOT_INFO,
@@ -1786,13 +1786,13 @@ describe('Split_PayNow_Bot group claiming', () => {
     };
 
   /** Start /split_receipt in a group, scan, Use this, choose to claim; returns what the tests need. */
-  async function startClaiming() {
+  async function startClaiming(extra: Record<string, string> = {}) {
     const chat = -uid++;
     const [org, ann, bob] = [uid++, uid++, uid++];
     NAMES[org] = 'Olive';
     NAMES[ann] = 'Ann';
     NAMES[bob] = 'Bob';
-    const b = claimBot();
+    const b = claimBot(extra);
     stub.reset();
     await gsay(b, chat, org, '/split_receipt');
     await gsay(b, chat, org, '91234567');
@@ -1805,6 +1805,50 @@ describe('Split_PayNow_Bot group claiming', () => {
     expect(stub.lastText()).toContain('1. Chilli crab SGD 30.00: unclaimed');
     return { b, chat, org, ann, bob, msg };
   }
+  const appButton = (markup: unknown) =>
+    (
+      (markup as { inline_keyboard: Array<Array<{ text: string; url?: string }>> } | undefined)
+        ?.inline_keyboard ?? []
+    )
+      .flat()
+      .find((k) => k.text.includes('Edit in app'));
+  const APP = { SPLIT_BOT_USERNAME: 'Split_PayNow_Bot', SPLIT_APP_NAME: 'Manage_Split_Claims' };
+
+  it('offers Edit in app on the claim message only when the Mini App is configured, and keeps it after a tap', async () => {
+    const on = await startClaiming(APP);
+    expect(appButton(stub.sentMessages.at(-1)?.replyMarkup)?.url).toBe(
+      `https://t.me/Split_PayNow_Bot/Manage_Split_Claims?startapp=${on.chat}_0`
+    );
+    await tapOn(on.b, on.chat, on.ann, 'split_claim:0', on.msg);
+    expect(appButton(stub.editedMessages.at(-1)?.replyMarkup)).toBeDefined();
+
+    const off = await startClaiming({ SPLIT_APP_NAME: '' });
+    expect(appButton(stub.sentMessages.at(-1)?.replyMarkup)).toBeUndefined();
+    const claimMessage = stub.lastText();
+    expect(claimMessage).toContain('1. Chilli crab SGD 30.00: unclaimed');
+    expect(off.msg).toBeGreaterThan(0);
+  });
+
+  it('puts the topic in the link when the split runs in a topic', async () => {
+    const chat = -uid++;
+    const org = uid++;
+    NAMES[org] = 'Olive';
+    const b = claimBot(APP);
+    stub.reset();
+    await gsay(b, chat, org, '/split_receipt', 9);
+    await gsay(b, chat, org, '91234567', 9);
+    const photo = photoUpdate(chat, org, 'file-1', upd++) as unknown as {
+      message: { chat: Record<string, unknown>; message_thread_id?: number };
+    };
+    photo.message.chat = { id: chat, type: 'supergroup' };
+    photo.message.message_thread_id = 9;
+    await b.handleUpdate(photo as unknown as Update);
+    await gtap(b, chat, org, 'split_scan:use', 9);
+    await gtap(b, chat, org, 'split_skip_description', 9);
+    await gtap(b, chat, org, 'split_how:claim', 9);
+    expect(appButton(stub.sentMessages.at(-1)?.replyMarkup)?.url).toContain(`startapp=${chat}_9`);
+  });
+
   // Done goes straight to the summary: the description was settled before the claiming
   const reachSummary = async (_b: B, _chat: number, _org: number) => stub.lastText();
 

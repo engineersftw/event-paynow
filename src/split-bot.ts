@@ -92,7 +92,10 @@ export function createSplitBot(
       { ...(reader ? { reader } : {}), ...(voice ? { voice } : {}), download },
       usage,
       deps.qrQueue,
-      deps.aiWorkflow
+      deps.aiWorkflow,
+      env.SPLIT_BOT_USERNAME && env.SPLIT_APP_NAME
+        ? { bot: env.SPLIT_BOT_USERNAME, name: env.SPLIT_APP_NAME }
+        : undefined
     );
   };
 

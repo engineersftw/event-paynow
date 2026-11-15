@@ -697,7 +697,7 @@ ${cta}
 <li><b>Equal split</b>: give it the total and how many people; it makes one QR for one share, rounded up to the cent.</li>
 <li><b>Custom amounts</b>: list who owes what. Every QR is posted in the chat with the names it is for, yours included.</li>
 <li><b>Receipt scan</b>: send a photo of the receipt. It reads the items, GST and service charge, and the charges are shared in proportion to what each person had.</li>
-<li><b>Group claiming</b>: in a group, everyone taps the items they had, and anyone can get their own QR straight away.</li>
+<li><b>Group claiming</b>: in a group, everyone taps the items they had, and anyone can get their own QR straight away. The organiser can fix or fill in who had what on one screen inside Telegram.</li>
 </ul>
 <h2>How a split goes</h2>
 <ol>
@@ -717,7 +717,7 @@ ${cta}
 <h2>What it keeps</h2>
 <ul>
 <li>Nothing beyond the conversation: your answers are forgotten when the split ends, or after 10 minutes (an hour while a group is claiming items). A QR waits in a send queue only for the moment until it is posted, and a photo or voice note is read in the background by a job that holds only ids, never the photo, the audio or what was read.</li>
-<li>Receipt photos are read and never stored.</li>
+<li>Receipt photos are read and never stored. The organiser's screen for claims reads and changes only those same answers in the conversation, and keeps nothing of its own.</li>
 <li>A QR never shows the payee's number. In a group, the number you type stays in the chat unless the bot may delete messages, so use a private chat if that matters.</li>
 </ul>
 <div class="end">${cta}</div>
