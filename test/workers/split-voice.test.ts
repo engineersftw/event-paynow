@@ -6,6 +6,7 @@ import { VoiceReaderError } from '../../src/voice-reader';
 import {
   applyTestSchema,
   callbackUpdate,
+  groupTextUpdate,
   photoUpdate,
   TEST_BOT_INFO,
   TelegramStub,
@@ -69,13 +70,36 @@ const speak = (b: B, user: number, opts?: { duration?: number; fileSize?: number
   b.handleUpdate(voiceUpdate(user, user, 'voice-1', opts, upd++));
 
 /** A private split at the assignment question, items 1 Chilli crab, 2 Rice, 3 Beer. */
-async function toAssign(b: B, user: number) {
+async function toAssign(b: B, user: number, how: 'type' | 'voice' = 'type') {
   await say(b, user, '/split_receipt');
   await say(b, user, '91234567');
   await b.handleUpdate(photoUpdate(user, user, 'file-1', upd++));
   await tap(b, user, 'split_scan:use');
   await tap(b, user, 'split_skip_description');
-  expect(stub.lastText()).toContain('Who had what?');
+  // With voice available the menu comes first; without it the bot asks at once
+  if (stub.lastText().includes('How do you want to share out the items?')) {
+    await tap(b, user, `split_how:${how}`);
+  }
+  expect(stub.lastText()).toContain(how === 'voice' ? 'Say who had which item' : 'Who had what?');
+}
+
+/** The menu's buttons (callback data) of the last message. */
+const menuButtons = () =>
+  (
+    stub.sentMessages.at(-1)!.replyMarkup as {
+      inline_keyboard: Array<Array<{ callback_data: string }>>;
+    }
+  ).inline_keyboard
+    .flat()
+    .map((k) => k.callback_data);
+
+/** The menu of a fresh private receipt split (the organiser has tapped Use this and skipped the description). */
+async function toMenu(b: B, user: number) {
+  await say(b, user, '/split_receipt');
+  await say(b, user, '91234567');
+  await b.handleUpdate(photoUpdate(user, user, 'file-1', upd++));
+  await tap(b, user, 'split_scan:use');
+  await tap(b, user, 'split_skip_description');
 }
 
 /** The message that carries `text` (the lines bubble): where the Use these lines button sits. */
@@ -223,9 +247,110 @@ describe('Split_PayNow_Bot voice assignment', () => {
     expect(stub.lastText()).toContain('Voice notes are not available');
   });
 
-  it('mentions voice in the assignment prompt when it is available', async () => {
+  it('mentions voice in the typed prompt when it is available', async () => {
     const b = makeBot();
-    await toAssign(b, uid++);
+    await toAssign(b, uid++, 'type');
     expect(stub.lastText()).toContain('You can also send a voice note');
+  });
+});
+
+describe('Split_PayNow_Bot how to share out the items: the menu', () => {
+  it('offers type or voice in a private chat, with no claiming', async () => {
+    const b = makeBot();
+    await toMenu(b, uid++);
+    expect(stub.lastText()).toContain('How do you want to share out the items?');
+    expect(menuButtons()).toEqual(['split_how:type', 'split_how:voice']);
+  });
+
+  it('shows no menu in a private chat without voice, and none of the voice wording', async () => {
+    const b = makeBot(false);
+    await toMenu(b, uid++);
+    expect(stub.lastText()).toContain('Who had what?');
+    expect(stub.sentMessages.some((m) => m.text.includes('How do you want to share out'))).toBe(
+      false
+    );
+  });
+
+  it('offers type, voice and claiming in a group', async () => {
+    const b = makeBot();
+    const chat = -uid++;
+    const org = uid++;
+    await b.handleUpdate(groupTextUpdate(chat, org, '/split_receipt', undefined, upd++));
+    await b.handleUpdate(groupTextUpdate(chat, org, '91234567', undefined, upd++));
+    await b.handleUpdate(photoUpdate(chat, org, 'file-1', upd++));
+    const gtap = (data: string) => {
+      const u = callbackUpdate(org, data, stub.lastMessageId(), upd++) as unknown as {
+        callback_query: { message: Record<string, unknown> };
+      };
+      u.callback_query.message.chat = { id: chat, type: 'group' };
+      return b.handleUpdate(u as unknown as Update);
+    };
+    await gtap('split_scan:use');
+    await gtap('split_skip_description');
+    expect(menuButtons()).toEqual(['split_how:type', 'split_how:voice', 'split_how:claim']);
+  });
+
+  it('choosing voice sends the list and a prompt that says what to say, with Type instead', async () => {
+    const b = makeBot();
+    const u = uid++;
+    await toAssign(b, u, 'voice');
+    expect(stub.editedMessages.at(-1)!.text).toBe('You will say who had what.');
+    expect(stub.sentMessages.at(-2)!.text).toBe(
+      '1. Chilli crab SGD 30.00\n2. Rice SGD 10.00\n3. Beer SGD 20.00'
+    );
+    expect(stub.lastText()).toContain('Say who had which item in a voice note');
+    expect(stub.lastText()).toContain('"Chilli crab is Ann\'s, Rice is mine"');
+    expect(stub.lastText()).toContain('show you what I heard');
+    expect(menuButtons()).toEqual(['split_how:retype']);
+  });
+
+  it('Type instead shows the typed prompt, and typed text after choosing voice is read as typed', async () => {
+    const b = makeBot();
+    const [a, c] = [uid++, uid++];
+    await toAssign(b, a, 'voice');
+    await tap(b, a, 'split_how:retype');
+    expect(stub.lastText()).toContain('Who had what? Send one line per group');
+
+    await toAssign(b, c, 'voice');
+    await say(b, c, '1,3 Ann\n2 me');
+    expect(stub.lastText()).toContain('Please check the split');
+  });
+
+  it('a voice note at the menu is read as choosing voice, and the menu loses its buttons', async () => {
+    const b = makeBot();
+    const u = uid++;
+    heard = { heard: 'crab is Ann, rice is mine', lines: '1 Ann\n2 me' };
+    await toMenu(b, u);
+    expect(stub.lastText()).toContain('How do you want to share out the items?');
+    stub.otherCalls = [];
+    await speak(b, u);
+    expect(stub.otherCalls.some((c) => c.method === 'editMessageReplyMarkup')).toBe(true);
+    expect(hearCalls).toHaveLength(1);
+    expect(asked(/I heard: "crab is Ann, rice is mine"/)).toBe(true);
+    expect(stub.sentMessages.some((m) => m.text.includes('I only take a voice note'))).toBe(false);
+  });
+
+  it('Amend then Items shows the menu again', async () => {
+    const b = makeBot();
+    const u = uid++;
+    await toAssign(b, u, 'type');
+    await say(b, u, '1,3 Ann\n2 me');
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:items');
+    expect(stub.lastText()).toContain('How do you want to share out the items?');
+    expect(menuButtons()).toEqual(['split_how:type', 'split_how:voice', 'split_keep']); // Keep as is
+  });
+
+  it('a stale menu tap changes nothing', async () => {
+    const b = makeBot();
+    const u = uid++;
+    await toAssign(b, u, 'type');
+    await tap(b, u, 'split_how:voice'); // the menu is long gone
+    const state = await env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`split-${u}`)).fetch(
+      'http://localhost/peek'
+    );
+    expect(((await state.json()) as { context: { assignHow?: string } }).context.assignHow).toBe(
+      'type'
+    );
   });
 });
