@@ -53,6 +53,7 @@ describe('GET /split', () => {
       '<code>/split_receipt</code>',
       'Receipt photos are read and never stored',
       'A QR waits in a send queue only for the moment',
+      'holds only ids, never the photo, the audio or what was read',
       'Every QR is posted in the chat',
       'A short description for the QRs',
     ]) {

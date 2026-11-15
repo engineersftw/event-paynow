@@ -26,6 +26,12 @@ max_batch_size = 10
 max_batch_timeout = 1
 max_retries = 5
 
+# Split_PayNow_Bot reads receipt photos and voice notes in this Workflow (timeouts, retries, no 30 s limit).
+[[workflows]]
+name = "split-ai"
+binding = "SPLIT_AI_WORKFLOW"
+class_name = "SplitAiWorkflow"
+
 [ai]
 binding = "AI"
 

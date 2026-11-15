@@ -1,3 +1,4 @@
+import type { SplitAiParams } from './split-ai-job';
 import type { SplitQrMessage } from './split-qr-queue';
 /**
  * Cloudflare Workers environment bindings as declared in wrangler.toml.
@@ -24,6 +25,8 @@ export interface Env {
   RECEIPT_MODEL?: string;
   /** Queue for Split_PayNow_Bot QR sends (one message per QR); without it QRs are sent directly. */
   SPLIT_QR_QUEUE?: Queue<SplitQrMessage>;
+  /** Workflow that reads Split_PayNow_Bot receipt photos and voice notes in the background; without it they are read inline. */
+  SPLIT_AI_WORKFLOW?: Workflow<SplitAiParams>;
   /** Speech-to-text model for voice notes in Split_PayNow_Bot; defaults to Whisper large v3 turbo. */
   VOICE_MODEL?: string;
   /** Telegram user ids (comma-separated) allowed to use the hidden /stats command; none when unset. */

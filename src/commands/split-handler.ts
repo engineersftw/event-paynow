@@ -15,9 +15,16 @@ import {
   SPLIT_TYPE_RECEIPT,
   type UsageCounter,
 } from '../db/usage-repository';
-import { type ReceiptReader, ReceiptReaderError } from '../receipt-reader';
+import type { ReceiptReader } from '../receipt-reader';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
+import {
+  type AiJobResult,
+  failureResult,
+  readScan,
+  readVoice,
+  type SplitAiParams,
+} from '../split-ai-job';
 import { queueSplitQrs, type SplitQrMessage } from '../split-qr-queue';
 import type { VoiceReader } from '../voice-reader';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
@@ -34,7 +41,6 @@ import {
   type PersonShare,
   parseAddedItems,
   parseAssignments,
-  parseScan,
   type Receipt,
   type ReceiptItem,
   receiptWarnings,
@@ -675,8 +681,75 @@ export class SplitCommandHandler {
     /** Anonymous daily counts for the owner's /stats; absent in tests that do not need it. */
     private readonly counter?: UsageCounter,
     /** Posts each QR in its own run, with retries; without it QRs are sent directly. */
-    private readonly qrQueue?: Queue<SplitQrMessage>
+    private readonly qrQueue?: Queue<SplitQrMessage>,
+    /** Reads photos and voice notes in the background; without it the update reads them itself. */
+    private readonly aiWorkflow?: Workflow<SplitAiParams>
   ) {}
+
+  /**
+   * Hand a photo or voice note to the Workflow. The conversation records the job first, so only the
+   * job it still waits for can be shown. False when there is no Workflow or it could not be started
+   * (the caller then reads inline); a job id that already exists is a redelivered update: started.
+   */
+  private async startJob(
+    ctx: Context,
+    kind: 'scan' | 'voice',
+    fileId: string,
+    noticeMsg: number,
+    state: ConversationState
+  ): Promise<boolean> {
+    if (!this.aiWorkflow || !ctx.chat || !ctx.from) return false;
+    const jobId = `split-${ctx.update.update_id}`;
+    const topic = topicOf(ctx);
+    const params: SplitAiParams = {
+      kind,
+      jobId,
+      chatId: ctx.chat.id,
+      chatType: ctx.chat.type,
+      ...(topic ? { threadId: topic } : {}),
+      userId: ctx.from.id,
+      fileId,
+      noticeMsg,
+    };
+    const { pendingJob: _old, ...rest } = state.context;
+    try {
+      await this.setState({
+        flow: 'split',
+        step: state.step,
+        context: { ...rest, pendingJob: { id: jobId, step: state.step, kind } },
+      });
+      await this.aiWorkflow.create({ id: jobId, params });
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/already|exists|duplicate/i.test(message)) return true;
+      console.error(`split ai workflow failed to start: ${message.slice(0, 200)}`);
+      await this.setState({ flow: 'split', step: state.step, context: rest });
+      return false;
+    }
+  }
+
+  /** The background read finished: show it if the conversation still waits for it, else drop it. */
+  async deliverJob(ctx: Context, params: SplitAiParams): Promise<void> {
+    const response = await this.conversationDO.fetch(
+      new Request('http://localhost/job/take', {
+        method: 'POST',
+        body: JSON.stringify({ jobId: params.jobId }),
+      })
+    );
+    let taken: { result: AiJobResult; state: ConversationState } | undefined;
+    if (response.status === 200) taken = await response.json();
+    else await response.body?.cancel();
+    if (!taken) {
+      await ctx.api.deleteMessage(params.chatId, params.noticeMsg).catch(() => undefined);
+      return;
+    }
+    if (taken.result.kind === 'scan') {
+      await this.deliverScan(ctx, taken.state, taken.result, params.noticeMsg);
+    } else {
+      await this.deliverVoice(ctx, taken.state, taken.result, params.noticeMsg);
+    }
+  }
 
   /** Put the QRs on the queue; false when there is no queue or it refused them (send directly). */
   private async enqueue(messages: SplitQrMessage[]): Promise<boolean> {
@@ -739,7 +812,27 @@ export class SplitCommandHandler {
       await this.setState({ flow: 'split', step: TOTAL, context: state.context });
       return;
     }
-    const failed = async (why: string) => {
+    const reading = await ctx.reply('Reading your receipt… this takes a few seconds.');
+    if (await this.startJob(ctx, 'scan', photo.file_id, reading.message_id, state)) return;
+    // The photo lives in memory for these calls and is never logged.
+    let result: AiJobResult;
+    try {
+      result = await readScan(reader, download, ctx.api, photo.file_id);
+    } catch (error) {
+      result = failureResult('scan', error);
+    }
+    await this.deliverScan(ctx, state, result, reading.message_id);
+  }
+
+  /** Show a read receipt, or say why it could not be used. Shared by the inline read and the Workflow. */
+  private async deliverScan(
+    ctx: Context,
+    state: ConversationState,
+    result: AiJobResult,
+    noticeMsg: number
+  ): Promise<void> {
+    if (result.kind !== 'scan') return;
+    if ('failure' in result) {
       await countAll(this.counter, [SPLIT_SCAN_FAILED]);
       const buttons =
         state.step === RECEIPT
@@ -748,47 +841,15 @@ export class SplitCommandHandler {
               .text('Type the total instead', 'split_scan:manual')
           : undefined;
       await ctx.reply(
-        `${why} Send another photo${state.step === RECEIPT ? ', or tap Type the total instead' : ' or type the total'}.`,
+        `${result.failure} Send another photo${state.step === RECEIPT ? ', or tap Type the total instead' : ' or type the total'}.`,
         buttons ? { reply_markup: buttons } : undefined
       );
-    };
-    const reading = await ctx.reply('Reading your receipt… this takes a few seconds.');
-    // The photo lives in memory for these calls and is never logged. Only the failed step and
-    // the error's own message (never receipt data) go to the Worker log, so a failure can be traced.
-    const note = (stage: string, error: unknown) =>
-      console.error(
-        `split receipt ${stage} failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`
-      );
-    let bytes: Uint8Array;
-    try {
-      bytes = await download(ctx.api, photo.file_id);
-    } catch (error) {
-      note('download', error);
-      await failed('I could not download that photo (download).');
-      return;
-    }
-    let raw: unknown;
-    try {
-      raw = await reader.read(bytes);
-    } catch (error) {
-      const stage = error instanceof ReceiptReaderError ? error.stage : 'model';
-      note(stage, error);
-      await failed(
-        stage === 'reply'
-          ? 'The reader answered, but I could not use its answer (reply).'
-          : 'The receipt reader failed (model).'
-      );
-      return;
-    }
-    const scan = parseScan(raw);
-    if (!scan.ok) {
-      await failed(scan.error);
       return;
     }
     await countAll(this.counter, [SPLIT_SCAN_OK]);
     // The notice has done its job; a failure keeps it, so the failure message has context
-    await ctx.api.deleteMessage(reading.chat.id, reading.message_id).catch(() => undefined);
-    await this.showReview(ctx, { ...state.context, scan: { receipt: scan.receipt } });
+    await ctx.api.deleteMessage(ctx.chat!.id, noticeMsg).catch(() => undefined);
+    await this.showReview(ctx, { ...state.context, scan: { receipt: result.receipt } });
   }
 
   /**
@@ -830,23 +891,33 @@ export class SplitCommandHandler {
       );
       return;
     }
-    const items = (state.context.receipt as Receipt).items.map((it) => it.name);
-    const retry = 'Send another voice note or type it.';
     const listening = await ctx.reply('Listening… this takes a few seconds.');
-    const gone = () =>
-      ctx.api.deleteMessage(listening.chat.id, listening.message_id).catch(() => undefined);
-    let result: { heard: string; lines: string };
+    if (await this.startJob(ctx, 'voice', note.file_id, listening.message_id, state)) return;
+    const items = (state.context.receipt as Receipt).items.map((it) => it.name);
+    let result: AiJobResult;
     try {
-      result = await voice.hear(await download(ctx.api, note.file_id), items);
+      result = await readVoice(voice, download, ctx.api, note.file_id, items);
     } catch (error) {
-      // Only the stage and the error's own message: never audio or what was said
-      console.error(
-        `split voice failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`
-      );
-      await reply(`Voice is not working right now. Please type who had what.`);
+      result = failureResult('voice', error);
+    }
+    await this.deliverVoice(ctx, state, result, listening.message_id);
+  }
+
+  /** Show what a voice note said and the lines made from it. Shared by the inline read and the Workflow. */
+  private async deliverVoice(
+    ctx: Context,
+    state: ConversationState,
+    result: AiJobResult,
+    noticeMsg: number
+  ): Promise<void> {
+    if (result.kind !== 'voice') return;
+    const reply = (text: string) => ctx.reply(text);
+    if ('failure' in result) {
+      await reply(result.failure);
       return;
     }
-    await gone();
+    const retry = 'Send another voice note or type it.';
+    await ctx.api.deleteMessage(ctx.chat!.id, noticeMsg).catch(() => undefined);
     if (!result.heard) {
       await reply(`I heard nothing. ${retry}`);
       return;

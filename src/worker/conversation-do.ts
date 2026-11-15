@@ -154,7 +154,61 @@ export class ConversationDO {
       return this.claimState(request);
     }
 
+    // A background read (receipt or voice note) leaves its result here and is shown at most once
+    if (method === 'POST' && url.pathname === '/job/store') {
+      return this.storeJob(request);
+    }
+    if (method === 'POST' && url.pathname === '/job/take') {
+      return this.takeJob(request);
+    }
+
     return new Response('Not found', { status: 404 });
+  }
+
+  /**
+   * Keep a background job's result in the conversation, if the conversation still waits for that
+   * job (`context.pendingJob.id`). 204 stored, 409 when it does not (the job is stale).
+   */
+  private async storeJob(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => null)) as {
+      jobId?: unknown;
+      result?: unknown;
+    } | null;
+    if (typeof body?.jobId !== 'string') return new Response('Invalid job', { status: 400 });
+    const stored = await this.state.storage.get<string>('conversation');
+    const current = stored ? this.serializer.deserialize(stored) : null;
+    const pending = current?.context.pendingJob as { id?: string } | undefined;
+    if (!current || pending?.id !== body.jobId) return new Response('Stale', { status: 409 });
+    await this.saveState({
+      ...current,
+      context: { ...current.context, pendingJob: { ...pending, result: body.result } },
+    });
+    return new Response(null, { status: 204 });
+  }
+
+  /**
+   * Hand out a job's result exactly once, and only while the conversation still waits for it: the
+   * same flow at the same step as when the job started. Either way the job is forgotten, so a
+   * conversation that moved on never receives it. 200 `{ result, state }` or 409.
+   */
+  private async takeJob(request: Request): Promise<Response> {
+    const body = (await request.json().catch(() => null)) as { jobId?: unknown } | null;
+    if (typeof body?.jobId !== 'string') return new Response('Invalid job', { status: 400 });
+    const stored = await this.state.storage.get<string>('conversation');
+    const current = stored ? this.serializer.deserialize(stored) : null;
+    const pending = current?.context.pendingJob as
+      | { id?: string; step?: number; result?: unknown }
+      | undefined;
+    if (!current || pending?.id !== body.jobId) return new Response('Stale', { status: 409 });
+    const { pendingJob: _gone, ...context } = current.context;
+    const state = { ...current, context };
+    await this.saveState(state);
+    if (current.flow !== 'split' || current.step !== pending.step || pending.result === undefined) {
+      return new Response('Stale', { status: 409 });
+    }
+    return new Response(JSON.stringify({ result: pending.result, state }), {
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 
   /**
