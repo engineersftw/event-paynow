@@ -4,9 +4,11 @@ import jsQR from 'jsqr';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { D1UsageRepository } from '../../src/db/usage-repository';
 import { ReceiptReaderError } from '../../src/receipt-reader';
+import { handleSplitAppApi } from '../../src/split-app/api';
 import { acceptUpdate, createSplitBot } from '../../src/split-bot';
 import worker from '../../src/worker';
 import type { ConversationDO } from '../../src/worker/conversation-do';
+import { launchFields, signInitData } from '../helpers/sign-init-data';
 import {
   applyTestSchema,
   bmpToRgba,
@@ -1772,12 +1774,9 @@ describe('Split_PayNow_Bot group claiming', () => {
     u.callback_query.message.chat = { id: chat, type: 'group' };
     return b.handleUpdate(u as unknown as Update);
   };
-  /** The organiser taps an item (which opens the menu) and then Mine; returns the menu message id. */
+  /** The organiser taps an item: like any member, that claims it for them. */
   const orgClaim = async (b: B, chat: number, org: number, item: number, msg: number) => {
     await tapOn(b, chat, org, `split_claim:${item}`, msg);
-    const menuId = lastId();
-    await tapOn(b, chat, org, `split_who:${item}:mine`, menuId);
-    return menuId;
   };
   const stateOf = async (chat: number) =>
     (await peek(`split-${chat}`)) as unknown as {
@@ -2008,95 +2007,107 @@ describe('Split_PayNow_Bot group claiming', () => {
     expect(stub.lastText()).toContain('2. Rice SGD 10.00: Bob');
   });
 
-  describe('the organiser menu', () => {
-    const menuText = () => stub.editedMessages.findLast((e) => e.text.startsWith('Item '))!.text;
+  describe('the organiser in the chat and in the Mini App', () => {
     const claimText = () =>
       stub.editedMessages.findLast((e) => e.text.startsWith('Tap the items'))!.text;
-    const open = async (b: B, chat: number, org: number, item: number, msg: number) => {
-      await tapOn(b, chat, org, `split_claim:${item}`, msg);
-      return lastId(); // the menu message
-    };
-    const pick = (b: B, chat: number, org: number, item: number, action: string, menu: number) =>
-      tapOn(b, chat, org, `split_who:${item}:${action}`, menu);
+    const appEnv = {
+      ...env,
+      AI: undefined,
+      SPLIT_BOT_TOKEN: 'split-token',
+      SPLIT_BOT_USERNAME: 'Split_PayNow_Bot',
+      SPLIT_APP_NAME: 'Manage_Split_Claims',
+    } as never;
+    /** The organiser changes the claims in the Mini App: the real interface with signed launch data. */
+    async function inApp(
+      chat: number,
+      org: number,
+      item: number,
+      op: string,
+      more: Record<string, unknown> = {}
+    ) {
+      const init = await signInitData(
+        'split-token',
+        launchFields({ id: org, first_name: NAMES[org] ?? `User${org}` }, `${chat}_0`)
+      );
+      const r = await handleSplitAppApi(
+        new Request('https://worker.test/split-app/api/claim', {
+          method: 'POST',
+          headers: { Authorization: `tma ${init}` },
+          body: JSON.stringify({ item, op, ...more }),
+        }),
+        appEnv,
+        { fetch: stub.fetch }
+      );
+      return { status: r.status, body: (await r.json()) as { error?: string } };
+    }
 
-    it('opens for the organiser only; Mine, giving to a claimer and removing claims work', async () => {
-      const { b, chat, org, ann, bob, msg } = await startClaiming();
+    it('the organiser taps an item like a member: it is claimed for them, no menu opens, and a second tap takes it back', async () => {
+      const { b, chat, org, msg } = await startClaiming();
       const before = stub.sentMessages.length;
-      await tapOn(b, chat, ann, 'split_claim:0', msg); // a member's tap claims, no menu
-      expect(stub.sentMessages.length).toBe(before);
-
-      const menu = await open(b, chat, org, 1, msg);
-      expect(stub.lastText()).toContain('Item 2: Rice SGD 10.00');
-      const labels = (
-        stub.sentMessages.at(-1)!.replyMarkup as {
-          inline_keyboard: Array<Array<{ text: string }>>;
-        }
-      ).inline_keyboard
-        .flat()
-        .map((k) => k.text);
-      expect(labels).toEqual(['🙋 Mine', 'Ann', '➕ Someone else…', '👥 Shared by all…', 'Close']); // no clear: nobody holds it
-
-      await pick(b, chat, org, 1, 'mine', menu);
+      await tapOn(b, chat, org, 'split_claim:1', msg);
+      expect(stub.sentMessages.length).toBe(before); // no menu or other message
       expect(claimText()).toContain('2. Rice SGD 10.00: Olive');
-      await pick(b, chat, org, 1, String(ann), menu); // give it to Ann as well
-      expect(claimText()).toContain('2. Rice SGD 10.00: Olive, Ann');
-      expect(menuText()).toContain('Item 2');
-      await pick(b, chat, org, 1, String(ann), menu); // and take Ann off again
-      expect(claimText()).toContain('2. Rice SGD 10.00: Olive');
-
-      // Remove all claims empties the item and keeps the rest
-      await pick(b, chat, org, 1, 'clear', menu);
+      expect((await stateOf(chat)).context.claims).toEqual({ '1': [org] });
+      await tapOn(b, chat, org, 'split_claim:1', msg);
       expect(claimText()).toContain('2. Rice SGD 10.00: unclaimed');
-      expect(claimText()).toContain('1. Chilli crab SGD 30.00: Ann');
-      void bob;
-
-      // Close removes the menu
-      stub.deletedMessages = [];
-      await pick(b, chat, org, 1, 'close', menu);
-      expect(stub.deletedMessages.map((d) => d.messageId)).toContain(menu);
+      expect((await stateOf(chat)).context.claims).toEqual({ '1': [] });
     });
 
-    it('refuses menu taps from members and from old menus', async () => {
+    it('names Edit in app in the claim message only when the Mini App is configured', async () => {
+      const on = await startClaiming({
+        SPLIT_BOT_USERNAME: 'Split_PayNow_Bot',
+        SPLIT_APP_NAME: 'Manage_Split_Claims',
+      });
+      const first = stub.sentMessages.find((m) => m.text.startsWith('Tap the items'))!.text;
+      expect(first).toContain('The organiser can fix who had what with Edit in app.');
+      expect(first).not.toContain('assign it to someone else');
+      await tapOn(on.b, on.chat, on.ann, 'split_claim:0', on.msg);
+      expect(claimText()).toContain('Edit in app');
+
+      const off = await startClaiming({ SPLIT_APP_NAME: '' });
+      expect(off.chat).not.toBe(on.chat);
+      const plain = stub.sentMessages.find((m) => m.text.startsWith('Tap the items'))!.text;
+      expect(plain).not.toContain('Edit in app');
+      expect(plain).not.toContain('assign it to someone else');
+    });
+
+    it('answers a button of a menu posted before the menu was removed, and changes nothing', async () => {
       const { b, chat, org, ann, msg } = await startClaiming();
-      const first = await open(b, chat, org, 0, msg);
-      await pick(b, chat, ann, 0, 'mine', first);
+      await tapOn(b, chat, org, 'split_who:1:mine', msg);
+      expect(stub.callbackAnswers.at(-1)).toBe('That menu is gone. Use Edit in app.');
+      await tapOn(b, chat, ann, 'split_who:1:mine', msg);
       expect(stub.callbackAnswers.at(-1)).toBe("That is the organiser's button.");
       expect((await stateOf(chat)).context.claims ?? {}).toEqual({});
-
-      const second = await open(b, chat, org, 1, msg); // a new menu replaces the old one
-      await pick(b, chat, org, 0, 'mine', first);
-      expect(stub.callbackAnswers.at(-1)).toBe('That step is over.');
-      await pick(b, chat, org, 1, 'mine', second);
-      expect(claimText()).toContain('2. Rice SGD 10.00: Olive');
     });
 
-    it('adds typed people (names, mentions, existing claimers) and refuses a long name', async () => {
-      const { b, chat, org, ann, bob, msg } = await startClaiming();
+    it('keeps working when the conversation still holds a menu from before', async () => {
+      const { b, chat, org, ann, msg } = await startClaiming();
+      const cur = (await peek(`split-${chat}`)) as unknown as { context: Record<string, unknown> };
+      await env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`split-${chat}`)).fetch(
+        new Request('http://localhost/state', {
+          method: 'POST',
+          body: JSON.stringify({
+            flow: 'split',
+            step: 17,
+            idleMs: 3_600_000,
+            context: { ...cur.context, menu: { item: 1, msg: 5, awaiting: 'names' } },
+          }),
+        })
+      );
+      const sent = stub.sentMessages.length;
+      await gsay(b, chat, org, 'Uncle Lim'); // what the old menu would have read: now ignored, quietly
+      expect(stub.sentMessages.length).toBe(sent);
       await tapOn(b, chat, ann, 'split_claim:0', msg);
-      const menu = await open(b, chat, org, 1, msg);
-      await pick(b, chat, org, 1, 'else', menu);
-      expect(menuText()).toContain('Send their names or @mentions');
-
-      await gsay(b, chat, org, 'x'.repeat(21));
-      expect(stub.lastText()).toContain('is too long for a name');
-      await gsay(b, chat, org, 'Uncle Lim, @new_user, ann');
-      expect(claimText()).toContain('2. Rice SGD 10.00: Uncle Lim, @new_user, Ann');
-      // typed people carry no Telegram id; a typed @username who then taps becomes that person
-      NAMES[bob] = 'Bob';
-      const bobTap = tapOn(b, chat, bob, 'split_claim:2', msg);
-      await bobTap;
-      const state = await stateOf(chat);
-      const typed = (state.context.claimers ?? []) as Array<{ id: number; name: string }>;
-      expect(typed.filter((x) => x.id < 0).map((x) => x.name)).toEqual(['Uncle Lim', '@new_user']);
+      expect((await stateOf(chat)).context.claims).toEqual({ '0': [ann] });
+      await tapOn(b, chat, org, 'split_claim:done', msg);
+      expect(stub.lastText()).toContain('not claimed by anyone'); // the flow moves on as usual
     });
 
-    it("merges a typed @username with that member's own tap", async () => {
+    it("merges a typed @username added in the app with that member's own tap", async () => {
       const { b, chat, org, msg } = await startClaiming();
       const member = uid++;
       NAMES[member] = 'Zoe';
-      const menu = await open(b, chat, org, 0, msg);
-      await pick(b, chat, org, 0, 'else', menu);
-      await gsay(b, chat, org, '@zoe_lee');
+      expect((await inApp(chat, org, 0, 'add', { text: '@zoe_lee' })).status).toBe(200);
       const tap = callbackUpdate(member, 'split_claim:1', msg, upd++) as unknown as {
         callback_query: { from: Record<string, unknown>; message: Record<string, unknown> };
       };
@@ -2113,27 +2124,13 @@ describe('Split_PayNow_Bot group claiming', () => {
       expect((await stateOf(chat)).context.claims).toEqual({ '0': [member], '1': [member] });
     });
 
-    it('shares an item N ways: one share each, a cap, and an unfilled share at Done', async () => {
+    it('shares an item N ways set in the app: one share each, and an unfilled share at Done', async () => {
       const { b, chat, org, ann, bob, msg } = await startClaiming();
-      const cy = uid++;
-      NAMES[cy] = 'Cy';
-      const menu = await open(b, chat, org, 0, msg);
-      await pick(b, chat, org, 0, 'all', menu);
-      expect(menuText()).toContain('How many ways');
-      await gsay(b, chat, org, '1');
-      expect(stub.lastText()).toContain('whole number from 2 to 20');
-      await pick(b, chat, org, 0, 'w3', menu);
+      expect((await inApp(chat, org, 0, 'ways', { n: 3 })).status).toBe(200);
       expect(claimText()).toContain('1. Chilli crab SGD 30.00 (3 ways): 3 left');
-
       await tapOn(b, chat, ann, 'split_claim:0', msg);
       await tapOn(b, chat, bob, 'split_claim:0', msg);
       expect(claimText()).toContain('(3 ways): Ann, Bob, 1 left');
-      // it cannot go below the people who hold it
-      await pick(b, chat, org, 0, 'all', menu);
-      await gsay(b, chat, org, '3');
-      await pick(b, chat, org, 0, 'back', menu);
-      const claimsBefore = (await stateOf(chat)).context.claims;
-      expect(claimsBefore).toEqual({ '0': [ann, bob] });
 
       await orgClaim(b, chat, org, 1, msg);
       await orgClaim(b, chat, org, 2, msg);
@@ -2148,59 +2145,40 @@ describe('Split_PayNow_Bot group claiming', () => {
       expect(summary).toContain('Ann: SGD 12.00');
       expect(summary).toContain('Bob: SGD 12.00');
       expect(summary).toContain('Your own share: SGD 48.00');
-      void cy;
     });
 
-    it('stops claims at the number of shares and refuses fewer ways than holders', async () => {
+    it('stops member taps at the number of shares, and lets them in when the ways are removed', async () => {
       const { b, chat, org, ann, bob, msg } = await startClaiming();
       const cy = uid++;
       NAMES[cy] = 'Cy';
-      const menu = await open(b, chat, org, 0, msg);
-      await pick(b, chat, org, 0, 'all', menu);
-      await pick(b, chat, org, 0, 'w2', menu);
+      await inApp(chat, org, 0, 'ways', { n: 2 });
       await tapOn(b, chat, ann, 'split_claim:0', msg);
       await tapOn(b, chat, bob, 'split_claim:0', msg);
       await tapOn(b, chat, cy, 'split_claim:0', msg);
       expect(stub.callbackAnswers.at(-1)).toBe('All 2 shares are taken.');
       expect((await stateOf(chat)).context.claims).toEqual({ '0': [ann, bob] });
 
-      // removing the ways makes it a normal shared item again, so Cy can join
-      await pick(b, chat, org, 0, 'noways', menu);
+      await inApp(chat, org, 0, 'ways', { n: null });
       await tapOn(b, chat, cy, 'split_claim:0', msg);
       expect((await stateOf(chat)).context.claims).toEqual({ '0': [ann, bob, cy] });
-      await pick(b, chat, org, 0, 'all', menu);
-      await pick(b, chat, org, 0, 'w2', menu);
-      expect(stub.callbackAnswers.at(-1)).toContain('3 people already hold it');
     });
 
-    it('keeps the ways when all claims are removed, and the 20 person limit counts typed people', async () => {
+    it('counts people added in the app towards the 20 person limit for member taps too', async () => {
       const { b, chat, org, ann, msg } = await startClaiming();
-      const menu = await open(b, chat, org, 0, msg);
-      await pick(b, chat, org, 0, 'all', menu);
-      await pick(b, chat, org, 0, 'w4', menu);
-      await tapOn(b, chat, ann, 'split_claim:0', msg);
-      await pick(b, chat, org, 0, 'clear', menu);
-      expect(claimText()).toContain('(4 ways): 4 left');
-
-      await pick(b, chat, org, 0, 'noways', menu);
-      await pick(b, chat, org, 0, 'else', menu);
       const names = Array.from({ length: 20 }, (_, i) => `P${i}`).join(', ');
-      await gsay(b, chat, org, names);
+      expect((await inApp(chat, org, 0, 'add', { text: names })).status).toBe(200);
       expect(((await stateOf(chat)).context.claimers ?? []).length).toBe(20);
-      // one more person, typed or tapping, is refused
-      await pick(b, chat, org, 0, 'else', menu);
-      await gsay(b, chat, org, 'One more');
-      expect(stub.lastText()).toContain('Up to 20 people');
+      const more = await inApp(chat, org, 0, 'add', { text: 'One more' });
+      expect(more.status).toBe(422);
+      expect(more.body.error).toContain('Up to 20 people');
       await tapOn(b, chat, ann, 'split_claim:1', msg);
       expect(stub.callbackAnswers.at(-1)).toContain('Up to 20 people');
     });
 
-    it('pays for a typed person and for claimers with chat QRs, and sends nothing by direct message', async () => {
+    it('pays for a person added in the app and for claimers with chat QRs, and sends nothing by direct message', async () => {
       const { b, chat, org, ann, msg } = await startClaiming();
       await tapOn(b, chat, ann, 'split_claim:0', msg);
-      const menu = await open(b, chat, org, 1, msg);
-      await pick(b, chat, org, 1, 'else', menu);
-      await gsay(b, chat, org, 'Uncle Lim');
+      expect((await inApp(chat, org, 1, 'add', { text: 'Uncle Lim' })).status).toBe(200);
       await orgClaim(b, chat, org, 2, msg);
       await tapOn(b, chat, org, 'split_claim:done', msg);
       expect(stub.lastText()).not.toContain('not claimed by anyone');
@@ -2238,11 +2216,11 @@ describe('Split_PayNow_Bot group claiming', () => {
       expect(claimText()).toContain('🔒 1. Chilli crab SGD 30.00: Ann (QR sent)');
       expect((await stateOf(chat)).step).toBe(17); // claiming is still open
 
-      // the locked item cannot be changed by a member or by the organiser's menu
+      // the locked item cannot be changed by a member or by the organiser
       await tapOn(b, chat, bob, 'split_claim:0', msg);
       expect(stub.callbackAnswers.at(-1)).toContain('locked');
       await tapOn(b, chat, org, 'split_claim:0', msg);
-      expect(stub.lastText()).toContain('This item is locked');
+      expect(stub.callbackAnswers.at(-1)).toContain('locked');
       expect((await stateOf(chat)).context.claims).toEqual({ '0': [ann] });
       // a second QR is refused
       await qr(b, chat, ann, msg);

@@ -34,7 +34,6 @@ import {
   applyUnassigned,
   assignmentFromClaims,
   type Claimer,
-  claimerName,
   memberAmount,
   missingCents,
   type PersonShare,
@@ -43,7 +42,6 @@ import {
   type Receipt,
   type ReceiptItem,
   receiptWarnings,
-  resolveTyped,
   shareReceipt,
   toEntries,
 } from './receipt';
@@ -52,16 +50,13 @@ import {
   applyClaim,
   CLAIM,
   CLAIM_IDLE_MS,
-  type ClaimOp,
   type ClaimResult,
   type Ctx,
   claimButtons,
   claimersOf,
   claimsOf,
   claimText,
-  itemLocked,
   lockedPeople,
-  MAX_WAYS,
   mutateClaimsOn,
   servedOf,
   waysOf,
@@ -458,58 +453,6 @@ const amendMenu = (receipt: boolean) =>
     .row()
     .text('Back', 'split_back');
 
-type Menu = { item: number; msg: number; awaiting?: 'names' | 'ways' };
-
-/** The organiser's menu for one item: what it says and its buttons. */
-function menuView(c: Ctx, organiserId: number): { text: string; kb: InlineKeyboard } {
-  const menu = c.menu as Menu;
-  const item = menu.item;
-  const it = (c.receipt as Receipt).items[item]!;
-  const holders = claimsOf(c)[String(item)] ?? [];
-  const n = waysOf(c)[String(item)];
-  const head = `Item ${item + 1}: ${it.name} ${sgd(it.cents)}${n !== undefined ? ` (${n} ways)` : ''}`;
-  const at = (action: string) => `split_who:${item}:${action}`;
-  if (itemLocked(c, item)) {
-    return {
-      text: `🔒 ${head}\n\nThis item is locked: someone on it already has their QR.`,
-      kb: new InlineKeyboard().text('Close', at('close')),
-    };
-  }
-  if (menu.awaiting === 'names') {
-    return {
-      text: `${head}\n\nWho else had it? Send their names or @mentions, separated by commas (reply to this message).`,
-      kb: new InlineKeyboard().text('Back', at('back')),
-    };
-  }
-  if (menu.awaiting === 'ways') {
-    const kb = new InlineKeyboard();
-    for (const k of [2, 3, 4, 5, 6]) kb.text(String(k), at(`w${k}`));
-    return {
-      text: `${head}\n\nHow many ways should it be split? Tap a number or send one from 2 to ${MAX_WAYS} (reply to this message).`,
-      kb: kb.row().text('Back', at('back')),
-    };
-  }
-  const kb = new InlineKeyboard().text(
-    `${holders.includes(organiserId) ? '✓ ' : ''}🙋 Mine`,
-    at('mine')
-  );
-  for (const person of claimersOf(c)) {
-    if (person.id === organiserId) continue;
-    kb.row().text(
-      `${holders.includes(person.id) ? '✓ ' : ''}${person.name}`.slice(0, 40),
-      at(String(person.id))
-    );
-  }
-  kb.row().text('➕ Someone else…', at('else'));
-  kb.row().text(n !== undefined ? `👥 Shared ${n} ways: change` : '👥 Shared by all…', at('all'));
-  if (n !== undefined) kb.row().text('Not shared: remove the ways', at('noways'));
-  if (holders.length > 0) kb.row().text('🗑 Remove all claims', at('clear'));
-  return {
-    text: `${head}\n\nWho had it? Tap a person to add or remove them.`,
-    kb: kb.row().text('Close', at('close')),
-  };
-}
-
 /**
  * Split_PayNow_Bot conversation. Every answer is stored in the Durable Object context and
  * `nextNeed` decides what is still missing, so the first run, an Amend and an edited message all
@@ -869,11 +812,7 @@ export class SplitCommandHandler {
       return true;
     }
 
-    if (state.step === CLAIM) {
-      // The organiser's reply to the menu (names or a number of ways); other chat is ignored
-      if ((state.context.menu as Menu | undefined)?.awaiting) await this.menuText(ctx, text, state);
-      return true;
-    }
+    if (state.step === CLAIM) return true; // taps only: the organiser's chat is not answered
 
     const field = FIELD_OF_STEP[state.step];
     if (!field) {
@@ -945,7 +884,11 @@ export class SplitCommandHandler {
       });
       return true;
     }
-    if (data.startsWith('split_who:')) return this.menuTap(ctx, data);
+    if (data.startsWith('split_who:')) {
+      // A button of a menu posted before the menu was removed
+      await ctx.answerCallbackQuery({ text: 'That menu is gone. Use Edit in app.' });
+      return true;
+    }
     if (data === 'split_voice:use') return this.voiceUse(ctx, state);
     const c = state.context;
     const step = state.flow === 'split' ? state.step : 0;
@@ -1056,11 +999,7 @@ export class SplitCommandHandler {
       }
       // Claiming is over for now (Keep claiming opens a fresh message): the buttons go
       await ctx.editMessageText(`${claimText(c)}\n\nClaiming is closed.`).catch(() => undefined);
-      const { menu, ...withoutMenu } = c;
-      if (menu) {
-        await ctx.api.deleteMessage(ctx.chat!.id, (menu as Menu).msg).catch(() => undefined);
-      }
-      await this.proceed(ctx, { ...withoutMenu, ...result.patch });
+      await this.proceed(ctx, { ...c, ...result.patch });
     } else if (data === 'split_claim:keep') {
       await this.setButtons(ctx, new InlineKeyboard()); // the question is answered
       const { partial, gap, unassignedChoice, shareItems, ...rest } = c;
@@ -1140,7 +1079,6 @@ export class SplitCommandHandler {
           claimers,
           claimMsg,
           ways,
-          menu,
           shareItems,
           served,
           organiserName,
@@ -1360,7 +1298,7 @@ export class SplitCommandHandler {
       // So a voice note sent before tapping can take the menu's buttons away
       await this.setState({ flow: 'split', step: HOW, context: { ...c, howMsg: sent.message_id } });
     } else if (step === CLAIM) {
-      const sent = await ctx.reply(claimText(c), {
+      const sent = await ctx.reply(claimText(c, this.appUrl(ctx)), {
         reply_markup: claimButtons(c, this.appUrl(ctx)),
       });
       await this.setState({
@@ -1560,7 +1498,7 @@ export class SplitCommandHandler {
   /**
    * Change the claims through a conditional write: read the state, apply the change to it, write
    * only if nobody wrote since, and apply it again on the newer state otherwise. That keeps
-   * simultaneous taps (and the organiser's menu choices) all recorded. `expectMsg` names the
+   * simultaneous taps all recorded. `expectMsg` names the
    * message the tap must come from (a stale button is refused); typed text passes none.
    */
   private async mutateClaims(
@@ -1579,42 +1517,17 @@ export class SplitCommandHandler {
   private async refreshClaims(ctx: Context, c: Ctx): Promise<void> {
     if (!ctx.chat || c.claimMsg === undefined) return;
     await ctx.api
-      .editMessageText(ctx.chat.id, c.claimMsg as number, claimText(c), {
+      .editMessageText(ctx.chat.id, c.claimMsg as number, claimText(c, this.appUrl(ctx)), {
         reply_markup: claimButtons(c, this.appUrl(ctx)),
       })
       .catch(() => undefined);
   }
 
-  /** Show the organiser's menu with the current state (or its waiting-for-text version). */
-  private async refreshMenu(ctx: Context, c: Ctx, organiserId: number): Promise<void> {
-    const menu = c.menu as Menu | undefined;
-    if (!ctx.chat || !menu) return;
-    const view = menuView(c, organiserId);
-    await ctx.api
-      .editMessageText(ctx.chat.id, menu.msg, view.text, { reply_markup: view.kb })
-      .catch(() => undefined);
-  }
-
-  /**
-   * A member taps an item: claim it, or take their claim back. The organiser's tap opens the
-   * menu for that item instead, where they can claim it, give it to someone else or share it.
-   */
+  /** Anyone, the organiser included, taps an item: claim it, or take their claim back. */
   private async claimTap(ctx: Context, data: string): Promise<boolean> {
     const index = Number(data.slice('split_claim:'.length));
     const from = ctx.from;
     if (!from) return true;
-    const first = await this.getState();
-    const c0 = first.context;
-    if (
-      first.flow === 'split' &&
-      first.step === CLAIM &&
-      ctx.callbackQuery?.message?.message_id === c0.claimMsg &&
-      first.owner?.userId === from.id &&
-      (c0.receipt as Receipt).items[index] !== undefined
-    ) {
-      await ctx.answerCallbackQuery();
-      return this.openMenu(ctx, index, c0);
-    }
     const r = await this.mutateClaims(
       ctx,
       (c) => c.claimMsg as number | undefined,
@@ -1727,127 +1640,6 @@ export class SplitCommandHandler {
       return 'posted';
     } catch {
       return 'failed';
-    }
-  }
-
-  private async openMenu(ctx: Context, item: number, before: Ctx): Promise<boolean> {
-    const organiserId = ctx.from!.id;
-    const old = before.menu as Menu | undefined;
-    if (old) await ctx.api.deleteMessage(ctx.chat!.id, old.msg).catch(() => undefined);
-    // The message id is not known until it is sent, so send, then record it
-    const placeholder = { ...before, menu: { item, msg: 0 } };
-    const view = menuView(placeholder, organiserId);
-    const sent = await ctx.reply(view.text, { reply_markup: view.kb });
-    const r = await this.mutateClaims(
-      ctx,
-      (c) => c.claimMsg as number | undefined,
-      (c) => ({ context: { ...c, menu: { item, msg: sent.message_id } }, note: '' })
-    );
-    if (r.kind !== 'ok')
-      await ctx.api.deleteMessage(ctx.chat!.id, sent.message_id).catch(() => undefined);
-    return true;
-  }
-
-  /** A tap on the organiser's menu (the owner check has already been made). */
-  private async menuTap(ctx: Context, data: string): Promise<boolean> {
-    const m = /^split_who:(\d+):(-?\d+|[a-z]+\d*)$/.exec(data);
-    const organiser = ctx.from;
-    if (!m || !organiser) {
-      await ctx.answerCallbackQuery();
-      return true;
-    }
-    const item = Number(m[1]);
-    const action = m[2]!;
-    const stale = (c: Ctx) =>
-      (c.menu as Menu | undefined)?.item !== item ? undefined : (c.menu as Menu).msg;
-
-    if (action === 'close') {
-      const r = await this.mutateClaims(ctx, stale, (c) => {
-        const { menu, ...rest } = c;
-        return { context: rest, note: '' };
-      });
-      await ctx.answerCallbackQuery(
-        r.kind === 'stale' ? { text: 'That step is over.' } : undefined
-      );
-      if (r.kind === 'ok') await ctx.deleteMessage().catch(() => undefined);
-      return true;
-    }
-
-    const awaiting = action === 'else' ? 'names' : action === 'all' ? 'ways' : undefined;
-    const op: ClaimOp | undefined =
-      action === 'mine'
-        ? { kind: 'toggle', from: organiser }
-        : action === 'clear'
-          ? { kind: 'clear' }
-          : action === 'noways'
-            ? { kind: 'ways', n: null }
-            : /^w\d+$/.test(action)
-              ? { kind: 'ways', n: Number(action.slice(1)) }
-              : /^-?\d+$/.test(action)
-                ? { kind: 'toggleId', id: Number(action) }
-                : undefined;
-    const r = await this.mutateClaims(ctx, stale, (c) => {
-      const menu = c.menu as Menu;
-      if (op) {
-        const done = applyClaim(c, item, op);
-        if ('refuse' in done) return done;
-        return { context: { ...done.context, menu: { item, msg: menu.msg } }, note: done.note };
-      }
-      // Else, Shared by all and Back only change what the menu is waiting for
-      return {
-        context: { ...c, menu: { item, msg: menu.msg, ...(awaiting ? { awaiting } : {}) } },
-        note: '',
-      };
-    });
-    if (r.kind === 'stale') {
-      await ctx.answerCallbackQuery({ text: 'That step is over.' });
-    } else if (r.kind === 'busy') {
-      await ctx.answerCallbackQuery({ text: 'Busy. Please tap again.' });
-    } else if (r.kind === 'refused') {
-      await ctx.answerCallbackQuery({ text: r.text, show_alert: true });
-    } else {
-      await ctx.answerCallbackQuery(r.note ? { text: r.note } : undefined);
-      await this.refreshMenu(ctx, r.context, organiser.id);
-      if (op) await this.refreshClaims(ctx, r.context);
-    }
-    return true;
-  }
-
-  /** The organiser's typed answer to the menu: names for Someone else, or a number of ways. */
-  private async menuText(ctx: Context, text: string, state: ConversationState): Promise<void> {
-    const organiser = ctx.from!;
-    const menu = state.context.menu as Menu;
-    const item = menu.item;
-    const mentions = textMentionsOf(ctx.message);
-    const r = await this.mutateClaims(ctx, null, (c) => {
-      const current = c.menu as Menu | undefined;
-      if (!current?.awaiting || current.item !== item) return { refuse: '' };
-      let done: ClaimResult;
-      if (current.awaiting === 'ways') {
-        const n = /^\d+$/.test(text) ? Number(text) : 0;
-        if (n < 2 || n > MAX_WAYS) {
-          return { refuse: `Send a whole number from 2 to ${MAX_WAYS}.` };
-        }
-        done = applyClaim(c, item, { kind: 'ways', n });
-      } else {
-        const typed = resolveTyped(claimersOf(c), text, mentions, {
-          id: organiser.id,
-          name: claimerName(
-            claimersOf(c).map((x) => x.name),
-            organiser
-          ),
-        });
-        if (!typed.ok) return { refuse: typed.error };
-        done = applyClaim(c, item, { kind: 'add', people: typed.people });
-      }
-      if ('refuse' in done) return done;
-      return { context: { ...done.context, menu: { item, msg: current.msg } }, note: done.note };
-    });
-    if (r.kind === 'ok') {
-      await this.refreshMenu(ctx, r.context, organiser.id);
-      await this.refreshClaims(ctx, r.context);
-    } else if (r.kind === 'refused') {
-      if (r.text) await ctx.reply(r.text);
     }
   }
 
