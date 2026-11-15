@@ -203,6 +203,40 @@ describe('Split Mini App interface: changing claims', () => {
     expect((await peek(chatId)).context.claims['0']).toEqual([]);
   });
 
+  it('adds everyone who is listed to an item in one step, skipping those who hold it or have their QR', async () => {
+    const chatId = await seed({ served: { '12': 500 } }); // Ann holds items 0 and 1, Bob has his QR
+    let r = await edit(chatId, 1, 'everyone');
+    expect(r.status).toBe(200);
+    expect(r.body.items[1].holders).toEqual([11, 7]); // Ann stays, the organiser joins, Bob is skipped
+    r = await edit(chatId, 1, 'everyone');
+    expect(r.status).toBe(422);
+    expect(r.body.error).toBe('Everyone is already on this item.');
+    r = await edit(chatId, 2, 'everyone');
+    expect(r.body.items[2].holders).toEqual([11, 7]);
+  });
+
+  it('adds nobody when the item has fewer shares left than people to add', async () => {
+    const chatId = await seed({ ways: { '2': 3 }, claims: { '2': [11] } });
+    const before = (await peek(chatId)).context.claims;
+    let r = await edit(chatId, 2, 'everyone'); // Bob and the organiser fit: 2 shares left for 2 people
+    expect(r.status).toBe(200);
+    expect(r.body.items[2].holders).toHaveLength(3);
+    const crowded = await seed({
+      ways: { '2': 3 },
+      claims: { '2': [11] },
+      claimers: [
+        { id: 11, name: 'Ann' },
+        { id: 12, name: 'Bob' },
+        { id: 13, name: 'Cy' },
+      ],
+    }); // Bob, Cy and the organiser are 3 people for 2 shares
+    r = await edit(crowded, 2, 'everyone');
+    expect(r.status).toBe(422);
+    expect(r.body.error).toBe('Only 2 shares left, so not everyone fits.');
+    expect((await peek(crowded)).context.claims['2']).toEqual([11]);
+    expect(before['2']).toEqual([11]);
+  });
+
   it('adds people by typed name: a new one, an existing one, me, and an @username', async () => {
     const chatId = await seed();
     let r = await edit(chatId, 3, 'add', { text: 'Uncle Lim' });

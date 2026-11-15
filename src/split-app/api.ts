@@ -142,6 +142,23 @@ function operation(
         ? { item, op: { kind: 'add', people: typed.people } }
         : { error: typed.error };
     }
+    case 'everyone': {
+      // Everyone listed who is not on the item yet and can still change; all or nobody
+      const held = new Set(claimsOf(c)[String(item)] ?? []);
+      const served = servedOf(c);
+      const listed = [...claimersOf(c)];
+      if (!listed.some((p) => p.id === user.id)) {
+        listed.push({ id: user.id, name: displayName(user) });
+      }
+      const people = listed.filter((p) => !held.has(p.id) && served[String(p.id)] === undefined);
+      if (people.length === 0) return { error: 'Everyone is already on this item.' };
+      const n = waysOf(c)[String(item)];
+      if (n !== undefined && people.length > n - held.size) {
+        const left = Math.max(0, n - held.size);
+        return { error: `Only ${left} share${left === 1 ? '' : 's'} left, so not everyone fits.` };
+      }
+      return { item, op: { kind: 'add', people } };
+    }
     case 'clear':
       return { item, op: { kind: 'clear' } };
     case 'ways': {

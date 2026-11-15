@@ -85,6 +85,30 @@ The system SHALL let the organiser, in the app, tap a person on an item to add o
 - **WHEN** a 3-way item is held by three people and the organiser adds a fourth
 - **THEN** the app refuses and says all shares are taken
 
+### Requirement: The organiser can add everyone to an item in one step
+
+The system SHALL let the organiser add every person listed in the app to an item in one step. Only people who do not hold the item and have not taken their QR SHALL be added. When the item is shared in a number of ways and fewer shares are left than people to add, the system SHALL add nobody and say how many shares are left.
+
+#### Scenario: Add everyone
+
+- **WHEN** Ann, Bob and the organiser are listed, Ann holds item 3, and the organiser adds everyone to item 3
+- **THEN** Bob and the organiser join Ann on item 3
+
+#### Scenario: Skips a person with a QR
+
+- **WHEN** Bob has taken his QR and the organiser adds everyone to item 3
+- **THEN** everyone except Bob is added
+
+#### Scenario: Everyone is already on it
+
+- **WHEN** every listed person already holds item 3
+- **THEN** the app says everyone is already on it and changes nothing
+
+#### Scenario: Not enough shares
+
+- **WHEN** item 3 is shared 3 ways, holds one person, and four more people are listed
+- **THEN** nobody is added and the app says two shares are left
+
 ### Requirement: The organiser can add people by name in the app
 
 The system SHALL let the organiser add a person to the claim by typing a name or an `@username`, with the rules of the chat's Someone else option: a name matching an existing person reuses them, a name longer than 20 characters is refused, a plain name has no Telegram identity, and the total number of people SHALL NOT exceed 20.
