@@ -134,7 +134,7 @@ The system SHALL send a PayNow QR as a fixed amount that the payer cannot change
 #### Scenario: A send fails part way
 
 - **WHEN** Telegram refuses one of several QR sends
-- **THEN** the bot stops, says how many QRs were sent and how many were not, and asks the user to send `/split` again
+- **THEN** the other QRs are still sent, the refused one is tried again, and if it still cannot be sent the chat is told which QR is missing and asked to send `/split` again
 
 ### Requirement: In a group only the person who started the split can answer
 
@@ -167,7 +167,7 @@ The system SHALL, in a group chat, accept text and button taps for a split only 
 
 ### Requirement: The bot stores nothing and is off until configured
 
-The system SHALL keep a split's answers only in the chat's Durable Object until the QR is sent, the user cancels or the conversation expires after 10 minutes of inactivity (one hour while items are being claimed), and SHALL NOT log the bill, payee, description or identities. The only data it keeps beyond that is the contact record (username and user id, until `/forget`) and a waiting QR (until collected or 48 hours). The bot's webhook SHALL answer 404 until its token, webhook secret and username are configured, and SHALL reject a request with a wrong secret token.
+The system SHALL keep a split's answers only in the chat's Durable Object until the QR is sent, the user cancels or the conversation expires after 10 minutes of inactivity (one hour while items are being claimed), and SHALL NOT log the bill, payee, description or identities. The only data it keeps beyond that is the contact record (username and user id, until `/forget`), a waiting QR (until collected or 48 hours), and a QR waiting in the send queue (its QR data, which includes the payee, the amount, the description and the names it is for), which SHALL be removed once it is posted or given up and SHALL NOT be logged. The bot's webhook SHALL answer 404 until its token, webhook secret and username are configured, and SHALL reject a request with a wrong secret token.
 
 #### Scenario: Not configured
 
@@ -1251,7 +1251,7 @@ The system SHALL NOT ask whether the payee is the organiser. The organiser's own
 
 ### Requirement: Every payer's QR is posted in the chat
 
-The system SHALL post every QR of a split in the chat where the split is confirmed, one per distinct amount with the name of everyone who owes it, and SHALL NOT send any QR by direct message. This SHALL hold for plain names, @mentions, people picked from the member list, claimers and the organiser, and for the QRs taken early with Get my QR. Confirming SHALL NOT depend on the bot knowing a person's Telegram identity or being allowed to message them. A QR that Telegram refuses SHALL be reported like any other failed send.
+The system SHALL post every QR of a split in the chat where the split is confirmed, one per distinct amount with the name of everyone who owes it, and SHALL NOT send any QR by direct message. This SHALL hold for plain names, @mentions, people picked from the member list, claimers and the organiser, and for the QRs taken early with Get my QR. Confirming SHALL NOT depend on the bot knowing a person's Telegram identity or being allowed to message them. Each QR SHALL be made and posted separately in the background, so the number of QRs in a split does not limit whether they all arrive; the QRs MAY arrive in any order. A QR that cannot be posted SHALL be retried and, if it still fails, reported in the chat.
 
 #### Scenario: Mentions
 
@@ -1267,6 +1267,11 @@ The system SHALL post every QR of a split in the chat where the split is confirm
 
 - **WHEN** Ann took her QR early with Get my QR
 - **THEN** the bot says in the chat that Ann's QR was already sent and does not post a second one
+
+#### Scenario: Many amounts
+
+- **WHEN** a split with eight distinct amounts is confirmed
+- **THEN** all eight QRs are posted in the chat, each naming who it is for, whatever order they arrive in
 
 #### Scenario: Private chat
 
@@ -1298,7 +1303,7 @@ The system SHALL take the organiser's own amount to be their items and any unass
 
 ### Requirement: A member can get their own QR in the chat before the claiming is closed
 
-The system SHALL show a Get my QR button on the claim message. When a member who holds at least one item taps it, the system SHALL send them a PayNow QR for their own amount to the payee already given, without waiting for the organiser's Done. The amount SHALL be the member's items (each item split equally between its holders) plus their proportional share of the difference between the receipt total and the items, calculated from the receipt's total of all items so that it does not depend on what other members claim, and rounded up to the cent. The QR SHALL be posted in the chat, with the member's name on the image and caption, and SHALL NOT be sent by direct message. A member who holds nothing SHALL be told to claim an item first. The QR SHALL carry the split's description, which is settled before the claiming begins.
+The system SHALL show a Get my QR button on the claim message. When a member who holds at least one item taps it, the system SHALL send them a PayNow QR for their own amount to the payee already given, without waiting for the organiser's Done. The amount SHALL be the member's items (each item split equally between its holders) plus their proportional share of the difference between the receipt total and the items, calculated from the receipt's total of all items so that it does not depend on what other members claim, and rounded up to the cent. The QR SHALL be posted in the chat in the background shortly after the tap, with the member's name on the image and caption, and SHALL NOT be sent by direct message; the member's amount SHALL be fixed at the tap. When the QR cannot be posted after retrying, the chat SHALL be told that the member's QR was not sent. A member who holds nothing SHALL be told to claim an item first. The QR SHALL carry the split's description, which is settled before the claiming begins.
 
 #### Scenario: Member takes their QR early
 
@@ -1324,3 +1329,22 @@ The system SHALL show a Get my QR button on the claim message. When a member who
 
 - **WHEN** the description was settled as `Huevos` before the claiming and a member taps Get my QR
 - **THEN** the QR carries the description `Huevos`
+
+### Requirement: QR sends are retried and failures reported
+
+The system SHALL retry a QR that could not be posted: when Telegram asks the bot to slow down it SHALL wait the time Telegram gives, and after another temporary error it SHALL try again after a short delay, up to 5 attempts in all. When Telegram refuses the QR for good (for example the bot was removed from the chat), or the attempts run out, the system SHALL stop trying and, where it still can, post one message in the chat naming the amount and the people whose QR was not sent and asking the user to send `/split` again.
+
+#### Scenario: Slowed down by Telegram
+
+- **WHEN** Telegram answers a QR send with "too many requests, retry after 7 seconds"
+- **THEN** the QR is posted again after about 7 seconds and the chat receives it once
+
+#### Scenario: Gives up
+
+- **WHEN** a QR still cannot be posted after 5 attempts
+- **THEN** the chat is told which QR (amount and names) was not sent, and no further attempts are made
+
+#### Scenario: Removed from the chat
+
+- **WHEN** the bot was removed from the group after the split was confirmed
+- **THEN** the QR is not retried and nothing else is attempted for it

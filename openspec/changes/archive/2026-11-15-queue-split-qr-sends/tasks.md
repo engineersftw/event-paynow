@@ -21,4 +21,4 @@
 
 - [x] 4.1 Update README (Split bot delivery, the queue to create, cost), AGENTS.md and docs/architecture.md
 - [x] 4.2 Run `npm run build`, `npm run check` and `npm test`; fix anything they report
-- [ ] 4.3 Create the queue on the account (`wrangler queues create split-qr-sends`) or confirm the deploy step did, deploy, and run one group split with at least five distinct amounts while watching `wrangler tail`: every QR arrives, no 30-second cut-off, and a forced failure (for example a removed bot in a test group) produces the notice
+- [x] 4.3 Create the queue on the account (`wrangler queues create split-qr-sends`) or confirm the deploy step did, deploy, and run one group split with at least five distinct amounts while watching `wrangler tail`: every QR arrives, no 30-second cut-off, and a forced failure (for example a removed bot in a test group) produces the notice (Done: the queue was created by hand, the deploy token got Queues: Edit, the Worker is the queue producer and consumer, and the live split posted every QR.)
