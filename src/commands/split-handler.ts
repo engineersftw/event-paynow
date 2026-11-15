@@ -67,7 +67,7 @@ const REVIEW = 11; // the scan is shown: Use this / Send another photo / Type th
 const ASSIGN = 12; // waiting for who had which item
 const UNASSIGNED = 13; // items nobody was given: split evenly or the organiser covers them
 const ADD_ITEM = 15; // the user is adding an item the scan missed
-const HOW = 16; // group only: type who had what, or let everyone claim
+const HOW = 16; // type who had what, say it with a voice note, or (group) let everyone claim
 const CLAIM = 17; // the claim message is open and any member can tap items
 
 const MAX_DESCRIPTION = 25;
@@ -104,7 +104,7 @@ export const SPLIT_HELP =
   'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
   '/split - payee first, then the total, an optional description, and equal or custom amounts\n' +
   '/split_custom - same, straight to custom amounts (one line per person: name and amount)\n' +
-  '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what; you can also answer that question with a voice note.\n' +
+  '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what; you can also answer that question with a voice note (there is a button for it).\n' +
   'Every QR is posted in the chat, with the names it is for. You get a QR for your own share too.\n' +
   '/forget - delete what I remember about you (your username, kept when you /start me)\n' +
   '/cancel - stop\n\n' +
@@ -319,7 +319,9 @@ function nextNeed(c: Ctx): { step: number; note?: string } {
     if (!entries) {
       if (!c.receipt) return { step: LIST };
       if (c.partial && !c.unassignedChoice) return { step: UNASSIGNED };
-      if (c.group && !c.assignHow) return { step: HOW };
+      // The menu shows in a group (claiming) and wherever voice is available; `group` covers a
+      // split that began before `askHow` existed
+      if ((c.askHow ?? c.group) && !c.assignHow) return { step: HOW };
       return { step: c.assignHow === 'claim' ? CLAIM : ASSIGN };
     }
     const sum = sumCents(entries);
@@ -797,9 +799,19 @@ export class SplitCommandHandler {
    */
   async handleVoice(ctx: Context): Promise<void> {
     const note = ctx.message?.voice;
-    const state = await this.getState();
+    let state = await this.getState();
     if (!note || state.flow !== 'split' || !this.isOwner(ctx, state)) return;
     const reply = (text: string) => ctx.reply(text);
+    if (state.step === HOW && this.receipts.voice) {
+      // Answering the menu by speaking is choosing the voice option
+      const howMsg = state.context.howMsg as number | undefined;
+      if (howMsg !== undefined && ctx.chat) {
+        await ctx.api.editMessageReplyMarkup(ctx.chat.id, howMsg).catch(() => undefined);
+      }
+      const context = { ...state.context, assignHow: 'voice' };
+      await this.setState({ flow: 'split', step: ASSIGN, context });
+      state = { ...state, step: ASSIGN, context };
+    }
     if (state.step !== ASSIGN) {
       // In a group the organiser's chat is mostly for other people: no nagging
       if (!isGroup(ctx))
@@ -1012,39 +1024,42 @@ export class SplitCommandHandler {
     const step = state.flow === 'split' ? state.step : 0;
     const onSummary = data === 'split_confirm' || data === 'split_cancel' || data === 'split_amend';
     const onMenu = data.startsWith('split_pick:') || data === 'split_back';
-    const expected = data.startsWith('split_how:')
-      ? HOW
-      : data === 'split_claim:done'
-        ? CLAIM
-        : data === 'split_claim:keep' || data.startsWith('split_unassigned:')
-          ? UNASSIGNED
-          : data.startsWith('split_scan:')
-            ? data === 'split_scan:add'
-              ? step === REVIEW
-                ? REVIEW
-                : -1
-              : data === 'split_scan:oneline' || data === 'split_scan:back'
-                ? step === ADD_ITEM
-                  ? ADD_ITEM
-                  : -1
-                : step === RECEIPT || step === REVIEW
-                  ? step
-                  : -1
-            : data.startsWith('split_mode:')
-              ? MODE
-              : data.startsWith('split_people:')
-                ? PEOPLE
-                : data.startsWith('split_leftover:')
-                  ? LEFTOVER
-                  : data === 'split_skip_description'
-                    ? DESCRIPTION
-                    : onSummary
-                      ? CONFIRM
-                      : onMenu
-                        ? AMEND
-                        : data === 'split_keep' && c.amending
-                          ? step
-                          : -1;
+    const expected =
+      data === 'split_how:retype'
+        ? ASSIGN
+        : data.startsWith('split_how:')
+          ? HOW
+          : data === 'split_claim:done'
+            ? CLAIM
+            : data === 'split_claim:keep' || data.startsWith('split_unassigned:')
+              ? UNASSIGNED
+              : data.startsWith('split_scan:')
+                ? data === 'split_scan:add'
+                  ? step === REVIEW
+                    ? REVIEW
+                    : -1
+                  : data === 'split_scan:oneline' || data === 'split_scan:back'
+                    ? step === ADD_ITEM
+                      ? ADD_ITEM
+                      : -1
+                    : step === RECEIPT || step === REVIEW
+                      ? step
+                      : -1
+                : data.startsWith('split_mode:')
+                  ? MODE
+                  : data.startsWith('split_people:')
+                    ? PEOPLE
+                    : data.startsWith('split_leftover:')
+                      ? LEFTOVER
+                      : data === 'split_skip_description'
+                        ? DESCRIPTION
+                        : onSummary
+                          ? CONFIRM
+                          : onMenu
+                            ? AMEND
+                            : data === 'split_keep' && c.amending
+                              ? step
+                              : -1;
     // Summary and menu buttons only count on the latest summary message
     const onLatest =
       !(onSummary || onMenu) ||
@@ -1067,14 +1082,25 @@ export class SplitCommandHandler {
     await ctx.answerCallbackQuery();
 
     if (data.startsWith('split_how:')) {
-      const claim = data.endsWith(':claim');
+      const how = data.slice('split_how:'.length);
+      const claim = how === 'claim';
+      if (how === 'voice' && !this.receipts.voice) {
+        await ctx.reply('Voice notes are not available. Please type who had what.');
+        return true;
+      }
       await ctx
-        .editMessageText(claim ? 'Everyone claims their own items.' : 'You will type who had what.')
+        .editMessageText(
+          claim
+            ? 'Everyone claims their own items.'
+            : how === 'voice'
+              ? 'You will say who had what.'
+              : 'You will type who had what.'
+        )
         .catch(() => undefined);
       const organiserName = [ctx.from?.first_name, ctx.from?.last_name].filter(Boolean).join(' ');
       const context = {
         ...c,
-        assignHow: claim ? 'claim' : 'type',
+        assignHow: claim ? 'claim' : how === 'voice' ? 'voice' : 'type',
         ...(claim ? { organiserName, organiserId: ctx.from?.id } : {}),
       };
       const next = claim ? CLAIM : ASSIGN;
@@ -1200,6 +1226,7 @@ export class SplitCommandHandler {
           totalCents: scan.receipt.totalCents,
           mode: 'custom',
           group: isGroup(ctx), // a group may let everyone claim the items
+          askHow: isGroup(ctx) || this.receipts.voice !== undefined, // type, voice or claim?
         });
       } else if (data === 'split_scan:again') {
         await this.setState({ flow: 'split', step: RECEIPT, context: rest });
@@ -1245,7 +1272,7 @@ export class SplitCommandHandler {
         pick === 'split'
           ? MODE
           : pick === 'items'
-            ? c.group
+            ? (c.askHow ?? c.group)
               ? HOW
               : ASSIGN
             : STEP_OF_FIELD[pick as Field];
@@ -1397,14 +1424,14 @@ export class SplitCommandHandler {
         }
       );
     } else if (step === HOW) {
-      await ctx.reply('How do you want to share out the items?', {
-        reply_markup: keep(
-          new InlineKeyboard()
-            .text("I'll type who had what", 'split_how:type')
-            .row()
-            .text('Let everyone claim their items', 'split_how:claim')
-        )!,
+      const kb = new InlineKeyboard().text("I'll type who had what", 'split_how:type');
+      if (this.receipts.voice) kb.row().text('Say it with a voice note', 'split_how:voice');
+      if (c.group) kb.row().text('Let everyone claim their items', 'split_how:claim');
+      const sent = await ctx.reply('How do you want to share out the items?', {
+        reply_markup: keep(kb)!,
       });
+      // So a voice note sent before tapping can take the menu's buttons away
+      await this.setState({ flow: 'split', step: HOW, context: { ...c, howMsg: sent.message_id } });
     } else if (step === CLAIM) {
       const sent = await ctx.reply(claimText(c), { reply_markup: claimButtons(c) });
       await this.setState({
@@ -1416,6 +1443,16 @@ export class SplitCommandHandler {
       const items = (c.receipt as Receipt).items;
       // The list gets its own bubble so it can be copied whole, without the instructions
       await ctx.reply(items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n'));
+      if (c.assignHow === 'voice') {
+        const [a, b] = items;
+        const example = b ? `${a!.name} is Ann's, ${b.name} is mine` : `${a!.name} is Ann's`;
+        await this.ask(
+          ctx,
+          `Say who had which item in a voice note (hold the microphone), for example: "${example}". I will show you what I heard and the lines I made before using them. You can also type it.`,
+          keep(new InlineKeyboard().text('Type instead', 'split_how:retype'))
+        );
+        return;
+      }
       await this.ask(
         ctx,
         'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back (a colon after a name is optional):\n\nAnn\n1. …\n\nAll\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you, and your share gets a QR too.' +
