@@ -75,7 +75,7 @@ export async function verifySession(
   nowMs: number = Date.now()
 ): Promise<number | null> {
   const parts = value?.split('.');
-  if (!parts || parts.length !== 3) return null;
+  if (parts?.length !== 3) return null;
   const [id, expiry, sig] = parts as [string, string, string];
   if (!safeEqual(await hmacHex(enc.encode(secret), `${id}.${expiry}`), sig)) return null;
   if (Number(expiry) <= nowMs) return null;

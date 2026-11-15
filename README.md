@@ -297,6 +297,8 @@ src/
 ├── split-ai-workflow.ts   # SplitAiWorkflow: read step + deliver step for Split_PayNow_Bot
 ├── env.ts                 # Cloudflare Workers environment bindings
 ├── index.ts               # Worker entry + ChatSessionDO export
+├── access/
+│   └── chat-admin.ts      # Chat-admin check via getChatMember (bot and web)
 ├── commands/
 │   ├── simple-handler.ts  # Simple_PayNow_Bot conversation (payee → amount → payer-may-change → description → confirm)
 │   ├── split-handler.ts   # Split_PayNow_Bot conversation (total → people → payee → description → confirm)
@@ -326,8 +328,7 @@ src/
 │   └── qr-render-node.ts  # PNG renderer (Node, tests)
 ├── web/
 │   ├── handler.ts         # Event page + JSON API + login (used by Pages)
-│   ├── auth.ts            # Telegram Login verification, signed session cookie
-│   └── access.ts          # Chat-admin check via getChatMember
+│   └── auth.ts            # Telegram Login verification, signed session cookie
 └── worker/
     └── conversation-do.ts # Per-chat Durable Object (FSM, atomic /claim, alarm expiry)
 

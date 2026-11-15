@@ -28,8 +28,7 @@ export const HELP_TEXT =
   '/init — create a new event (name + PayNow payee)\n' +
   "/edit_event — change an event's name, payee or default amount (admins)\n" +
   '/end_event — close an event\n' +
-  '/cancel — abandon the current conversation\n\n' +
-  'Commands must be set up with BotFather (task 1.3).';
+  '/cancel — abandon the current conversation';
 
 /**
  * Build the fully-wired bot: all command handlers, inline-button callback
