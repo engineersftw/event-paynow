@@ -32,7 +32,7 @@ describe('PaymentsCommandHandler', () => {
 
   beforeEach(() => {
     mockRepository = {
-      listPaymentsByUser: vi.fn(),
+      listPaymentsByUserAndEvent: vi.fn(),
       sentPaybackTotalsByEvent: vi.fn(async () => new Map<number, number>()),
       getPaymentByRef: vi.fn(),
       updatePaymentStatus: vi.fn(),
@@ -120,7 +120,7 @@ describe('PaymentsCommandHandler', () => {
       };
 
       vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
-      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([payment]);
+      vi.mocked(mockRepository.listPaymentsByUserAndEvent).mockResolvedValue([payment]);
 
       await handler.handle(mockCtx, 'EVT-TEST0001');
 
@@ -148,7 +148,7 @@ describe('PaymentsCommandHandler', () => {
         receivedAt: '2024-01-15T13:00:00Z',
       });
       vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
-      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([
+      vi.mocked(mockRepository.listPaymentsByUserAndEvent).mockResolvedValue([
         mk(1, 'PAYSENT01'),
         mk(2, 'PAYPLAIN2'),
       ]);
@@ -172,7 +172,7 @@ describe('PaymentsCommandHandler', () => {
       await handler.handle(mockCtx, 'EVT-TEST0001');
 
       expect(mockCtx.reply).toHaveBeenCalledWith('❌ Event not found.');
-      expect(mockRepository.listPaymentsByUser).not.toHaveBeenCalled();
+      expect(mockRepository.listPaymentsByUserAndEvent).not.toHaveBeenCalled();
     });
 
     it('escapes Markdown specials in the event name and description', async () => {
@@ -195,7 +195,7 @@ describe('PaymentsCommandHandler', () => {
         ...openEvent,
         name: 'Sam_s *dinner*',
       } as any);
-      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([payment]);
+      vi.mocked(mockRepository.listPaymentsByUserAndEvent).mockResolvedValue([payment]);
 
       await handler.handle(mockCtx, 'EVT-TEST0001');
 
@@ -221,7 +221,7 @@ describe('PaymentsCommandHandler', () => {
         receivedAt: null,
       };
       vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
-      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([
+      vi.mocked(mockRepository.listPaymentsByUserAndEvent).mockResolvedValue([
         { ...base, payerName: 'Al_ice' },
         { ...base, id: 2, ref: 'PAY002', createdAt: '2024-01-14T12:30:00Z' },
       ]);
@@ -250,7 +250,7 @@ describe('PaymentsCommandHandler', () => {
         receivedAt: null,
       };
       vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
-      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([
+      vi.mocked(mockRepository.listPaymentsByUserAndEvent).mockResolvedValue([
         { ...base, ref: 'PAYP', createdAt: '2024-01-15T12:30:00Z' },
         { ...base, id: 2, ref: 'PAYR', status: 'received', createdAt: '2024-01-14T12:30:00Z' },
         { ...base, id: 3, ref: 'PAYV', status: 'voided', createdAt: '2024-01-13T12:30:00Z' },
@@ -277,7 +277,7 @@ describe('PaymentsCommandHandler', () => {
 
     it('should show empty message when event has no payments', async () => {
       vi.mocked(mockEventRepository.getEventByRef).mockResolvedValue(openEvent as any);
-      vi.mocked(mockRepository.listPaymentsByUser).mockResolvedValue([]);
+      vi.mocked(mockRepository.listPaymentsByUserAndEvent).mockResolvedValue([]);
 
       await handler.handle(mockCtx, 'EVT-TEST0001');
 

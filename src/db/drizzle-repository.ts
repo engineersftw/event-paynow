@@ -90,6 +90,16 @@ export class D1Repository implements Repository {
     return result ? toPayment(result) : null;
   }
 
+  async getPaymentById(id: number): Promise<Payment | null> {
+    const result = await this.db
+      .select()
+      .from(schema.payments)
+      .where(eq(schema.payments.id, id))
+      .get();
+
+    return result ? toPayment(result) : null;
+  }
+
   async listPaymentsByUser(userId: number): Promise<Payment[]> {
     const results = await this.db
       .select()

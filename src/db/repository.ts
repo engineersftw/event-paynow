@@ -139,6 +139,7 @@ export interface Repository {
     payment: Omit<Payment, 'id' | 'createdAt' | 'receivedAt'> & { timestamp: string }
   ): Promise<Payment>;
   getPaymentByRef(ref: string): Promise<Payment | null>;
+  getPaymentById(id: number): Promise<Payment | null>;
   listPaymentsByUser(userId: number): Promise<Payment[]>;
   /** Anonymous (owner 0) payments of an event created at or after `sinceIso`. */
   countRecentAnonymousPayments(eventId: number, sinceIso: string): Promise<number>;

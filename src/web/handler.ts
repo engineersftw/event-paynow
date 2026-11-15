@@ -582,7 +582,7 @@ async function createPayback(
   );
 }
 
-/** A payback of this event (found through the event's payments), with its payment. */
+/** A payback of this event (its payment must belong to the event), with its payment. */
 async function findPayback(
   env: WebEnv,
   event: Event,
@@ -591,10 +591,8 @@ async function findPayback(
   const repo = new D1Repository(env.paynow_db);
   const payback = await repo.getPaybackByRef(paybackRef);
   if (!payback) return null;
-  const payment = (await repo.listPaymentsByEvent(event.id)).find(
-    (p) => p.id === payback.paymentId
-  );
-  return payment ? { payback, payment } : null;
+  const payment = await repo.getPaymentById(payback.paymentId);
+  return payment && payment.eventId === event.id ? { payback, payment } : null;
 }
 
 async function paybackTransition(
