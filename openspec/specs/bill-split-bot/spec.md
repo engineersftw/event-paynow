@@ -8,11 +8,11 @@ A standalone Telegram bot that splits a bill equally between a number of people 
 
 ### Requirement: The bot asks for the bill, the number of people, the payee and a description
 
-The system SHALL, when a user sends `/split` to Split_PayNow_Bot (or `/start` in a private chat), ask in order for the payee (a Singapore mobile number or a UEN), whether the payee is the user, the bill total in SGD, whether to split Equally or with Custom amounts, then either the number of people (equal split) or the list of names and amounts (custom split), and an optional short description. The payee, the total and the split details are required. The description SHALL offer a Skip button and SHALL be at most 25 characters. The bot SHALL work in private chats and in group chats.
+The system SHALL, when a user sends `/split` to Split_PayNow_Bot (or `/start` in a private chat), ask in order for the payee (a Singapore mobile number or a UEN), the bill total in SGD, an optional short description, whether to split Equally or with Custom amounts, and then either the number of people (equal split) or the list of names and amounts (custom split). The payee, the total and the split details are required. The description SHALL offer a Skip button and SHALL be at most 25 characters. The bot SHALL work in private chats and in group chats.
 
 #### Scenario: Full conversation in a private chat
 
-- **WHEN** the user sends `/split`, a valid payee, taps Yes, it's me, sends the total `187.40`, taps Equally, sends the number `4` and the description `Dinner`, and then confirms
+- **WHEN** the user sends `/split`, a valid payee and the total `187.40`, sends the description `Dinner`, taps Equally, sends the number `4`, and then confirms
 - **THEN** the bot replies with a PayNow QR image for one share of the bill
 
 #### Scenario: Skipping the description
@@ -37,7 +37,7 @@ The system SHALL, when a user sends `/split` to Split_PayNow_Bot (or `/start` in
 
 #### Scenario: Full custom conversation
 
-- **WHEN** the user sends `/split`, a valid payee, taps Yes, it's me, sends the total `100`, taps Custom amounts, sends the lines `Ann 60` and `Bob 40` and taps Skip, and then confirms
+- **WHEN** the user sends `/split`, a valid payee, the total `100`, taps Skip on the description, taps Custom amounts, sends the lines `Ann 60` and `Bob 40`, and then confirms
 - **THEN** the bot replies with PayNow QR images for the amounts listed
 
 ### Requirement: A group's member count is offered as the number of people
@@ -109,7 +109,7 @@ The system SHALL, after the last question, show one summary with Confirm, Amend 
 
 ### Requirement: The QR is for one share and never shows the payee number
 
-The system SHALL send a PayNow QR as a fixed amount that the payer cannot change, with the description when one was given. For an equal split it SHALL send one QR for the share. For a custom split it SHALL send one QR for each distinct amount owed, and each QR's image and caption SHALL name the people who owe that amount. The image and caption SHALL show the description, the amount and, for an equal split, the number of people, and SHALL NOT show the payee number or name. The caption SHALL remind payers to check the payee name in their banking app.
+The system SHALL send a PayNow QR as a fixed amount that the payer cannot change, with the description when one was given. For an equal split it SHALL send one QR for the share. For a custom or receipt split it SHALL post in the chat where the split is confirmed one QR for each distinct amount owed, the organiser's own amount included, and each QR's image and caption SHALL name the people who owe that amount. No QR SHALL be sent by direct message. The image and caption SHALL show the description, the amount and, for an equal split, the number of people, and SHALL NOT show the payee number or name. The caption SHALL remind payers to check the payee name in their banking app.
 
 #### Scenario: QR contents
 
@@ -125,6 +125,11 @@ The system SHALL send a PayNow QR as a fixed amount that the payer cannot change
 
 - **WHEN** a custom split of Ann 40, Bob 25, Cy 25 is confirmed
 - **THEN** the bot sends two QRs: SGD 40.00 labelled Ann, and SGD 25.00 labelled Bob and Cy
+
+#### Scenario: The organiser is named too
+
+- **WHEN** a custom split of Ann 40 and Bob 25 is confirmed and the organiser's own amount is 25.00
+- **THEN** the bot posts two QRs: SGD 40.00 labelled Ann, and SGD 25.00 labelled Bob and the organiser's first name
 
 #### Scenario: A send fails part way
 
@@ -209,16 +214,16 @@ The system SHALL, after the bill total is accepted, ask whether to split the bil
 
 ### Requirement: `/split_custom` starts a custom split directly
 
-The system SHALL accept `/split_custom` as a shortcut that asks for the payee and whether the payee is the user, then the bill total, and then goes straight to the custom list, without asking Equally or Custom amounts. After that it SHALL behave exactly as a custom split started from `/split`, in private chats and in groups, with the same owner-only rules in groups.
+The system SHALL accept `/split_custom` as a shortcut that asks for the payee, then the bill total, then the optional description, and then goes straight to the custom list, without asking Equally or Custom amounts. After that it SHALL behave exactly as a custom split started from `/split`, in private chats and in groups, with the same owner-only rules in groups.
 
 #### Scenario: Shortcut skips the choice
 
-- **WHEN** the user sends `/split_custom`, answers the payee questions and then sends a valid total
+- **WHEN** the user sends `/split_custom`, a valid payee, a valid total, and answers or skips the description
 - **THEN** the bot asks for the list of names and amounts and does not offer Equally or Custom amounts
 
 #### Scenario: Invalid total
 
-- **WHEN** the total after `/split_custom` and the payee questions is not a positive amount with at most two decimals
+- **WHEN** the total after `/split_custom` and the payee is not a positive amount with at most two decimals
 - **THEN** the bot explains the format and asks for the total again
 
 #### Scenario: Restarting replaces a split in progress
@@ -334,7 +339,7 @@ The system SHALL, when the owner edits the text of a message that answered the t
 #### Scenario: Edit an earlier answer while a later question is open
 
 - **WHEN** the bot is asking for the total and the user edits their payee message to a valid new payee
-- **THEN** the bot confirms the update, asks again whether the new payee is the user, and then keeps waiting for the total
+- **THEN** the bot confirms the update and keeps waiting for the total
 
 #### Scenario: Invalid edit
 
@@ -393,44 +398,6 @@ The system SHALL accept, in place of a name in a custom list, an @username (for 
 - **WHEN** the list contains `@Ann 10` and `@ann 20`
 - **THEN** the bot rejects the list because the name is repeated
 
-### Requirement: Mentioned people receive their QR by direct message
-
-The system SHALL, when the user confirms a custom split, send each mentioned person who can be messaged a PayNow QR for their own amount as a direct message from the bot. The message SHALL name the organiser, the amount and the description, and SHALL NOT show the payee number. Plain-name people SHALL still be served by one chat QR per distinct amount, and a QR SHALL NOT be sent to the chat for a mentioned person.
-
-#### Scenario: All mentioned and known
-
-- **WHEN** a split of `@ann 40` and `@bob 25` is confirmed and the bot knows both
-- **THEN** Ann and Bob each receive a direct message with their own QR and no QR is posted in the chat
-
-#### Scenario: Mixed list
-
-- **WHEN** a split of `@ann 40` and `Cy 25` is confirmed
-- **THEN** Ann receives a direct message and the chat receives one QR labelled Cy
-
-#### Scenario: Result report
-
-- **WHEN** the direct messages have been sent
-- **THEN** the chat shows which mentioned people were sent their QR and which are waiting
-
-### Requirement: People the bot cannot message get a Get my QR button
-
-The system SHALL, for each mentioned person who cannot be messaged (unknown to the bot, or the message is refused), post one waiting message in the chat with a Get my QR button for each such person. The button SHALL open the bot's private chat. After the person starts the bot there, the bot SHALL check that they are the person mentioned (same Telegram id, or same username ignoring case) and send their QR by direct message. The QR SHALL NOT be posted in the chat.
-
-#### Scenario: Unknown person
-
-- **WHEN** a split names `@dee`, whom the bot does not know, and is confirmed
-- **THEN** the chat shows a waiting message with a Get my QR button for Dee
-
-#### Scenario: Dee collects
-
-- **WHEN** Dee taps the button and starts the bot
-- **THEN** Dee receives the QR by direct message and the waiting message no longer lists Dee
-
-#### Scenario: Someone else taps
-
-- **WHEN** a different user opens the bot through Dee's button
-- **THEN** the bot says the QR is for someone else and sends nothing
-
 ### Requirement: Waiting QRs expire and are used once
 
 The system SHALL keep a waiting QR only until it is collected or 48 hours after the split was confirmed, whichever comes first, and SHALL send each waiting QR at most once. An expired or already collected request SHALL be answered with a short notice and no QR.
@@ -466,11 +433,11 @@ The system SHALL record a person's Telegram username and user id when they send 
 
 ### Requirement: A receipt photo is read for the bill
 
-The system SHALL accept `/split_receipt`, which asks for the payee and whether the payee is the user and then for a photo of the receipt, and SHALL also accept a photo when the bot is asking for the bill total. It SHALL read the photo with a vision model and extract the line items with prices, the service charge, GST, any discount and the total, in SGD. If the photo is unreadable, has no total, or the reader is unavailable, the bot SHALL say so and offer to type the total instead.
+The system SHALL accept `/split_receipt`, which asks for the payee and then for a photo of the receipt, and SHALL also accept a photo when the bot is asking for the bill total. It SHALL read the photo with a vision model and extract the line items with prices, the service charge, GST, any discount and the total, in SGD. If the photo is unreadable, has no total, or the reader is unavailable, the bot SHALL say so and offer to type the total instead.
 
 #### Scenario: Photo after /split_receipt
 
-- **WHEN** the user sends `/split_receipt`, answers the payee questions and then sends a clear receipt photo
+- **WHEN** the user sends `/split_receipt`, sends a valid payee and then a clear receipt photo
 - **THEN** the bot shows the numbered items, the charges and the total it read
 
 #### Scenario: Photo instead of a total
@@ -602,12 +569,12 @@ The system SHALL compute each person's amount as their share of the items plus a
 
 ### Requirement: The receipt split continues as a custom split
 
-The system SHALL, once items are assigned, continue as a custom split with the computed amounts: the optional description (the payee was asked first), the summary with Confirm, Amend and Cancel, one QR per distinct amount, and direct messages to mentioned people. Amend SHALL offer Items, which asks for the assignment again, and editing the assignment message SHALL update the split like any other edited answer.
+The system SHALL, once items are assigned, continue as a custom split with the computed amounts: the summary with Confirm, Amend and Cancel, and one QR per distinct amount posted in the chat (the description was settled earlier). Amend SHALL offer Items, which asks for the assignment again, and editing the assignment message SHALL update the split like any other edited answer.
 
 #### Scenario: Full receipt flow
 
-- **WHEN** the user scans a receipt, taps Use this, assigns items to `@ann` and `Bob` and confirms
-- **THEN** Ann is sent her QR by direct message and the chat receives a QR for Bob
+- **WHEN** the user scans a receipt, taps Use this, settles the description, assigns items to `@ann` and `Bob` and confirms
+- **THEN** the chat receives the QRs for Ann and Bob, and for the organiser's own share when it is above zero
 
 #### Scenario: Amend items
 
@@ -640,7 +607,7 @@ The system SHALL, when an assignment leaves some receipt items out, state which 
 #### Scenario: Leave them out
 
 - **WHEN** item 3 is unassigned and the organiser chooses Leave them out
-- **THEN** item 3 counts as the organiser's, the summary shows the organiser's share, and only the people named are asked to pay unless the payee is someone else
+- **THEN** item 3 counts as the organiser's, the summary shows the organiser's share, and the organiser's QR includes it
 
 #### Scenario: Everything assigned
 
@@ -665,87 +632,6 @@ The system SHALL keep the organiser's choice when an assignment is edited or ame
 
 - **WHEN** an amended assignment leaves item 4 unassigned instead of item 3
 - **THEN** the bot asks again what to do with it
-
-### Requirement: The bot asks whether the payee is the organiser
-
-The system SHALL, straight after the payee is entered in any split (equal, custom or receipt), ask whether the payee is the organiser, with the buttons "Yes, it's me" and "No, someone else", before the bill total or the receipt photo is asked for. The answer SHALL be kept with the split and SHALL be asked again whenever the payee is changed by amending or editing. Once the question is answered the system SHALL remove its buttons and replace its text with the answer: "Payment was made by you." or "Payment was made by someone else."
-
-#### Scenario: Question after the payee
-
-- **WHEN** the user enters a valid payee
-- **THEN** the bot asks whether the payee is the user, with Yes and No buttons
-
-#### Scenario: Answer shown
-
-- **WHEN** the user taps Yes, it's me
-- **THEN** the buttons disappear and the message reads "Payment was made by you."
-
-#### Scenario: Answer shown for someone else
-
-- **WHEN** the user taps No, someone else
-- **THEN** the buttons disappear and the message reads "Payment was made by someone else."
-
-#### Scenario: Payee changed
-
-- **WHEN** the user amends or edits the payee
-- **THEN** the bot asks again whether the new payee is the user, in a new message
-
-#### Scenario: Only the organiser answers in a group
-
-- **WHEN** a different group member taps a button of that question
-- **THEN** nothing changes and they are told the split is not theirs
-
-### Requirement: When someone else is paid, the organiser pays their own share
-
-The system SHALL, when the organiser says the payee is someone else, collect the organiser's own amount like everyone else's and send the organiser a QR for it when it is above zero. When the organiser says the payee is them, their own amount SHALL stay shown but not collected, as before.
-
-#### Scenario: Receipt split, someone else paid
-
-- **WHEN** the organiser's items come to 24.00 of a 72.00 receipt, the payee is someone else, and the split is confirmed
-- **THEN** the organiser receives a QR for SGD 24.00 and the others receive theirs
-
-#### Scenario: Custom split, someone else paid
-
-- **WHEN** the bill is 100.00, the list adds up to 80.00, the leftover is left out and the payee is someone else
-- **THEN** the organiser receives a QR for SGD 20.00
-
-#### Scenario: Payee is the organiser
-
-- **WHEN** the organiser says the payee is them
-- **THEN** their own amount is shown as not collected and no QR is made for it
-
-#### Scenario: Nothing to pay
-
-- **WHEN** the payee is someone else and the organiser's own amount is zero
-- **THEN** no QR is made for the organiser
-
-### Requirement: The organiser's own amount comes from their items or the left-out remainder
-
-The system SHALL take the organiser's own amount to be their items and any unassigned items they cover in a receipt split, and the leftover that was left out in a custom split. The organiser's QR SHALL be sent by direct message or, when the bot cannot message them, through a Get my QR button, and SHALL NOT be posted in the chat.
-
-#### Scenario: Via direct message
-
-- **WHEN** the organiser has started the bot and the split is confirmed with someone else as the payee
-- **THEN** the QR for their own amount arrives as a direct message
-
-#### Scenario: Not reachable
-
-- **WHEN** the organiser has never started the bot
-- **THEN** the chat shows a Get my QR button for them and the QR is not posted in the chat
-
-### Requirement: The summary and QR wording follow the answer
-
-The system SHALL word the summary by the answer. When the payee is the organiser it SHALL say the organiser's own share is not collected, or in an equal split that everyone else pays the share to them. When the payee is someone else it SHALL say the organiser pays their own share and gets a QR, or in an equal split that all the people pay the share to the payee.
-
-#### Scenario: Equal split, someone else paid
-
-- **WHEN** a bill of 100.00 is split between 4 people and the payee is someone else
-- **THEN** the summary says all 4 people pay SGD 25.00 to the payee
-
-#### Scenario: Equal split, organiser paid
-
-- **WHEN** a bill of 100.00 is split between 4 people and the payee is the organiser
-- **THEN** the summary says everyone else pays the organiser SGD 25.00
 
 ### Requirement: The review says how much looks missing
 
@@ -837,15 +723,6 @@ The system SHALL delete the "I read this receipt" message when the user taps **U
 
 - **WHEN** Telegram refuses to delete the review message
 - **THEN** its buttons are removed instead and the flow continues
-
-### Requirement: The assignment prompt does not promise an uncollected share
-
-The system SHALL NOT state in the assignment prompt that the organiser's share is not collected, because the payee is only asked afterwards. The prompt SHALL say that `me` is the organiser, that the share is not collected if the organiser is the payee, and that otherwise a QR for it is sent to the organiser.
-
-#### Scenario: Wording
-
-- **WHEN** the bot asks who had what
-- **THEN** the text explains `me` and both outcomes, and does not say the share is simply not collected
 
 ### Requirement: The summary counts the organiser among the people sharing the bill
 
@@ -958,7 +835,7 @@ The system SHALL show in the claim message each numbered item with its price and
 
 ### Requirement: Claimers are identified by their Telegram account
 
-The system SHALL identify each claimer by their Telegram user id and show their first name, adding their last initial, then their username or a number, when two claimers would otherwise show the same name. At most 20 people SHALL be able to claim; a further person tapping SHALL be told the limit has been reached. A claimer SHALL be treated as a mentioned person when the split is sent, so they receive their QR by direct message when the bot can message them.
+The system SHALL identify each claimer by their Telegram user id and show their first name, adding their last initial, then their username or a number, when two claimers would otherwise show the same name. At most 20 people SHALL be able to claim; a further person tapping SHALL be told the limit has been reached. A claimer's QR SHALL be posted in the chat like everyone else's.
 
 #### Scenario: Same first name
 
@@ -973,16 +850,16 @@ The system SHALL identify each claimer by their Telegram user id and show their 
 #### Scenario: Claimer not reachable
 
 - **WHEN** a claimer has never started the bot
-- **THEN** after confirming, they get a Get my QR button like any other mentioned person
+- **THEN** after confirming, their QR is posted in the chat like any other
 
 ### Requirement: Only the organiser closes the claiming
 
-The system SHALL let only the organiser close the claim with Done. When every item is claimed, Done SHALL compute the amounts and continue to the description question. When some items are unclaimed, Done SHALL ask the organiser with the existing unassigned-items choice, worded for claimers: Split evenly between those who claimed, Leave them out: I cover them, or Keep claiming, and SHALL not choose for them. Done SHALL be refused until someone other than the organiser has claimed an item.
+The system SHALL let only the organiser close the claim with Done. When every item is claimed, Done SHALL compute the amounts and continue to the summary. When some items are unclaimed, Done SHALL ask the organiser with the existing unassigned-items choice, worded for claimers: Split evenly between those who claimed, Leave them out: I cover them, or Keep claiming, and SHALL not choose for them. Done SHALL be refused until someone other than the organiser has claimed an item.
 
 #### Scenario: Everything claimed
 
 - **WHEN** every item is claimed and the organiser taps Done
-- **THEN** the claim message is closed and the bot asks for the description
+- **THEN** the claim message is closed and the bot shows the summary
 
 #### Scenario: Unclaimed items covered by the organiser
 
@@ -1011,8 +888,8 @@ The system SHALL let only the organiser close the claim with Done. When every it
 
 #### Scenario: Organiser's own claimed share when someone else paid
 
-- **WHEN** the organiser claimed items and then answers that someone else is the payee
-- **THEN** the organiser's own amount is collected like the others' and a QR for it is sent to the organiser
+- **WHEN** the organiser claimed items and the split is confirmed, whoever the payee is
+- **THEN** a QR for the organiser's own amount is posted in the chat with the others'
 
 ### Requirement: Claims become the same amounts as a typed assignment
 
@@ -1077,22 +954,22 @@ The system SHALL, in a group chat, ignore the organiser's free text without any 
 
 ### Requirement: The payee is asked first in every split
 
-The system SHALL, in every split that is started with `/split`, `/split_custom`, `/split_receipt` or `/start` in a private chat, ask for the payee and whether the payee is the user before anything about the bill, and SHALL keep the same order when the answers are amended: a payee changed later is checked first, then the rest of the split continues from where it was. The description SHALL remain the last question.
+The system SHALL, in every split that is started with `/split`, `/split_custom`, `/split_receipt` or `/start` in a private chat, ask for the payee before anything about the bill, and SHALL keep the same order when the answers are amended: a payee changed later is checked first, then the rest of the split continues from where it was. The description SHALL be asked as soon as the bill total is known (typed, or accepted from the receipt scan) and before the split type, the people, the list, the assignment or the claiming.
 
 #### Scenario: Payee before total
 
 - **WHEN** the user sends `/split`
-- **THEN** the first question is who should be paid, then whether the payee is the user, then the bill total
+- **THEN** the first question is who should be paid, then the bill total
 
 #### Scenario: Payee before the photo
 
 - **WHEN** the user sends `/split_receipt`
-- **THEN** the bot asks for the payee and whether it is the user before it asks for the receipt photo
+- **THEN** the bot asks for the payee before it asks for the receipt photo
 
 #### Scenario: Changing the payee later
 
 - **WHEN** the user amends the payee on the summary
-- **THEN** the bot asks for the new payee and whether it is the user, and then shows the summary again
+- **THEN** the bot asks for the new payee and then shows the summary again
 
 ### Requirement: The organiser's tap on an item opens a menu
 
@@ -1200,35 +1077,6 @@ The system SHALL, when the organiser taps Shared by all, ask how many ways to sp
 
 - **WHEN** the organiser sends 1 or `lots` as the number of ways
 - **THEN** the bot says a whole number from 2 to 20 is needed and asks again
-
-### Requirement: A member can get their own QR before the claiming is closed
-
-The system SHALL show a Get my QR button on the claim message. When a member who holds at least one item taps it, the system SHALL send them a PayNow QR for their own amount to the payee already given, without waiting for the organiser's Done. The amount SHALL be the member's items (each item split equally between its holders) plus their proportional share of the difference between the receipt total and the items, calculated from the receipt's total of all items so that it does not depend on what other members claim, and rounded up to the cent. The QR SHALL be sent by direct message; when the bot cannot message the member, the tap SHALL open the bot with a start link so the member collects it with the existing Get my QR flow. A member who holds nothing SHALL be told to claim an item first, and the organiser SHALL be told there is nothing to collect when the organiser is the payee. The QR SHALL carry the merchant name from the receipt as its description when one was read, and no description otherwise.
-
-#### Scenario: Member takes their QR early
-
-- **WHEN** Ann holds item 1 and taps Get my QR while other items are unclaimed
-- **THEN** Ann receives a QR for her amount by direct message and claiming stays open
-
-#### Scenario: Bot cannot message the member
-
-- **WHEN** Bob has never started the bot and taps Get my QR
-- **THEN** the tap opens the bot with a start link and Bob collects his QR there
-
-#### Scenario: Nothing claimed
-
-- **WHEN** a member who holds no item taps Get my QR
-- **THEN** they are told to claim an item first
-
-#### Scenario: Member without a Telegram account
-
-- **WHEN** the organiser typed a name for a person who has no Telegram account
-- **THEN** that person has no way to take a QR and is served by the shared chat QR when the claiming is closed
-
-#### Scenario: Organiser is the payee
-
-- **WHEN** the organiser, who is the payee, taps Get my QR
-- **THEN** they are told their own share is not collected
 
 ### Requirement: Taking the QR locks the member's items and fixes their amount
 
@@ -1348,3 +1196,131 @@ The assignment prompt SHALL say that a voice note works as well as typing, when 
 
 - **WHEN** the bot asks who had which item and speech-to-text is configured
 - **THEN** the prompt includes a line that the organiser can also send a voice note
+### Requirement: The description is asked once the bill total is known
+
+The system SHALL ask for the optional description right after the bill total is known: after the typed total, or after the receipt scan is accepted with Use this, and before the split type, the people, the list, the assignment or the claiming. When the split came from a receipt and the user taps Skip, or the answer is empty, the description SHALL be the merchant name read from the receipt (cut to 25 characters), and when no merchant was read there SHALL be none. A description the user types SHALL always win. The question SHALL name the default when there is one. The description SHALL be the same on every QR of the split, including the QRs taken early with Get my QR.
+
+#### Scenario: Receipt gives the default
+
+- **WHEN** the receipt shows `Huevos @ North Bridge Road` and the user taps Skip on the description question
+- **THEN** the description is the merchant name cut to 25 characters and every QR carries it
+
+#### Scenario: Typed description wins
+
+- **WHEN** the user types `Late lunch` for a split from a receipt
+- **THEN** the description is `Late lunch`
+
+#### Scenario: No receipt, no default
+
+- **WHEN** the user taps Skip on a split with a typed total
+- **THEN** there is no description
+
+#### Scenario: Before the claiming
+
+- **WHEN** the organiser lets everyone claim items
+- **THEN** the description was settled before the claim message is posted, so Get my QR already carries it
+
+#### Scenario: Amend
+
+- **WHEN** the user amends the description on the summary
+- **THEN** every QR sent afterwards carries the new description
+
+### Requirement: The organiser always gets a QR for their own share
+
+The system SHALL NOT ask whether the payee is the organiser. The organiser's own amount SHALL always be shown in the summary and posted as a QR in the chat when it is above zero, whether or not the organiser is the payee. An equal split SHALL be worded as everyone, the organiser included, paying the share.
+
+#### Scenario: Equal split
+
+- **WHEN** a bill of 100.00 is split between 4 people
+- **THEN** the summary says each of the 4 people pays SGD 25.00 and one QR for it is posted
+
+#### Scenario: Receipt split
+
+- **WHEN** the organiser's items come to 24.00 of a 72.00 receipt
+- **THEN** the summary shows the organiser's own share and a QR for SGD 24.00 is posted with their first name
+
+#### Scenario: Custom split with a leftover
+
+- **WHEN** the bill is 100.00, the list adds up to 80.00 and the leftover is left out
+- **THEN** the organiser's own amount is SGD 20.00 and a QR for it is posted
+
+#### Scenario: Nothing to pay
+
+- **WHEN** the organiser's own amount is zero
+- **THEN** no QR is made for the organiser
+
+### Requirement: Every payer's QR is posted in the chat
+
+The system SHALL post every QR of a split in the chat where the split is confirmed, one per distinct amount with the name of everyone who owes it, and SHALL NOT send any QR by direct message. This SHALL hold for plain names, @mentions, people picked from the member list, claimers and the organiser, and for the QRs taken early with Get my QR. Confirming SHALL NOT depend on the bot knowing a person's Telegram identity or being allowed to message them. A QR that Telegram refuses SHALL be reported like any other failed send.
+
+#### Scenario: Mentions
+
+- **WHEN** a split of `@ann 40` and `@bob 25` is confirmed
+- **THEN** the chat receives a QR for Ann and a QR for Bob, each naming them, and no direct message is sent
+
+#### Scenario: Claimers
+
+- **WHEN** Ann and Bob claimed items and the organiser confirms
+- **THEN** their QRs are posted in the chat, except for anyone who already took theirs early
+
+#### Scenario: Already taken
+
+- **WHEN** Ann took her QR early with Get my QR
+- **THEN** the bot says in the chat that Ann's QR was already sent and does not post a second one
+
+#### Scenario: Private chat
+
+- **WHEN** the split is run in a private chat with the bot
+- **THEN** all the QRs are posted in that chat
+
+### Requirement: The assignment prompt says the organiser gets a QR for their share
+
+The system SHALL say in the assignment prompt that `me` is the organiser and that a QR for the organiser's share is posted with the others.
+
+#### Scenario: Wording
+
+- **WHEN** the bot asks who had what
+- **THEN** the text explains `me` and says the organiser's share also gets a QR
+
+### Requirement: The organiser's QR is posted in the chat
+
+The system SHALL take the organiser's own amount to be their items and any unassigned items they cover in a receipt split, and the leftover that was left out in a custom split. The organiser's QR SHALL be posted in the chat with the others', labelled with the organiser's first name, whether or not the organiser is the payee, and SHALL NOT be sent by direct message.
+
+#### Scenario: In the chat
+
+- **WHEN** the split is confirmed and the organiser's own amount is above zero
+- **THEN** the QR for it is posted in the chat, with the organiser's first name on the image and caption, merged into one QR when someone else owes the same amount
+
+#### Scenario: Organiser never started the bot
+
+- **WHEN** the organiser has never messaged the bot privately
+- **THEN** their QR is posted in the chat all the same
+
+### Requirement: A member can get their own QR in the chat before the claiming is closed
+
+The system SHALL show a Get my QR button on the claim message. When a member who holds at least one item taps it, the system SHALL send them a PayNow QR for their own amount to the payee already given, without waiting for the organiser's Done. The amount SHALL be the member's items (each item split equally between its holders) plus their proportional share of the difference between the receipt total and the items, calculated from the receipt's total of all items so that it does not depend on what other members claim, and rounded up to the cent. The QR SHALL be posted in the chat, with the member's name on the image and caption, and SHALL NOT be sent by direct message. A member who holds nothing SHALL be told to claim an item first. The QR SHALL carry the split's description, which is settled before the claiming begins.
+
+#### Scenario: Member takes their QR early
+
+- **WHEN** Ann holds item 1 and taps Get my QR while other items are unclaimed
+- **THEN** a QR for her amount is posted in the chat with her name on it and claiming stays open
+
+#### Scenario: Member never started the bot
+
+- **WHEN** Bob has never started the bot and taps Get my QR
+- **THEN** his QR is posted in the chat like anyone else's
+
+#### Scenario: Nothing claimed
+
+- **WHEN** a member who holds no item taps Get my QR
+- **THEN** they are told to claim an item first
+
+#### Scenario: Member without a Telegram account
+
+- **WHEN** the organiser typed a name for a person who has no Telegram account
+- **THEN** that person has no way to take a QR and is served by the shared chat QR when the claiming is closed
+
+#### Scenario: Description included
+
+- **WHEN** the description was settled as `Huevos` before the claiming and a member taps Get my QR
+- **THEN** the QR carries the description `Huevos`
