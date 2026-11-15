@@ -86,25 +86,6 @@ const TEST_SCHEMA_STATEMENTS = [
     count INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (day, metric)
   )`,
-  `CREATE TABLE IF NOT EXISTS split_contacts (
-    username TEXT PRIMARY KEY NOT NULL,
-    user_id INTEGER NOT NULL,
-    updated_at TEXT NOT NULL
-  )`,
-  `CREATE UNIQUE INDEX IF NOT EXISTS split_contacts_user_id_unique ON split_contacts (user_id)`,
-  `CREATE TABLE IF NOT EXISTS split_claims (
-    token TEXT PRIMARY KEY NOT NULL,
-    username TEXT,
-    user_id INTEGER,
-    name TEXT NOT NULL,
-    amount_cents INTEGER NOT NULL,
-    description TEXT,
-    payload TEXT NOT NULL,
-    organiser TEXT NOT NULL,
-    chat_id INTEGER NOT NULL,
-    message_id INTEGER,
-    expires_at TEXT NOT NULL
-  )`,
   `CREATE INDEX IF NOT EXISTS idx_payments_user_id ON payments(user_id)`,
   `CREATE INDEX IF NOT EXISTS idx_payments_ref ON payments(ref)`,
   `CREATE INDEX IF NOT EXISTS idx_paybacks_payment_id ON paybacks(payment_id)`,

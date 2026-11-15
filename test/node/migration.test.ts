@@ -48,15 +48,7 @@ describe('migrations (whole history, applied in order)', () => {
         name: string;
       }>
     ).map((t) => t.name);
-    expect(tables).toEqual([
-      'events',
-      'paybacks',
-      'payments',
-      'split_claims',
-      'split_contacts',
-      'usage_counters',
-      'users',
-    ]);
+    expect(tables).toEqual(['events', 'paybacks', 'payments', 'usage_counters', 'users']);
 
     expect(columns(db, 'users')).toEqual([
       'telegram_id',
@@ -118,20 +110,15 @@ describe('migrations (whole history, applied in order)', () => {
       'cancelled_by',
     ]);
     expect(columns(db, 'usage_counters')).toEqual(['day', 'metric', 'count']);
-    expect(columns(db, 'split_contacts')).toEqual(['username', 'user_id', 'updated_at']);
-    expect(columns(db, 'split_claims')).toEqual([
-      'token',
-      'username',
-      'user_id',
-      'name',
-      'amount_cents',
-      'description',
-      'payload',
-      'organiser',
-      'chat_id',
-      'message_id',
-      'expires_at',
-    ]);
+  });
+
+  it('drops the Split bot contact and waiting-QR tables, which nothing uses any more', () => {
+    expect(files().at(-1)).toBe('0003_drop_split_directory.sql');
+    const tables = migrate()
+      .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
+      .all() as Array<{ name: string }>;
+    expect(tables.map((t) => t.name)).not.toContain('split_contacts');
+    expect(tables.map((t) => t.name)).not.toContain('split_claims');
   });
 
   it('has unique references and a (day, metric) key for the counters', () => {
