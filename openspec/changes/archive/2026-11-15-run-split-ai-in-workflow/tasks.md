@@ -21,4 +21,4 @@
 
 - [x] 4.1 Update README (background reading, the Workflows permission for the API token), AGENTS.md, `docs/architecture.md`, the Split landing page wording and its test (nothing about the bill in the Workflow; what the instance holds), and the stores-nothing text
 - [x] 4.2 Run `npm run build`, `npm run check` and `npm test`; fix anything they report
-- [ ] 4.3 Add Workflows: Edit to the Cloudflare API token, deploy, then watch `wrangler tail` and the Workflows page during one receipt scan and one voice note: both arrive, instance params hold ids only, and note the retention shown for finished instances
+- [x] 4.3 Add Workflows: Edit to the Cloudflare API token, deploy, then watch `wrangler tail` and the Workflows page during one receipt scan and one voice note: both arrive, instance params hold ids only, and note the retention shown for finished instances

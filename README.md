@@ -389,7 +389,7 @@ Pushes to `main` deploy through `.github/workflows/deploy.yml`. It diffs the pus
 | Worker | `src/` (except `src/web/`), `wrangler.toml`, `package*.json`, `tsconfig.json` |
 | Pages | `web/`, `src/{web,db,sgqr,payments,access}/`, `src/commands/payer-label.ts`, `package*.json`, `tsconfig.json` |
 
-Add repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit, Cloudflare Pages: Edit, D1: Edit, Queues: Edit, Workflows: Edit) and
+Add repo secrets `CLOUDFLARE_API_TOKEN` (Workers Scripts: Edit, Cloudflare Pages: Edit, D1: Edit, Queues: Edit, Account Settings: Read) and
 `CLOUDFLARE_ACCOUNT_ID`. To deploy both without a code change, use Actions → Deploy → Run workflow.
 A change under `drizzle/` also runs `wrangler d1 migrations apply paynow-db --remote` first (job "Apply D1 migrations");
 the Worker and Pages deploys wait for it and are skipped if it fails. Migrations therefore have to be backward
