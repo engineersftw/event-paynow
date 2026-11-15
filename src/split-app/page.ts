@@ -29,6 +29,7 @@ button,select,input{font:inherit}
 .add input{flex:1;min-width:0;border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:8px 10px;min-height:40px}
 .btn{border:0;background:var(--accent);color:var(--accent-fg);border-radius:8px;padding:8px 14px;min-height:40px;cursor:pointer}
 .btn.plain{background:transparent;color:var(--danger);padding:8px 6px}
+.btn.link{background:transparent;color:var(--accent);padding:8px 6px}
 select{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:6px 8px;min-height:36px}
 .empty{color:var(--hint);font-size:14px}
 `;
@@ -43,6 +44,7 @@ const JS = `
   var busy = false;
   var closed = false;
   var timer = null;
+  var waysOpen = {};
 
   function say(text, isError) { msg.textContent = text || ''; msg.className = isError ? 'err' : ''; }
   function stop(text) { closed = true; clearInterval(timer); list.textContent = ''; say(text, false); }
@@ -79,6 +81,12 @@ const JS = `
     return e;
   }
 
+  /** Empties the name field of one item (after its name was added; a refused name stays to be fixed). */
+  function clearField(item) {
+    var inp = list.querySelector('input[data-item="' + item + '"]');
+    if (inp) inp.value = '';
+  }
+
   async function change(item, op, more) {
     if (busy || closed) return;
     busy = true;
@@ -88,8 +96,11 @@ const JS = `
     var refused = false;
     try {
       var r = await api('claim', body);
-      if (accept(r)) { data = r.body; render(); }
-      else if (r.status === 422) refused = true;
+      if (accept(r)) {
+        if (op === 'add') clearField(item);
+        data = r.body;
+        render();
+      } else if (r.status === 422) refused = true;
     } catch (e) { say('No connection. Please try again.', true); }
     busy = false;
     if (refused) await load(); // show what the chat says now, keeping the reason on screen
@@ -125,6 +136,12 @@ const JS = `
     if (others.length) {
       c.appendChild(el('div', 'label', 'Add'));
       var add = el('div', 'row');
+      if (others.length > 1) {
+        var all = el('button', 'chip', '+ Everyone');
+        all.type = 'button';
+        all.addEventListener('click', function () { change(i, 'everyone'); });
+        add.appendChild(all);
+      }
       others.forEach(function (p) {
         var b = el('button', 'chip', '+ ' + personName(p));
         b.type = 'button';
@@ -155,21 +172,33 @@ const JS = `
     c.appendChild(form);
 
     var tools = el('div', 'row');
-    var sel = el('select');
-    sel.setAttribute('aria-label', 'Share item ' + (i + 1) + ' in a number of ways');
-    var none = el('option', '', 'Not shared');
-    none.value = '';
-    sel.appendChild(none);
-    for (var n = 2; n <= 20; n++) {
-      var o = el('option', '', 'Shared ' + n + ' ways');
-      o.value = String(n);
-      sel.appendChild(o);
+    if (it.ways || waysOpen[i]) {
+      var sel = el('select');
+      sel.setAttribute('aria-label', 'Share item ' + (i + 1) + ' in a number of ways');
+      var none = el('option', '', 'Not shared');
+      none.value = '';
+      sel.appendChild(none);
+      for (var n = 2; n <= 20; n++) {
+        var o = el('option', '', 'Shared ' + n + ' ways');
+        o.value = String(n);
+        sel.appendChild(o);
+      }
+      sel.value = it.ways ? String(it.ways) : '';
+      sel.addEventListener('change', function () {
+        if (sel.value === '') delete waysOpen[i];
+        change(i, 'ways', { n: sel.value === '' ? null : Number(sel.value) });
+      });
+      tools.appendChild(sel);
+      if (it.ways) {
+        var left = it.ways - it.holders.length;
+        tools.appendChild(el('span', 'empty', left > 0 ? left + (left === 1 ? ' share left' : ' shares left') : 'All shares taken'));
+      }
+    } else {
+      var more = el('button', 'btn link', 'Share with more people\u2026');
+      more.type = 'button';
+      more.addEventListener('click', function () { waysOpen[i] = true; render(); });
+      tools.appendChild(more);
     }
-    sel.value = it.ways ? String(it.ways) : '';
-    sel.addEventListener('change', function () {
-      change(i, 'ways', { n: sel.value === '' ? null : Number(sel.value) });
-    });
-    tools.appendChild(sel);
     if (it.holders.length) {
       var clear = el('button', 'btn plain', 'Remove all');
       clear.type = 'button';

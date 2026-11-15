@@ -39,6 +39,12 @@ describe('Split Mini App page', () => {
     expect(script).not.toMatch(/https?:\/\//);
   });
 
+  it('offers Everyone, and keeps the ways dropdown behind a link until it is wanted', () => {
+    expect(script).toContain("change(i, 'everyone')");
+    expect(script).toContain('Share with more people');
+    expect(script).toContain('waysOpen');
+  });
+
   it('is told, not guessed: a page opened outside Telegram says how to open it', () => {
     expect(script).toContain('Open this page from the Edit in app button in Telegram.');
   });

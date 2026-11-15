@@ -39,6 +39,12 @@
 - [x] 7.2 Run `npm run build`, `npm run check` and `npm test`; fix anything they report
 - [ ] 7.3 Deploy, create the Mini App in BotFather, set `SPLIT_APP_NAME`, and in a real group run one claim split: a member claims, the organiser edits in the app (toggle, add by name, share 3 ways, remove all), Done in the chat still works, and a member opening the app is told it is for the organiser
 
+## 8. Changes from the first live run
+
+- [x] 8.1 Add the `everyone` change to the interface (`op: 'everyone'`: people not holding the item and not served, refused as a whole when fewer shares are left or nobody is left to add) and test each case in `test/workers/split-app-api.test.ts`
+- [x] 8.2 In the page: empty an item's name field after a successful add (keep it after a refusal), add `+ Everyone`, and show the ways dropdown only for an item that already has ways or after `Share with more people…`, with how many shares are left; verify in Chromium (field cleared, Everyone adds all, dropdown hidden then shown, still no sideways scroll at 320 px)
+- [x] 8.3 Update the script test, README and the architecture note if they name the changed behaviour; run `npm run build`, `npm run check` and `npm test`
+
 ## Workflow follow-up
 
 - Archive the change after 7.3 is confirmed on a real group.
