@@ -2,6 +2,7 @@ import { handleWebhook, validateSecret } from './bot';
 import type { Env } from './env';
 import { handleSimpleWebhook } from './simple-bot';
 import { handleSplitWebhook } from './split-bot';
+import { handleSplitQrBatch, SPLIT_QR_QUEUE, type SplitQrMessage } from './split-qr-queue';
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
@@ -44,5 +45,10 @@ export default {
     }
 
     return new Response('Not found', { status: 404 });
+  },
+
+  /** Queue consumer: Split_PayNow_Bot QR sends, one message per QR. */
+  async queue(batch: MessageBatch<SplitQrMessage>, env: Env): Promise<void> {
+    if (batch.queue === SPLIT_QR_QUEUE) await handleSplitQrBatch(batch, env);
   },
 };
