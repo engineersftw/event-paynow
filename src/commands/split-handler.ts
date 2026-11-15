@@ -35,7 +35,6 @@ import {
   assignmentFromClaims,
   type Claimer,
   claimerName,
-  MAX_CLAIMERS,
   memberAmount,
   missingCents,
   type PersonShare,
@@ -48,6 +47,25 @@ import {
   shareReceipt,
   toEntries,
 } from './receipt';
+import {
+  appLink,
+  applyClaim,
+  CLAIM,
+  CLAIM_IDLE_MS,
+  type ClaimOp,
+  type ClaimResult,
+  type Ctx,
+  claimButtons,
+  claimersOf,
+  claimsOf,
+  claimText,
+  itemLocked,
+  lockedPeople,
+  MAX_WAYS,
+  mutateClaimsOn,
+  servedOf,
+  waysOf,
+} from './split-claims';
 import {
   applyLeftover,
   groupByAmount,
@@ -74,20 +92,15 @@ const ASSIGN = 12; // waiting for who had which item
 const UNASSIGNED = 13; // items nobody was given: split evenly or the organiser covers them
 const ADD_ITEM = 15; // the user is adding an item the scan missed
 const HOW = 16; // type who had what, say it with a voice note, or (group) let everyone claim
-const CLAIM = 17; // the claim message is open and any member can tap items
 
 const MAX_DESCRIPTION = 25;
-// Each round of simultaneous taps lets one write through, so this many taps at once all fit
-const MAX_TAP_RETRIES = 25;
 /** Stop starting new QR sends after this long, so a slow Confirm says what is missing. */
 const SEND_BUDGET_MS = 20_000;
 
 const VOICE_MAX_SECONDS = 60; // a longer voice note is refused before any download or AI call
 const VOICE_MAX_BYTES = 1_000_000;
 const IDLE_MS = 10 * 60 * 1000;
-const CLAIM_IDLE_MS = 60 * 60 * 1000; // people finish dinner at different speeds
 
-type Ctx = Record<string, unknown>;
 type Field = 'total' | 'people' | 'list' | 'assign' | 'payee' | 'description';
 const FIELD_OF_STEP: Record<number, Field> = {
   [TOTAL]: 'total',
@@ -445,62 +458,7 @@ const amendMenu = (receipt: boolean) =>
     .row()
     .text('Back', 'split_back');
 
-const claimsOf = (c: Ctx) => (c.claims as Record<string, number[]> | undefined) ?? {};
-const claimersOf = (c: Ctx) => (c.claimers as Claimer[] | undefined) ?? [];
-const servedOf = (c: Ctx) => (c.served as Record<string, number> | undefined) ?? {};
-const waysOf = (c: Ctx) => (c.ways as Record<string, number> | undefined) ?? {};
 type Menu = { item: number; msg: number; awaiting?: 'names' | 'ways' };
-const MAX_WAYS = 20;
-
-/** An item is locked once any of its holders has taken their QR. */
-const itemLocked = (c: Ctx, item: number) =>
-  (claimsOf(c)[String(item)] ?? []).some((id) => servedOf(c)[String(id)] !== undefined);
-
-/** The claimers (by position, which is also their place in the assignment) who hold their QR. */
-function lockedPeople(c: Ctx): Set<number> {
-  const served = servedOf(c);
-  return new Set(claimersOf(c).flatMap((x, i) => (served[String(x.id)] !== undefined ? [i] : [])));
-}
-
-/** The claim message: every item with the people who claimed it (and the shares left). */
-function claimText(c: Ctx): string {
-  const claims = claimsOf(c);
-  const claimers = claimersOf(c);
-  const ways = waysOf(c);
-  const lines = (c.receipt as Receipt).items.map((it, i) => {
-    const holders = claims[String(i)] ?? [];
-    const who = holders
-      .map((id) => {
-        const name = claimers.find((x) => x.id === id)?.name ?? '?';
-        return servedOf(c)[String(id)] !== undefined ? `${name} (QR sent)` : name;
-      })
-      .join(', ');
-    const lock = itemLocked(c, i) ? '🔒 ' : '';
-    const n = ways[String(i)];
-    if (n === undefined) {
-      return `${lock}${i + 1}. ${it.name} ${sgd(it.cents)}: ${who || 'unclaimed'}`;
-    }
-    const left = n - holders.length;
-    const parts = [who, left > 0 ? `${left} left` : ''].filter(Boolean).join(', ');
-    return `${lock}${i + 1}. ${it.name} ${sgd(it.cents)} (${n} ways): ${parts}`;
-  });
-  return `Tap the items you had; tap again to take one back. An item claimed by several people is split equally. The organiser taps Done when everyone has claimed, and can tap an item to assign it to someone else or share it. Tap Get my QR to pay now: your items are then locked. This stays open for an hour after the last tap.\n\n${lines.join('\n')}`;
-}
-
-/** One button per item (with how many have claimed it) and Done. */
-function claimButtons(c: Ctx): InlineKeyboard {
-  const claims = claimsOf(c);
-  const ways = waysOf(c);
-  const kb = new InlineKeyboard();
-  (c.receipt as Receipt).items.forEach((it, i) => {
-    const n = (claims[String(i)] ?? []).length;
-    const w = ways[String(i)];
-    const count = w !== undefined ? ` (${n}/${w})` : n > 0 ? ` (${n})` : '';
-    const lock = itemLocked(c, i) ? '🔒 ' : '';
-    kb.text(`${lock}${i + 1}. ${it.name}${count}`.slice(0, 40), `split_claim:${i}`).row();
-  });
-  return kb.text('💳 Get my QR', 'split_claim:qr').row().text('✅ Done', 'split_claim:done');
-}
 
 /** The organiser's menu for one item: what it says and its buttons. */
 function menuView(c: Ctx, organiserId: number): { text: string; kb: InlineKeyboard } {
@@ -552,116 +510,6 @@ function menuView(c: Ctx, organiserId: number): { text: string; kb: InlineKeyboa
   };
 }
 
-type TgUser = { id: number; first_name: string; last_name?: string; username?: string };
-type ClaimOp =
-  | { kind: 'toggle'; from: TgUser } // a member's own tap, or the organiser's Mine
-  | { kind: 'toggleId'; id: number } // the organiser taps a person in the menu
-  | { kind: 'add'; people: Claimer[] } // typed names
-  | { kind: 'clear' }
-  | { kind: 'ways'; n: number | null };
-type ClaimResult = { context: Ctx; note: string } | { refuse: string };
-
-/** Apply one change to the claims of one item; pure, so it can be retried on a newer state. */
-function applyClaim(c: Ctx, item: number, op: ClaimOp): ClaimResult {
-  const claims: Record<string, number[]> = {};
-  for (const [k, v] of Object.entries(claimsOf(c))) claims[k] = [...v];
-  let claimers = [...claimersOf(c)];
-  const ways = { ...waysOf(c) };
-  const key = String(item);
-  const holders = () => claims[key] ?? [];
-  let note = 'Done';
-  // Taking a QR fixes the amounts of everyone on the item: nobody can change it any more
-  if (itemLocked(c, item))
-    return { refuse: 'That item is locked: someone on it already has their QR.' };
-  const served = servedOf(c);
-
-  const add = (person: Claimer): string | undefined => {
-    if (served[String(person.id)] !== undefined) {
-      return 'They already have their QR, so their items cannot change.';
-    }
-    if (!claimers.some((x) => x.id === person.id)) {
-      // A typed @username who now taps themselves becomes the same person
-      const typed =
-        person.id > 0 && person.username
-          ? claimers.find(
-              (x) => x.id < 0 && x.username?.toLowerCase() === person.username!.toLowerCase()
-            )
-          : undefined;
-      if (typed) {
-        for (const k of Object.keys(claims)) {
-          claims[k] = claims[k]!.map((id) => (id === typed.id ? person.id : id));
-        }
-        claimers = claimers.map((x) => (x.id === typed.id ? { ...x, id: person.id } : x));
-      } else {
-        if (claimers.length >= MAX_CLAIMERS) return `Up to ${MAX_CLAIMERS} people can claim items.`;
-        claimers.push(person);
-      }
-    }
-    if (holders().includes(person.id)) return undefined;
-    const n = ways[key];
-    if (n !== undefined && holders().length >= n) return `All ${n} shares are taken.`;
-    claims[key] = [...holders(), person.id];
-    return undefined;
-  };
-  const remove = (id: number) => {
-    claims[key] = holders().filter((x) => x !== id);
-  };
-
-  if (op.kind === 'toggle') {
-    const known = claimers.find((x) => x.id === op.from.id);
-    if (known && holders().includes(known.id)) {
-      remove(known.id);
-      note = 'Removed';
-    } else {
-      const refusal = add(
-        known ?? {
-          id: op.from.id,
-          name: claimerName(
-            claimers.map((x) => x.name),
-            op.from
-          ),
-          ...(op.from.username ? { username: op.from.username } : {}),
-        }
-      );
-      if (refusal) return { refuse: refusal };
-      note = 'Claimed';
-    }
-  } else if (op.kind === 'toggleId') {
-    const person = claimers.find((x) => x.id === op.id);
-    if (!person) return { refuse: 'That person has no items now. Use Someone else to add them.' };
-    if (holders().includes(person.id)) {
-      remove(person.id);
-      note = 'Removed';
-    } else {
-      const refusal = add(person);
-      if (refusal) return { refuse: refusal };
-      note = 'Added';
-    }
-  } else if (op.kind === 'add') {
-    for (const person of op.people) {
-      const refusal = add(person);
-      if (refusal) return { refuse: refusal };
-    }
-    note = 'Added';
-  } else if (op.kind === 'clear') {
-    claims[key] = [];
-    note = 'Cleared';
-  } else if (op.n === null) {
-    delete ways[key];
-    note = 'Not shared';
-  } else {
-    if (op.n < holders().length) {
-      return { refuse: `${holders().length} people already hold it, so it cannot be fewer ways.` };
-    }
-    ways[key] = op.n;
-    note = `Shared ${op.n} ways`;
-  }
-  // Someone with no items left is no longer counted as a claimer
-  const holding = new Set(Object.values(claims).flat());
-  claimers = claimers.filter((x) => holding.has(x.id));
-  return { context: { ...c, claims, claimers, ways }, note };
-}
-
 /**
  * Split_PayNow_Bot conversation. Every answer is stored in the Durable Object context and
  * `nextNeed` decides what is still missing, so the first run, an Amend and an edited message all
@@ -683,8 +531,17 @@ export class SplitCommandHandler {
     /** Posts each QR in its own run, with retries; without it QRs are sent directly. */
     private readonly qrQueue?: Queue<SplitQrMessage>,
     /** Reads photos and voice notes in the background; without it the update reads them itself. */
-    private readonly aiWorkflow?: Workflow<SplitAiParams>
+    private readonly aiWorkflow?: Workflow<SplitAiParams>,
+    /** The Mini App (bot username and app short name) behind the claim message's Edit in app button; off when absent. */
+    private readonly app?: { bot: string; name: string }
   ) {}
+
+  /** The link that opens the Mini App for this chat and topic, when it is configured. */
+  private appUrl(ctx: Context): string | undefined {
+    return this.app && ctx.chat
+      ? appLink(this.app.bot, this.app.name, ctx.chat.id, topicOf(ctx))
+      : undefined;
+  }
 
   /**
    * Hand a photo or voice note to the Workflow. The conversation records the job first, so only the
@@ -1503,7 +1360,9 @@ export class SplitCommandHandler {
       // So a voice note sent before tapping can take the menu's buttons away
       await this.setState({ flow: 'split', step: HOW, context: { ...c, howMsg: sent.message_id } });
     } else if (step === CLAIM) {
-      const sent = await ctx.reply(claimText(c), { reply_markup: claimButtons(c) });
+      const sent = await ctx.reply(claimText(c), {
+        reply_markup: claimButtons(c, this.appUrl(ctx)),
+      });
       await this.setState({
         flow: 'split',
         step: CLAIM,
@@ -1708,32 +1567,12 @@ export class SplitCommandHandler {
     ctx: Context,
     expectMsg: ((c: Ctx) => number | undefined) | null,
     change: (c: Ctx, state: ConversationState) => ClaimResult
-  ): Promise<
-    | { kind: 'ok'; context: Ctx; note: string }
-    | { kind: 'refused'; text: string }
-    | { kind: 'stale' }
-    | { kind: 'busy' }
-  > {
-    for (let attempt = 0; attempt < MAX_TAP_RETRIES; attempt++) {
-      const state = await this.getState();
-      const c = state.context;
-      if (
-        state.flow !== 'split' ||
-        state.step !== CLAIM ||
-        (expectMsg && ctx.callbackQuery?.message?.message_id !== expectMsg(c))
-      ) {
-        return { kind: 'stale' };
-      }
-      const result = change(c, state);
-      if ('refuse' in result) return { kind: 'refused', text: result.refuse };
-      const status = await this.writeIfRev(
-        { flow: 'split', step: CLAIM, context: result.context },
-        state.rev ?? 0
-      );
-      if (status === 409) continue; // another change got in first: apply this one on top of it
-      return { kind: 'ok', context: result.context, note: result.note };
-    }
-    return { kind: 'busy' };
+  ) {
+    return mutateClaimsOn(
+      this.conversationDO,
+      change,
+      expectMsg ? (c) => ctx.callbackQuery?.message?.message_id === expectMsg(c) : undefined
+    );
   }
 
   /** Show the claims on the claim message (not modified or rate limited: the stored claims win). */
@@ -1741,7 +1580,7 @@ export class SplitCommandHandler {
     if (!ctx.chat || c.claimMsg === undefined) return;
     await ctx.api
       .editMessageText(ctx.chat.id, c.claimMsg as number, claimText(c), {
-        reply_markup: claimButtons(c),
+        reply_markup: claimButtons(c, this.appUrl(ctx)),
       })
       .catch(() => undefined);
   }
@@ -2033,21 +1872,6 @@ export class SplitCommandHandler {
     const { voice, ...rest } = state.context;
     const context = state.step === ASSIGN ? state.context : rest;
     await this.fetch('/state', { ...state, context, idleMs: claiming ? CLAIM_IDLE_MS : IDLE_MS });
-  }
-
-  /** Write the state only if nobody wrote since `rev` was read; the HTTP status says which. */
-  private async writeIfRev(
-    state: Pick<ConversationState, 'flow' | 'step' | 'context'>,
-    rev: number
-  ): Promise<number> {
-    const response = await this.conversationDO.fetch(
-      new Request('http://localhost/state', {
-        method: 'POST',
-        body: JSON.stringify({ ...state, idleMs: CLAIM_IDLE_MS, ifRev: rev }),
-      })
-    );
-    await response.body?.cancel();
-    return response.status;
   }
 
   private async fetch(path: string, body: unknown) {

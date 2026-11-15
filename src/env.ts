@@ -19,6 +19,8 @@ export interface Env {
   SPLIT_BOT_TOKEN?: string;
   SPLIT_WEBHOOK_SECRET?: string;
   SPLIT_BOT_USERNAME?: string;
+  /** Short name of Split_PayNow_Bot's Mini App (BotFather /newapp); without it the Edit in app button and its routes are off. */
+  SPLIT_APP_NAME?: string;
   /** Workers AI binding for reading receipt photos in Split_PayNow_Bot; scanning is off without it. */
   AI?: Ai;
   /** Vision model used for receipts; defaults to Llama 4 Scout. */
