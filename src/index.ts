@@ -1,5 +1,6 @@
 import { ConversationDO } from './worker/conversation-do';
 
+export { SplitAiWorkflow } from './split-ai-workflow';
 export { default } from './worker';
 /**
  * Worker entry + Durable Object exports.

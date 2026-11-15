@@ -11,6 +11,7 @@ import {
   type ReceiptReader,
   WorkersAiReceiptReader,
 } from './receipt-reader';
+import type { SplitAiParams } from './split-ai-job';
 import type { SplitQrMessage } from './split-qr-queue';
 import { DEFAULT_VOICE_MODEL, type VoiceReader, WorkersAiVoiceReader } from './voice-reader';
 import type { ConversationDO } from './worker/conversation-do';
@@ -29,10 +30,16 @@ export interface SplitBotDeps {
   download?: (api: Api, fileId: string) => Promise<Uint8Array>;
   /** Queue that posts each QR on its own; only the webhook route passes it (tests send directly). */
   qrQueue?: Queue<SplitQrMessage>;
+  /** Workflow that reads photos and voice notes in the background; only the webhook route passes it. */
+  aiWorkflow?: Workflow<SplitAiParams>;
 }
 
 /** The photo's bytes through the Bot API file endpoint (capped: receipts are small). */
-async function downloadTelegramFile(token: string, api: Api, fileId: string): Promise<Uint8Array> {
+export async function downloadTelegramFile(
+  token: string,
+  api: Api,
+  fileId: string
+): Promise<Uint8Array> {
   const file = await api.getFile(fileId);
   if (!file.file_path || (file.file_size ?? 0) > 10_000_000) throw new Error('unusable file');
   const response = await fetch(`https://api.telegram.org/file/bot${token}/${file.file_path}`);
@@ -40,15 +47,12 @@ async function downloadTelegramFile(token: string, api: Api, fileId: string): Pr
   return new Uint8Array(await response.arrayBuffer());
 }
 
-export function createSplitBot(
+/** The receipt reader, voice reader and file download: the given ones, else Workers AI and the Bot API. */
+export function splitReaders(
   env: Env,
   token: string,
-  config?: BotConfig<Context>,
-  deps: SplitBotDeps = {}
-): Bot {
-  const bot = new Bot(token, config);
-
-  const usage = new D1UsageRepository(env.paynow_db); // anonymous daily counts only
+  deps: Pick<SplitBotDeps, 'reader' | 'voice' | 'download'> = {}
+) {
   const reader =
     deps.reader ??
     (env.AI
@@ -65,6 +69,19 @@ export function createSplitBot(
       : undefined);
   const download =
     deps.download ?? ((api: Api, fileId: string) => downloadTelegramFile(token, api, fileId));
+  return { reader, voice, download };
+}
+
+export function createSplitBot(
+  env: Env,
+  token: string,
+  config?: BotConfig<Context>,
+  deps: SplitBotDeps = {}
+): Bot {
+  const bot = new Bot(token, config);
+
+  const usage = new D1UsageRepository(env.paynow_db); // anonymous daily counts only
+  const { reader, voice, download } = splitReaders(env, token, deps);
 
   const handler = (ctx: Context): SplitCommandHandler => {
     const id = ctx.chat?.id;
@@ -74,7 +91,8 @@ export function createSplitBot(
       stub as unknown as ConversationDO,
       { ...(reader ? { reader } : {}), ...(voice ? { voice } : {}), download },
       usage,
-      deps.qrQueue
+      deps.qrQueue,
+      deps.aiWorkflow
     );
   };
 
@@ -122,6 +140,7 @@ async function getSplitBot(env: Env, token: string): Promise<Bot> {
     const pending = (async () => {
       const bot = createSplitBot(env, token, undefined, {
         ...(env.SPLIT_QR_QUEUE ? { qrQueue: env.SPLIT_QR_QUEUE } : {}),
+        ...(env.SPLIT_AI_WORKFLOW ? { aiWorkflow: env.SPLIT_AI_WORKFLOW } : {}),
       });
       await bot.init();
       return bot;
