@@ -422,7 +422,6 @@ export class StartCommandHandler {
     amountCents: number
   ): Promise<void> {
     const eventRef = state.context.eventRef as string;
-    const _eventName = state.context.eventName as string;
     const userId = ctx.from!.id;
     let createdRef: string | undefined;
 

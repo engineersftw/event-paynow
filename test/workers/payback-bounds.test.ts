@@ -20,14 +20,6 @@ import { D1Repository } from '../../src/db/drizzle-repository';
 // Apply schema once before all tests (idempotent)
 beforeAll(async () => {
   const statements = [
-    `CREATE TABLE IF NOT EXISTS users (
-      telegram_id INTEGER PRIMARY KEY,
-      payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
-      payee_value TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`,
     `CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ref TEXT NOT NULL UNIQUE,
@@ -63,7 +55,6 @@ beforeAll(async () => {
       voided_by INTEGER,
       checked_in_at TEXT,
       checked_in_by INTEGER,
-      FOREIGN KEY (user_id) REFERENCES users(telegram_id),
       FOREIGN KEY (event_id) REFERENCES events(id)
     )`,
     `CREATE TABLE IF NOT EXISTS paybacks (
@@ -107,13 +98,6 @@ describe('createPaybackBounded (task 7.2)', () => {
   /** Seed a distinct received payment and return its id. */
   async function seedPayment(amountCents: number): Promise<number> {
     const userId = 720000000 + userSeq++;
-    await repo.upsertUser({
-      telegramId: userId,
-      payeeType: 'mobile',
-      payeeValue: '+6591234567',
-      displayName: 'Payee',
-      timestamp: T0,
-    });
     const payment = await repo.createPayment({
       ref: `72-pay-${refSeq++}`,
       userId,

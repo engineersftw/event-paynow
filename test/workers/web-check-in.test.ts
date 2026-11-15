@@ -5,7 +5,7 @@ import type { Event } from '../../src/db/repository';
 import { createPaymentRequest } from '../../src/payments/payment-request';
 import { signSession } from '../../src/web/auth';
 import { handleWeb, type WebEnv } from '../../src/web/handler';
-import { applyTestSchema } from './harness';
+import { applyTestSchema, insertPayback } from './harness';
 
 const webEnv: WebEnv = {
   paynow_db: env.paynow_db,
@@ -117,7 +117,7 @@ describe('POST /api/events/:ref/scan', () => {
 
     // A payback QR carries the payback's reference, not a payment's
     await repo.updatePaymentStatus(mine.ref, 'received', 'manual', T);
-    const pb = await repo.createPayback({
+    const pb = await insertPayback(repo, {
       ref: 'PBSCAN0001',
       paymentId: mine.id,
       payerType: 'mobile',

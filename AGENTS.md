@@ -259,9 +259,8 @@ The repository layer provides infra-neutral interfaces for database operations:
 
 **Operations:**
 
-- Users: upsertUser, getUser
 - Payments: createPayment, getPaymentByRef, listPaymentsByUser, updatePaymentStatus
-- Paybacks: createPayback, createPaybackBounded (transactional bound enforcement), getPaybackByRef, updatePaybackStatus (guarded pending→sent CAS, task 7.4), listPaybacksByPayment, sumPaybacks (pending + sent — the bounded quantity; cancelled excluded)
+- Paybacks: createPaybackBounded (transactional bound enforcement), getPaybackByRef, updatePaybackStatus (guarded pending→sent CAS, task 7.4), listPaybacksByPayment, sumPaybacks (pending + sent — the bounded quantity; cancelled excluded)
 
 **Testing:**
 

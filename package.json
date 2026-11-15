@@ -22,8 +22,6 @@
   "dependencies": {
     "drizzle-orm": "^0.45.4",
     "grammy": "^1.30.0",
-    "pngjs": "^7.0.0",
-    "qrcode": "^1.5.4",
     "qrcode-generator": "^2.0.4",
     "zod": "^4.6.7"
   },
@@ -38,6 +36,9 @@
     "drizzle-kit": "^0.31.11",
     "jsqr": "^1.4.0",
     "playwright": "^1.65.0",
+    "pngjs": "^7.0.0",
+    "qrcode": "^1.5.4",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.2",
     "vitest": "^5.1.0",
     "wrangler": "^4.159.0"

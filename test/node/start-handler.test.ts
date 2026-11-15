@@ -56,7 +56,6 @@ describe('StartCommandHandler', () => {
 
     mockRepository = {
       voidPayment: vi.fn(async () => null),
-      getUser: vi.fn(),
       createPayment: vi.fn(async (input: any) => ({
         id: 1,
         ref: input.ref,

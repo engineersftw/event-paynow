@@ -1,5 +1,6 @@
 import type { D1Database } from '@cloudflare/workers-types';
 import type { Update } from 'grammy/types';
+import type { D1Repository } from '../../src/db/drizzle-repository';
 
 /**
  * Shared Workers-pool e2e harness for bot-level tests.
@@ -625,4 +626,14 @@ export function bmpToRgba(bytes: Uint8Array): {
     }
   }
   return { data, width, height };
+}
+
+/** Insert a payback through the bounded write (the only one the app has); fails the test if refused. */
+export async function insertPayback(
+  repo: D1Repository,
+  input: Parameters<D1Repository['createPaybackBounded']>[0]
+) {
+  const result = await repo.createPaybackBounded(input);
+  if (!result.ok) throw new Error(`payback refused: ${result.reason}`);
+  return result.payback;
 }

@@ -73,13 +73,6 @@ async function seedReceivedPayment(
   paymentRef: string,
   amountCents: number
 ) {
-  await repo.upsertUser({
-    telegramId: userId,
-    payeeType: 'mobile',
-    payeeValue: '+6591234567',
-    displayName: 'ACME PTE LTD',
-    timestamp: T0,
-  });
   return repo.createPayment({
     ref: paymentRef,
     userId,
@@ -214,13 +207,6 @@ describe('payback QR end-to-end (task 7.3)', () => {
   it('a pending (unreceived) payment cannot be paid back', async () => {
     const userId = 730000400;
     const { repo, bot } = makeHarness(userId);
-    await repo.upsertUser({
-      telegramId: userId,
-      payeeType: 'mobile',
-      payeeValue: '+6591234567',
-      displayName: 'ACME PTE LTD',
-      timestamp: T0,
-    });
     await repo.createPayment({
       ref: 'PAY73004',
       userId,

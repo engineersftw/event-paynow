@@ -12,7 +12,6 @@ import type {
   PaymentStatus,
   ReceiptSource,
   Repository,
-  User,
 } from './repository';
 import * as schema from './schema';
 
@@ -26,66 +25,6 @@ export class D1Repository implements Repository {
   constructor(d1: D1Database) {
     this.db = drizzle(d1, { schema });
     this.d1 = d1;
-  }
-
-  // ============================================================================
-  // Users
-  // ============================================================================
-
-  async upsertUser(
-    input: Omit<User, 'createdAt' | 'updatedAt'> & { timestamp: string }
-  ): Promise<User> {
-    const { telegramId, payeeType, payeeValue, displayName, timestamp } = input;
-
-    // Check if user exists
-    const existing = await this.db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.telegramId, telegramId))
-      .get();
-
-    if (existing) {
-      // Update existing user
-      const updated = await this.db
-        .update(schema.users)
-        .set({
-          payeeType,
-          payeeValue,
-          displayName,
-          updatedAt: timestamp,
-        })
-        .where(eq(schema.users.telegramId, telegramId))
-        .returning()
-        .get();
-
-      return toUser(updated!);
-    } else {
-      // Insert new user
-      const created = await this.db
-        .insert(schema.users)
-        .values({
-          telegramId,
-          payeeType,
-          payeeValue,
-          displayName,
-          createdAt: timestamp,
-          updatedAt: timestamp,
-        })
-        .returning()
-        .get();
-
-      return toUser(created!);
-    }
-  }
-
-  async getUser(telegramId: number): Promise<User | null> {
-    const result = await this.db
-      .select()
-      .from(schema.users)
-      .where(eq(schema.users.telegramId, telegramId))
-      .get();
-
-    return result ? toUser(result) : null;
   }
 
   // ============================================================================
@@ -316,40 +255,6 @@ export class D1Repository implements Repository {
   // ============================================================================
   // Paybacks
   // ============================================================================
-
-  async createPayback(
-    input: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
-  ): Promise<Payback> {
-    const {
-      ref,
-      paymentId,
-      payerType,
-      payerValue,
-      amountCents,
-      status,
-      qrPayload,
-      timestamp,
-      createdBy,
-    } = input;
-
-    const created = await this.db
-      .insert(schema.paybacks)
-      .values({
-        ref,
-        paymentId,
-        payerType,
-        payerValue,
-        amountCents,
-        status,
-        qrPayload,
-        createdAt: timestamp,
-        createdBy: createdBy ?? null,
-      })
-      .returning()
-      .get();
-
-    return toPayback(created!);
-  }
 
   /**
    * Task 7.2: payback bounding enforced inside one D1 batch (implicit transaction).
@@ -710,17 +615,6 @@ function toEvent(row: typeof schema.events.$inferSelect): Event {
     closedAt: row.closedAt,
     defaultAmountCents: row.defaultAmountCents,
     websiteUrl: row.websiteUrl ?? null,
-  };
-}
-
-function toUser(row: typeof schema.users.$inferSelect): User {
-  return {
-    telegramId: row.telegramId,
-    payeeType: row.payeeType as User['payeeType'],
-    payeeValue: row.payeeValue,
-    displayName: row.displayName,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
   };
 }
 
