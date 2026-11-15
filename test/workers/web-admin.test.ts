@@ -3,7 +3,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 import { D1EventRepository, D1Repository } from '../../src/db/drizzle-repository';
 import { signSession } from '../../src/web/auth';
 import { handleWeb, type WebEnv } from '../../src/web/handler';
-import { applyTestSchema } from './harness';
+import { applyTestSchema, insertPayback } from './harness';
 
 const webEnv: WebEnv = {
   paynow_db: env.paynow_db,
@@ -191,7 +191,7 @@ describe('listPaybacksByPayments', () => {
       [b!, 'PBKBACK002'],
       [c!, 'PBKBACK003'],
     ] as const) {
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref,
         paymentId: pay.id,
         payerType: 'mobile',
@@ -789,7 +789,7 @@ describe('web admin', () => {
       cents: number,
       status?: 'sent' | 'cancelled'
     ) => {
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref,
         paymentId,
         payerType: 'mobile',

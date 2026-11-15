@@ -1,6 +1,7 @@
 import { env } from 'cloudflare:test';
 import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { D1Repository } from '../../src/db/drizzle-repository';
+import { insertPayback } from './harness';
 
 /**
  * Repository integration tests against a real local D1 binding.
@@ -13,14 +14,6 @@ import { D1Repository } from '../../src/db/drizzle-repository';
 // Apply schema once before all tests (idempotent)
 beforeAll(async () => {
   const statements = [
-    `CREATE TABLE IF NOT EXISTS users (
-      telegram_id INTEGER PRIMARY KEY,
-      payee_type TEXT NOT NULL CHECK(payee_type IN ('mobile', 'uen')),
-      payee_value TEXT NOT NULL,
-      display_name TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    )`,
     `CREATE TABLE IF NOT EXISTS events (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       ref TEXT NOT NULL UNIQUE,
@@ -56,7 +49,6 @@ beforeAll(async () => {
       voided_by INTEGER,
       checked_in_at TEXT,
       checked_in_by INTEGER,
-      FOREIGN KEY (user_id) REFERENCES users(telegram_id),
       FOREIGN KEY (event_id) REFERENCES events(id)
     )`,
     `CREATE TABLE IF NOT EXISTS paybacks (
@@ -127,77 +119,6 @@ describe('D1Repository', () => {
       displayName: 'Test User',
     };
     // Seed a fresh user for every test
-    await repo.upsertUser({ ...testUser, timestamp: testTimestamp });
-  });
-
-  // ============================================================================
-  // Users
-  // ============================================================================
-
-  describe('Users', () => {
-    it('creates a new user', async () => {
-      const user = await repo.getUser(testUser.telegramId);
-
-      expect(user).not.toBeNull();
-      expect(user!.telegramId).toBe(testUser.telegramId);
-      expect(user!.payeeType).toBe(testUser.payeeType);
-      expect(user!.payeeValue).toBe(testUser.payeeValue);
-      expect(user!.displayName).toBe(testUser.displayName);
-      expect(user!.createdAt).toBe(testTimestamp);
-      expect(user!.updatedAt).toBe(testTimestamp);
-    });
-
-    it('updates an existing user', async () => {
-      const updatedUser = await repo.upsertUser({
-        telegramId: testUser.telegramId,
-        payeeType: 'uen',
-        payeeValue: '201234567A',
-        displayName: 'Updated Name',
-        timestamp: '2024-01-02T00:00:00Z',
-      });
-
-      expect(updatedUser.payeeType).toBe('uen');
-      expect(updatedUser.payeeValue).toBe('201234567A');
-      expect(updatedUser.displayName).toBe('Updated Name');
-      expect(updatedUser.createdAt).toBe(testTimestamp); // unchanged
-      expect(updatedUser.updatedAt).toBe('2024-01-02T00:00:00Z');
-    });
-
-    it('retrieves a user by telegramId', async () => {
-      const user = await repo.getUser(testUser.telegramId);
-
-      expect(user).not.toBeNull();
-      expect(user!.telegramId).toBe(testUser.telegramId);
-    });
-
-    it('returns null for non-existent user', async () => {
-      const user = await repo.getUser(999999999);
-      expect(user).toBeNull();
-    });
-
-    it('enforces cross-user isolation', async () => {
-      const user1 = {
-        telegramId: nextUserId(),
-        payeeType: 'mobile' as const,
-        payeeValue: '+6591111111',
-        displayName: 'User 1',
-      };
-      const user2 = {
-        telegramId: nextUserId(),
-        payeeType: 'uen' as const,
-        payeeValue: '201111111A',
-        displayName: 'User 2',
-      };
-
-      await repo.upsertUser({ ...user1, timestamp: testTimestamp });
-      await repo.upsertUser({ ...user2, timestamp: testTimestamp });
-
-      const retrieved1 = await repo.getUser(user1.telegramId);
-      const retrieved2 = await repo.getUser(user2.telegramId);
-
-      expect(retrieved1!.displayName).toBe('User 1');
-      expect(retrieved2!.displayName).toBe('User 2');
-    });
   });
 
   // ============================================================================
@@ -398,21 +319,6 @@ describe('D1Repository', () => {
       const user1 = nextUserId();
       const user2 = nextUserId();
 
-      await repo.upsertUser({
-        telegramId: user1,
-        payeeType: 'mobile',
-        payeeValue: '+6591111111',
-        displayName: 'User 1',
-        timestamp: testTimestamp,
-      });
-      await repo.upsertUser({
-        telegramId: user2,
-        payeeType: 'uen',
-        payeeValue: '201111111A',
-        displayName: 'User 2',
-        timestamp: testTimestamp,
-      });
-
       const p1 = makePayment({ userId: user1, ref: nextRef('user1-payment') });
       const p2 = makePayment({ userId: user2, ref: nextRef('user2-payment') });
       await repo.createPayment({ ...p1, timestamp: testTimestamp });
@@ -446,7 +352,7 @@ describe('D1Repository', () => {
 
     it('creates a new payback', async () => {
       const ref = nextRef('payback-ref');
-      const payback = await repo.createPayback({
+      const payback = await insertPayback(repo, {
         ref,
         paymentId,
         payerType: 'mobile',
@@ -468,7 +374,7 @@ describe('D1Repository', () => {
     it('lists paybacks by payment', async () => {
       const r1 = nextRef('payback-ref');
       const r2 = nextRef('payback-ref');
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref: r1,
         paymentId,
         payerType: 'mobile',
@@ -478,7 +384,7 @@ describe('D1Repository', () => {
         qrPayload: 'payload1',
         timestamp: testTimestamp,
       });
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref: r2,
         paymentId,
         payerType: 'uen',
@@ -502,7 +408,7 @@ describe('D1Repository', () => {
     });
 
     it('sums paybacks across all statuses', async () => {
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref: nextRef('payback-ref'),
         paymentId,
         payerType: 'mobile',
@@ -512,7 +418,7 @@ describe('D1Repository', () => {
         qrPayload: 'payload1',
         timestamp: testTimestamp,
       });
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref: nextRef('payback-ref'),
         paymentId,
         payerType: 'mobile',
@@ -528,7 +434,7 @@ describe('D1Repository', () => {
     });
 
     it('includes sent paybacks in sum (bound counts delivery-completed paybacks)', async () => {
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref: nextRef('payback-ref'),
         paymentId,
         payerType: 'mobile',
@@ -538,7 +444,7 @@ describe('D1Repository', () => {
         qrPayload: 'payload1',
         timestamp: testTimestamp,
       });
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref: nextRef('payback-ref'),
         paymentId,
         payerType: 'mobile',
@@ -564,7 +470,7 @@ describe('D1Repository', () => {
 
     it('retrieves a payback by its ref', async () => {
       const ref = nextRef('pb-lookup');
-      const created = await repo.createPayback({
+      const created = await insertPayback(repo, {
         ref,
         paymentId,
         payerType: 'mobile',
@@ -591,7 +497,7 @@ describe('D1Repository', () => {
 
     it('marks a pending payback as sent with a timestamp', async () => {
       const ref = nextRef('pb-sent');
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref,
         paymentId,
         payerType: 'mobile',
@@ -619,7 +525,7 @@ describe('D1Repository', () => {
 
     it('rejects a duplicate pending → sent transition (compare-and-set)', async () => {
       const ref = nextRef('pb-sent');
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref,
         paymentId,
         payerType: 'mobile',
@@ -653,7 +559,7 @@ describe('D1Repository', () => {
 
     it('concurrent duplicate taps yield exactly one winner', async () => {
       const ref = nextRef('pb-sent');
-      await repo.createPayback({
+      await insertPayback(repo, {
         ref,
         paymentId,
         payerType: 'mobile',

@@ -32,7 +32,6 @@ describe('PaymentsCommandHandler', () => {
 
   beforeEach(() => {
     mockRepository = {
-      getUser: vi.fn(),
       listPaymentsByUser: vi.fn(),
       sentPaybackTotalsByEvent: vi.fn(async () => new Map<number, number>()),
       getPaymentByRef: vi.fn(),

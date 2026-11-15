@@ -421,15 +421,3 @@ export class ConversationDO {
     await this.state.storage.setAlarm(scheduledTime);
   }
 }
-
-// ============================================================================
-// Router
-// ============================================================================
-
-/**
- * Get or create a conversation DO for a chat.
- */
-export async function getConversationDO(env: Env, chatId: number): Promise<DurableObjectStub> {
-  const id = env.CHAT_SESSION.idFromName(`chat-${chatId}`);
-  return env.CHAT_SESSION.get(id);
-}

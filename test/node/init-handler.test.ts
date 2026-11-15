@@ -14,10 +14,7 @@ describe('/init command handler (event creation)', () => {
       fetch: vi.fn(),
     } as unknown as ConversationDO;
 
-    mockRepository = {
-      getUser: vi.fn(),
-      upsertUser: vi.fn(),
-    } as unknown as Repository;
+    mockRepository = {} as unknown as Repository;
 
     mockEventRepository = {
       createEvent: vi.fn(),

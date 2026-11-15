@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { D1EventRepository, D1Repository } from '../../src/db/drizzle-repository';
 import type { PaybackStatus } from '../../src/db/repository';
-import { applyTestSchema } from './harness';
+import { applyTestSchema, insertPayback } from './harness';
 
 const T = '2024-01-01T00:00:00Z';
 let repo: D1Repository;
@@ -46,7 +46,7 @@ async function seedPayment(eventId: number, ref: string, cents: number, received
 }
 
 async function seedPayback(paymentId: number, ref: string, cents: number, status: PaybackStatus) {
-  await repo.createPayback({
+  await insertPayback(repo, {
     ref,
     paymentId,
     payerType: 'mobile',

@@ -314,7 +314,6 @@ src/
 │   ├── schema.ts          # Drizzle table definitions (users, events, payments, paybacks)
 │   ├── repository.ts      # Infra-neutral interfaces
 │   ├── drizzle-repository.ts # D1 implementation
-│   ├── payment-service.ts # Payment status transitions
 │   └── proxy-validation.ts # Mobile/UEN validation, reference generator
 ├── sgqr/
 │   ├── index.ts           # TLV encoder, CRC16

@@ -43,15 +43,6 @@ export interface EventStats {
   notCheckedInPendingCount: number;
 }
 
-export interface User {
-  telegramId: number;
-  payeeType: PayeeType;
-  payeeValue: string;
-  displayName: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
 export interface Payment {
   id: number;
   ref: string;
@@ -143,10 +134,6 @@ export interface EventRepository {
 }
 
 export interface Repository {
-  // Users
-  upsertUser(user: Omit<User, 'createdAt' | 'updatedAt'> & { timestamp: string }): Promise<User>;
-  getUser(telegramId: number): Promise<User | null>;
-
   // Payments
   createPayment(
     payment: Omit<Payment, 'id' | 'createdAt' | 'receivedAt'> & { timestamp: string }
@@ -186,9 +173,6 @@ export interface Repository {
   checkInPayment(ref: string, actorId: number, timestamp: string): Promise<Payment | null>;
 
   // Paybacks
-  createPayback(
-    payback: Omit<Payback, 'id' | 'createdAt' | 'sentAt'> & { timestamp: string }
-  ): Promise<Payback>;
   /**
    * Create a payback only if `SUM(paybacks) + amountCents <= payment.amountCents`
    * still holds when the write commits — counting both pending and sent rows.

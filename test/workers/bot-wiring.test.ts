@@ -7,6 +7,7 @@ import {
   applyTestSchema,
   callbackUpdate,
   groupTextUpdate,
+  insertPayback,
   TEST_BOT_INFO,
   TelegramStub,
   textUpdate,
@@ -115,13 +116,6 @@ describe('bot wiring (src/bot.ts)', () => {
   it('/payments renders the list with inline buttons', async () => {
     const userId = 800000002;
     const { bot, repo } = makeWiredBot();
-    await repo.upsertUser({
-      telegramId: userId,
-      payeeType: 'mobile',
-      payeeValue: '+6591234567',
-      displayName: 'Wiring User',
-      timestamp: T0,
-    });
     // Seed an event for this user's chat
     const eventRepo = new (await import('../../src/db/drizzle-repository')).D1EventRepository(
       env.paynow_db
@@ -293,13 +287,6 @@ describe('bot wiring (src/bot.ts)', () => {
   it.skip('pagination callback renders the next page with Prev button', async () => {
     const userId = 800000011;
     const { bot, repo } = makeWiredBot();
-    await repo.upsertUser({
-      telegramId: userId,
-      payeeType: 'mobile',
-      payeeValue: '+6591234567',
-      displayName: 'Wiring User',
-      timestamp: T0,
-    });
     // Seed 6 payments to force 2 pages (pageSize = 5)
     for (let i = 1; i <= 6; i++) {
       await seedPayment(repo, userId, `PAGE-${String(i).padStart(3, '0')}`, 1000, 'pending');
@@ -324,13 +311,6 @@ describe('bot wiring (src/bot.ts)', () => {
   it('callback_query mark_received transitions the payment through the wired bot', async () => {
     const userId = 800000003;
     const { bot, repo } = makeWiredBot();
-    await repo.upsertUser({
-      telegramId: userId,
-      payeeType: 'mobile',
-      payeeValue: '+6591234567',
-      displayName: 'Wiring User',
-      timestamp: T0,
-    });
     await seedPayment(repo, userId, 'WIRE-003', 2500, 'pending');
 
     await bot.handleUpdate(callbackUpdate(userId, 'mark_received:WIRE-003'));
@@ -350,13 +330,6 @@ describe('bot wiring (src/bot.ts)', () => {
   it('callback_query view shows payment details', async () => {
     const userId = 800000004;
     const { bot, repo } = makeWiredBot();
-    await repo.upsertUser({
-      telegramId: userId,
-      payeeType: 'mobile',
-      payeeValue: '+6591234567',
-      displayName: 'Wiring User',
-      timestamp: T0,
-    });
     await seedPayment(repo, userId, 'WIRE-004', 990, 'pending');
 
     await bot.handleUpdate(callbackUpdate(userId, 'view:WIRE-004'));
@@ -370,13 +343,6 @@ describe('bot wiring (src/bot.ts)', () => {
     const ownerId = 800000005;
     const intruderId = 800000006;
     const { bot, repo } = makeWiredBot();
-    await repo.upsertUser({
-      telegramId: ownerId,
-      payeeType: 'mobile',
-      payeeValue: '+6591234567',
-      displayName: 'Owner',
-      timestamp: T0,
-    });
     await seedPayment(repo, ownerId, 'WIRE-005', 500, 'pending');
 
     await bot.handleUpdate(callbackUpdate(intruderId, 'mark_received:WIRE-005'));
@@ -389,13 +355,6 @@ describe('bot wiring (src/bot.ts)', () => {
   it('/payback without an argument shows usage; /payback <ref> starts the flow', async () => {
     const userId = 800000007;
     const { bot, repo } = makeWiredBot();
-    await repo.upsertUser({
-      telegramId: userId,
-      payeeType: 'mobile',
-      payeeValue: '+6591234567',
-      displayName: 'Wiring User',
-      timestamp: T0,
-    });
     await seedPayment(repo, userId, 'WIRE-007', 1250, 'received');
 
     await bot.handleUpdate(textUpdate(userId, '/payback'));
@@ -567,15 +526,8 @@ describe('bot wiring (src/bot.ts), misc', () => {
   it('detail view renders Mark-sent buttons; tapping transitions the payback and re-renders (task 7.4)', async () => {
     const userId = 800000010;
     const { bot, repo } = makeWiredBot();
-    await repo.upsertUser({
-      telegramId: userId,
-      payeeType: 'mobile',
-      payeeValue: '+6591234567',
-      displayName: 'Wiring User',
-      timestamp: T0,
-    });
     const payment = await seedPayment(repo, userId, 'WIRE-010', 10000, 'received');
-    await repo.createPayback({
+    await insertPayback(repo, {
       ref: 'WIRE-PB-010',
       paymentId: payment.id,
       payerType: 'mobile',

@@ -53,7 +53,6 @@
 │  ┌──────────────────────────────────────────────────────────┐  │
 │  │         Repository Layer (src/db/repository.ts)          │  │
 │  │  • Infra-neutral interfaces                              │  │
-│  │  • Users: upsertUser, getUser                            │  │
 │  │  • Payments: create, list, receive/void (pending CAS)    │  │
 │  │  • Paybacks: create, list, sum, sent/cancel (CAS)        │  │
 │  └────────────────────┬─────────────────────────────────────┘  │
@@ -230,7 +229,6 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 
 **Key operations**:
 
-- `upsertUser`: Create or update a user's PayNow reference
 - `createPayment`: Create a pending payment (with optional payer type/value/name)
 - `updatePaymentStatus`: Pending-only compare-and-set to `received`
 - `voidPayment`: Pending-only compare-and-set to `voided`; null if missing or no longer pending
@@ -389,9 +387,9 @@ User taps Confirm button (callback_query)
   ↓
 Handler updates state (flow: 'idle', step: 0)
   ↓
-Handler calls repository.upsertUser()
+Handler calls eventRepository.createEvent()
   ↓
-D1 stores user record
+D1 stores the event
   ↓
 Handler updates original message in place with success text
 ```

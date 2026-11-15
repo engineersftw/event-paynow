@@ -1,4 +1,4 @@
-import { buildPayload, nestedTlv, tlv } from './index';
+import { buildPayload, tlv } from './index';
 
 /** PayNow proxy types. */
 export type ProxyType = 'mobile' | 'uen';
@@ -96,22 +96,11 @@ export function buildPayNowPayload(opts: PayNowPayloadOptions): string {
   if (reference) {
     paynowFields.push(['05', truncateAnsi(reference, 25)]);
   }
-  const _paynowTemplate = nestedTlv('26', paynowFields);
-
   // Format amount as decimal string (e.g. 1250 → "12.50")
   // An amount is always carried when given; `editable` (tag 26.03) only says whether the payer may change it
   const amountStr = amountCents !== undefined ? (amountCents / 100).toFixed(2) : undefined;
 
   // Build the full payload
-  const _fields: Array<[string, string]> = [
-    ['00', '01'], // payload format indicator
-    ['01', '12'], // dynamic point of initiation
-    // paynowTemplate is a pre-built string starting with "26..."
-    // We need to include it as a single field — use tlv directly with the inner
-  ];
-
-  // Insert the paynow template (already TLV-encoded with tag 26)
-  // We'll build the content manually and include it in the CRC input
   const outerFields: Array<[string, string]> = [
     ['00', '01'],
     ['01', '12'],

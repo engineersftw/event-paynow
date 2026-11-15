@@ -308,11 +308,9 @@ export class InitCommandHandler {
     proxy: { type: string; normalized: string },
     state: ConversationState
   ): Promise<void> {
-    const _userId = state.context.userId as number;
     const chatId = state.context.chatId as number;
     const topicId = state.context.topicId as number;
     const eventName = state.context.eventName as string;
-    const _userName = state.context.userName as string;
     const ref = generateRef();
 
     try {
