@@ -29,6 +29,13 @@
       "when": 1794720257396,
       "tag": "0003_drop_split_directory",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1794734111094,
+      "tag": "0004_add_query_indexes",
+      "breakpoints": true
     }
   ]
 }

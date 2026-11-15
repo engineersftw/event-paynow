@@ -173,6 +173,13 @@ describe('D1Repository', () => {
       expect(payment).toBeNull();
     });
 
+    it('retrieves a payment by id, and null for an unknown id', async () => {
+      const created = await repo.createPayment({ ...makePayment(), timestamp: testTimestamp });
+
+      expect((await repo.getPaymentById(created.id))!.ref).toBe(created.ref);
+      expect(await repo.getPaymentById(999999999)).toBeNull();
+    });
+
     it('lists payments by user', async () => {
       const p1 = makePayment({ description: 'First' });
       const p2 = makePayment({ description: 'Second', amountCents: 2000 });

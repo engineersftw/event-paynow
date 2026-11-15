@@ -102,7 +102,7 @@ export class PaymentsCommandHandler {
     // Chat admins see every payment of the event; everyone else only their own
     const eventPayments = (await this.isAdmin(event.chatId, userId))
       ? await this.repository.listPaymentsByEvent(event.id)
-      : (await this.repository.listPaymentsByUser(userId)).filter((p) => p.eventId === event.id);
+      : await this.repository.listPaymentsByUserAndEvent(userId, event.id);
 
     if (eventPayments.length === 0) {
       await ctx.reply(`📭 No payments for event "${event.name}" yet.\n\nUse /start to create one!`);

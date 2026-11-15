@@ -175,7 +175,7 @@ describe('/payments drill-down for admins', () => {
 
   function setup(isAdmin: (c: number, u: number) => Promise<boolean>) {
     const repo = {
-      listPaymentsByUser: vi.fn(async () => [others[0]!]),
+      listPaymentsByUserAndEvent: vi.fn(async () => [others[0]!]),
       listPaymentsByEvent: vi.fn(async () => others),
       sentPaybackTotalsByEvent: vi.fn(async () => new Map()),
     } as unknown as Repository;
@@ -195,7 +195,7 @@ describe('/payments drill-down for admins', () => {
       .calls[0]![0] as string;
     expect(text).toContain('MINE000001');
     expect(text).toContain('THEIRS0002');
-    expect(repo.listPaymentsByUser).not.toHaveBeenCalled();
+    expect(repo.listPaymentsByUserAndEvent).not.toHaveBeenCalled();
   });
 
   it('an ordinary member only sees their own', async () => {

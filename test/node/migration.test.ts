@@ -113,12 +113,37 @@ describe('migrations (whole history, applied in order)', () => {
   });
 
   it('drops the Split bot contact and waiting-QR tables, which nothing uses any more', () => {
-    expect(files().at(-1)).toBe('0003_drop_split_directory.sql');
+    expect(files()).toContain('0003_drop_split_directory.sql');
     const tables = migrate()
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all() as Array<{ name: string }>;
     expect(tables.map((t) => t.name)).not.toContain('split_contacts');
     expect(tables.map((t) => t.name)).not.toContain('split_claims');
+  });
+
+  it('indexes the columns the queries filter by, without touching any data', () => {
+    expect(files().at(-1)).toBe('0004_add_query_indexes.sql');
+    const db = migrate();
+    const names = (
+      db
+        .prepare(
+          "SELECT name FROM sqlite_master WHERE type = 'index' AND name LIKE '%\\_idx' ESCAPE '\\' ORDER BY name"
+        )
+        .all() as Array<{ name: string }>
+    ).map((i) => i.name);
+    expect(names).toEqual([
+      'events_chat_topic_idx',
+      'paybacks_payment_idx',
+      'payments_event_created_idx',
+      'payments_user_idx',
+    ]);
+    // The status CHECK constraints live only in the SQL: an index migration must not rebuild a table
+    expect(
+      rejectedByCheck(
+        db,
+        "INSERT INTO paybacks (ref, payment_id, payer_type, payer_value, amount_cents, status, qr_payload, created_at) VALUES ('r', 1, 'mobile', 'x', 1, 'bogus', 'p', 't')"
+      )
+    ).toBe(true);
   });
 
   it('has unique references and a (day, metric) key for the counters', () => {
