@@ -454,6 +454,35 @@ describe('conversation relevance in a group chat', () => {
     expect((await doStateOf(chatId)).step).toBe(3);
   });
 
+  it("a second member's flow command is refused while the first is mid-flow; their own restart and a finished flow are allowed", async () => {
+    const chatId = -1008000009;
+    const { bot } = makeWiredBot();
+
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, '/init'));
+    expect(stub.lastText()).toContain('create a new event');
+
+    // Bob tries every flow command: each is refused and Alice's conversation is untouched
+    for (const cmd of ['/init', '/start', '/payback', '/edit_event', '/end_event']) {
+      const sent = stub.sentMessages.length;
+      await bot.handleUpdate(groupTextUpdate(chatId, bob, cmd));
+      expect(stub.sentMessages).toHaveLength(sent + 1);
+      expect(stub.lastText()).toContain('Someone else is in the middle of a request');
+      expect(await doStateOf(chatId)).toMatchObject({
+        flow: 'init',
+        step: 1,
+        owner: { userId: alice, topicId: 0 },
+      });
+    }
+
+    // Alice may restart her own flow, and once it is cancelled Bob can start his
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, '/init'));
+    expect(stub.lastText()).toContain('create a new event');
+    await bot.handleUpdate(groupTextUpdate(chatId, alice, '/cancel'));
+    await bot.handleUpdate(groupTextUpdate(chatId, bob, '/init'));
+    expect(stub.lastText()).toContain('create a new event');
+    expect((await doStateOf(chatId)).owner).toEqual({ userId: bob, topicId: 0 });
+  });
+
   it('the owner in another topic is ignored', async () => {
     const chatId = -1008000003;
     const { bot } = makeWiredBot();

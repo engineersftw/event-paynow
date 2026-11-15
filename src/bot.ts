@@ -84,16 +84,33 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
     );
   };
 
+  /**
+   * True (after telling the sender) when someone else is in the middle of a conversation in this
+   * chat: a chat holds one conversation, so starting a new flow would silently wipe theirs. Your own
+   * unfinished conversation (any topic) and one with no recorded owner can be replaced.
+   */
+  const busyWithSomeoneElse = async (ctx: Context): Promise<boolean> => {
+    const response = await conversation(ctx).fetch(new Request('http://localhost/peek'));
+    const state = (await response.json()) as ConversationState;
+    if (state.flow === 'idle' || !state.owner || state.owner.userId === ctx.from?.id) return false;
+    await ctx.reply(
+      '⏳ Someone else is in the middle of a request in this chat. Try again in a minute, or ask them to /cancel.'
+    );
+    return true;
+  };
+
   // --- commands ------------------------------------------------------------
   bot.command('ping', (ctx) => ctx.reply('pong 🏓'));
   bot.command('help', (ctx) => ctx.reply(HELP_TEXT, { parse_mode: 'Markdown' }));
 
   bot.command('init', async (ctx) => {
+    if (await busyWithSomeoneElse(ctx)) return;
     await new InitCommandHandler(conversation(ctx), repository, eventRepository).start(ctx);
     await stampOwner(ctx);
   });
 
   bot.command('start', async (ctx) => {
+    if (await busyWithSomeoneElse(ctx)) return;
     await new StartCommandHandler(conversation(ctx), repository, eventRepository).start(ctx);
     await stampOwner(ctx);
   });
@@ -111,6 +128,7 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   );
 
   bot.command('payback', async (ctx) => {
+    if (await busyWithSomeoneElse(ctx)) return;
     const arg = typeof ctx.match === 'string' ? ctx.match.trim() : '';
     await new PaybackCommandHandler(conversation(ctx), repository, canAct).start(
       ctx,
@@ -120,11 +138,13 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   });
 
   bot.command('edit_event', async (ctx) => {
+    if (await busyWithSomeoneElse(ctx)) return;
     await new EditEventHandler(conversation(ctx), eventRepository, isAdmin).start(ctx);
     await stampOwner(ctx);
   });
 
   bot.command('end_event', async (ctx) => {
+    if (await busyWithSomeoneElse(ctx)) return;
     await new EndEventHandler(conversation(ctx), eventRepository).start(ctx);
     await stampOwner(ctx);
   });
@@ -216,6 +236,10 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
       data.startsWith('payback_cancel_amount:')
     ) {
       await new PaybackCommandHandler(conversation(ctx), repository, canAct).handleCallback(ctx);
+      return;
+    }
+    if (data.startsWith('payback:') && (await busyWithSomeoneElse(ctx))) {
+      await ctx.answerCallbackQuery();
       return;
     }
     await new PaymentCallbackHandler(conversation(ctx), repository, canAct).handleCallback(ctx);
