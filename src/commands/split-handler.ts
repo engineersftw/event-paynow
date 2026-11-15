@@ -1,5 +1,5 @@
 import type { Api, Context } from 'grammy';
-import { InlineKeyboard, InputFile } from 'grammy';
+import { InlineKeyboard } from 'grammy';
 import type { Message } from 'grammy/types';
 import { detectProxyType } from '../db/proxy-validation';
 import {
@@ -17,10 +17,10 @@ import {
 import { type ReceiptReader, ReceiptReaderError } from '../receipt-reader';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
-import { bmpToPng } from '../sgqr/png';
-import { renderQrPng } from '../sgqr/qr-render';
+import { queueSplitQrs, type SplitQrMessage } from '../split-qr-queue';
 import type { VoiceReader } from '../voice-reader';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
+import { qrPhoto } from './qr-photo';
 import {
   type AssignedOk,
   applyUnassigned,
@@ -73,15 +73,6 @@ const CLAIM = 17; // the claim message is open and any member can tap items
 const MAX_DESCRIPTION = 25;
 // Each round of simultaneous taps lets one write through, so this many taps at once all fit
 const MAX_TAP_RETRIES = 25;
-/**
- * The QR as a PNG file. The renderer makes a 1 MB BMP; as a PNG it is about 20 KB, so each upload
- * to Telegram takes a fraction of the time (the whole Confirm must finish within the 30 seconds
- * Cloudflare gives background work).
- */
-async function qrPhoto(payload: string, lines: string[]): Promise<InputFile> {
-  return new InputFile(await bmpToPng(await renderQrPng(payload, lines)), 'paynow-qr.png');
-}
-
 /** Stop starting new QR sends after this long, so a slow Confirm says what is missing. */
 const SEND_BUDGET_MS = 20_000;
 
@@ -681,8 +672,44 @@ export class SplitCommandHandler {
       download?: (api: Api, fileId: string) => Promise<Uint8Array>;
     } = {},
     /** Anonymous daily counts for the owner's /stats; absent in tests that do not need it. */
-    private readonly counter?: UsageCounter
+    private readonly counter?: UsageCounter,
+    /** Posts each QR in its own run, with retries; without it QRs are sent directly. */
+    private readonly qrQueue?: Queue<SplitQrMessage>
   ) {}
+
+  /** Put the QRs on the queue; false when there is no queue or it refused them (send directly). */
+  private async enqueue(messages: SplitQrMessage[]): Promise<boolean> {
+    if (!this.qrQueue || messages.length === 0) return false;
+    try {
+      await queueSplitQrs(this.qrQueue, messages);
+      return true;
+    } catch (error) {
+      console.error(
+        `split qr queue failed: ${(error instanceof Error ? error.message : String(error)).slice(0, 200)}`
+      );
+      return false;
+    }
+  }
+
+  /** One queue message for a QR in this chat (and topic). */
+  private qrMessage(
+    ctx: Context,
+    payload: string,
+    lines: string[],
+    caption: string,
+    label: string
+  ) {
+    const topic = topicOf(ctx);
+    return {
+      v: 1 as const,
+      chatId: ctx.chat!.id,
+      ...(topic ? { threadId: topic } : {}),
+      payload,
+      lines,
+      caption,
+      label,
+    };
+  }
 
   /** `/split_custom` passes 'custom': after the total it goes straight to the list. */
   async start(ctx: Context, mode?: 'custom' | 'receipt'): Promise<void> {
@@ -1519,6 +1546,21 @@ export class SplitCommandHandler {
           return [{ cents: share, lines: [`${sgd(share)} each (split ${people} ways)`] }];
         })();
 
+    // The queue posts each QR in its own run (retried on errors), so nothing is lost to the time limit
+    const queued = await this.enqueue(
+      jobs.map((job) => {
+        const lines = [...(description ? [description] : []), ...job.lines];
+        return this.qrMessage(
+          ctx,
+          payloadFor(job.cents),
+          lines,
+          `${lines.join('\n')}\n\n${caution} Send /split for another.`,
+          job.lines.join(' ')
+        );
+      })
+    );
+    if (queued) return;
+
     // Cloudflare stops background work 30 seconds after the update arrived, without a word: stop
     // starting sends in good time, so the chat is told which QRs are missing
     const deadline = Date.now() + SEND_BUDGET_MS;
@@ -1698,7 +1740,12 @@ export class SplitCommandHandler {
           show_alert: true,
         });
       } else {
-        await ctx.answerCallbackQuery({ text: 'Your QR is posted in the chat.' });
+        await ctx.answerCallbackQuery({
+          text:
+            sent === 'queued'
+              ? 'Your QR will be posted in the chat in a moment.'
+              : 'Your QR is posted in the chat.',
+        });
       }
       await this.refreshClaims(ctx, r.context);
     }
@@ -1711,7 +1758,7 @@ export class SplitCommandHandler {
     from: { id: number; first_name: string },
     cents: number,
     c: Ctx
-  ): Promise<'posted' | 'failed'> {
+  ): Promise<'queued' | 'posted' | 'failed'> {
     const description = c.description as string | undefined;
     const payload = buildPayNowPayload({
       proxyType: c.payeeType as 'mobile' | 'uen',
@@ -1722,10 +1769,14 @@ export class SplitCommandHandler {
     });
     const name = claimersOf(c).find((x) => x.id === from.id)?.name ?? from.first_name;
     const lines = [...(description ? [description] : []), sgd(cents), name];
+    const caption = `${lines.join('\n')}\n\nScan with your banking app. Check the payee name before you pay.`;
+    if (
+      await this.enqueue([this.qrMessage(ctx, payload, lines, caption, `${sgd(cents)} ${name}`)])
+    ) {
+      return 'queued';
+    }
     try {
-      await ctx.replyWithPhoto(await qrPhoto(payload, lines), {
-        caption: `${lines.join('\n')}\n\nScan with your banking app. Check the payee name before you pay.`,
-      });
+      await ctx.replyWithPhoto(await qrPhoto(payload, lines), { caption });
       await countAll(this.counter, [SPLIT_QR_CHAT]);
       return 'posted';
     } catch {

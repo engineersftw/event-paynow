@@ -97,6 +97,11 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
+      # The Split bot's QR queue must exist before a deploy that consumes it; "already exists" is fine
+      - run: npx wrangler queues create split-qr-sends || npx wrangler queues info split-qr-sends
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       - run: npx wrangler deploy
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}

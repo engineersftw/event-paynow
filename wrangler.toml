@@ -14,6 +14,18 @@ migrations_dir = "drizzle"
 bindings = [{ name = "CHAT_SESSION", class_name = "ChatSessionDO" }]
 
 # Workers AI, used to read receipt photos. Remote only: local runs and tests use a fake reader.
+# Split_PayNow_Bot posts each QR from this queue (one message per QR, retried on errors).
+# Create it once: npx wrangler queues create split-qr-sends
+[[queues.producers]]
+queue = "split-qr-sends"
+binding = "SPLIT_QR_QUEUE"
+
+[[queues.consumers]]
+queue = "split-qr-sends"
+max_batch_size = 10
+max_batch_timeout = 1
+max_retries = 5
+
 [ai]
 binding = "AI"
 

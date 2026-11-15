@@ -13,6 +13,7 @@ import {
   type ReceiptReader,
   WorkersAiReceiptReader,
 } from './receipt-reader';
+import type { SplitQrMessage } from './split-qr-queue';
 import { DEFAULT_VOICE_MODEL, type VoiceReader, WorkersAiVoiceReader } from './voice-reader';
 import type { ConversationDO } from './worker/conversation-do';
 
@@ -28,6 +29,8 @@ export interface SplitBotDeps {
   voice?: VoiceReader;
   /** Downloads a Telegram file; defaults to the Bot API file endpoint. */
   download?: (api: Api, fileId: string) => Promise<Uint8Array>;
+  /** Queue that posts each QR on its own; only the webhook route passes it (tests send directly). */
+  qrQueue?: Queue<SplitQrMessage>;
 }
 
 /** The photo's bytes through the Bot API file endpoint (capped: receipts are small). */
@@ -73,7 +76,8 @@ export function createSplitBot(
     return new SplitCommandHandler(
       stub as unknown as ConversationDO,
       { ...(reader ? { reader } : {}), ...(voice ? { voice } : {}), download },
-      usage
+      usage,
+      deps.qrQueue
     );
   };
 
@@ -140,7 +144,9 @@ let botPromise: Promise<Bot> | null = null;
 async function getSplitBot(env: Env, token: string): Promise<Bot> {
   if (!botPromise) {
     const pending = (async () => {
-      const bot = createSplitBot(env, token);
+      const bot = createSplitBot(env, token, undefined, {
+        ...(env.SPLIT_QR_QUEUE ? { qrQueue: env.SPLIT_QR_QUEUE } : {}),
+      });
       await bot.init();
       return bot;
     })();
