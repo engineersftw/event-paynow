@@ -32,7 +32,7 @@ The system SHALL serve an HTML page at `/split` to anyone, without sign-in and w
 
 ### Requirement: The page explains the bot, how to start and what it stores
 
-The page SHALL describe what the bot does: an equal split with one QR for one share, custom amounts per person with @mentions whose QRs are sent by direct message, a receipt photo read for items, GST and service charge, and, in a group, members claiming their own items and paying at once. It SHALL list how to start (`/split`, `/split_custom`, `/split_receipt`, and adding the bot to a group or messaging it), show the order of a split (the payee and whether the payee is the user first, then the bill, then a summary to confirm), and say what the bot keeps: nothing beyond the conversation, receipt photos are never stored, and a mentioned person's username and a waiting QR are kept briefly and can be deleted with `/forget`.
+The page SHALL describe what the bot does: an equal split with one QR for one share, custom amounts per person, with the QRs posted in the chat, a receipt photo read for items, GST and service charge, and, in a group, members claiming their own items and paying at once. It SHALL list how to start (`/split`, `/split_custom`, `/split_receipt`, and adding the bot to a group or messaging it), show the order of a split (the payee first, then the bill, the description, the details and a summary to confirm), and say what the bot keeps: nothing beyond the conversation, receipt photos are never stored, and a mentioned person's username and a waiting QR are kept briefly and can be deleted with `/forget`.
 
 #### Scenario: What it does
 

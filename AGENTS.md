@@ -119,6 +119,7 @@ This project uses OpenSpec for change management. All changes are archived:
 53. `add-early-claim-qr` (9 tasks) — archived 2026-11-11
 54. `add-split-landing-page` (9 tasks) — archived 2026-11-11
 55. `add-split-voice-assignment` (13 tasks) — archived 2026-11-14
+56. `post-split-qrs-in-chat` (15 tasks) — archived 2026-11-15
 
 **Workflow commands:**
 

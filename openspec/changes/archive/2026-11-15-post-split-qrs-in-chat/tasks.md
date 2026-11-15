@@ -23,4 +23,4 @@
 
 - [x] 4.1 Update the landing page text in `src/web/page.ts` (and its tests), the README Split section, AGENTS.md and docs/architecture.md for the new order and chat-only QRs
 - [x] 4.2 Run `npm run build`, `npm run check` and `npm test`; fix anything they report
-- [ ] 4.3 After deploy, run one real group split with a receipt (skip the description, let two people claim, take one QR early, confirm) and check: the description defaults to the merchant, every QR is in the chat with names, no direct messages, no payee question
+- [x] 4.3 After deploy, run one real group split with a receipt (skip the description, let two people claim, take one QR early, confirm) and check: the description defaults to the merchant, every QR is in the chat with names, no direct messages, no payee question (Done: live group splits posted every QR in the chat with names and the description; a first run lost QRs to the 30 s background limit, fixed by sending PNGs in #96.)
