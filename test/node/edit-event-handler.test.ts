@@ -34,7 +34,7 @@ function setup(opts: { events?: Event[]; admin?: boolean[] } = {}) {
     getEventByRef: vi.fn(async (ref: string) => events.find((e) => e.ref === ref) ?? null),
     updateEvent: vi.fn(async (ref: string, patch: EventPatch) => {
       const e = events.find((x) => x.ref === ref);
-      if (!e || e.status !== 'open') return null;
+      if (e?.status !== 'open') return null;
       ev = Object.assign(e, patch);
       return e;
     }),
