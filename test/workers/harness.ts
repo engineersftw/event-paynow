@@ -241,6 +241,51 @@ function parseMultipart(
   return out;
 }
 
+const isPng = (b: Uint8Array) => b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4e && b[3] === 0x47;
+
+/** The inverse of `bmpToPng` for its own output (8-bit RGB, filter 0 on every row). */
+async function pngToBmp(png: Uint8Array): Promise<Uint8Array> {
+  const view = new DataView(png.buffer, png.byteOffset, png.byteLength);
+  let width = 0;
+  let height = 0;
+  const idat: Uint8Array[] = [];
+  for (let at = 8; at < png.length; ) {
+    const len = view.getUint32(at);
+    const type = String.fromCharCode(...png.subarray(at + 4, at + 8));
+    if (type === 'IHDR') {
+      width = view.getUint32(at + 8);
+      height = view.getUint32(at + 12);
+    } else if (type === 'IDAT') idat.push(png.subarray(at + 8, at + 8 + len));
+    at += 12 + len;
+  }
+  const stream = new Blob(idat).stream().pipeThrough(new DecompressionStream('deflate'));
+  const raw = new Uint8Array(await new Response(stream).arrayBuffer());
+  const stride = (width * 3 + 3) & ~3;
+  const bmp = new Uint8Array(54 + stride * height);
+  const out = new DataView(bmp.buffer);
+  bmp[0] = 0x42;
+  bmp[1] = 0x4d;
+  out.setUint32(2, bmp.length, true);
+  out.setUint32(10, 54, true);
+  out.setUint32(14, 40, true);
+  out.setInt32(18, width, true);
+  out.setInt32(22, -height, true); // top-down
+  out.setUint16(26, 1, true);
+  out.setUint16(28, 24, true);
+  for (let y = 0; y < height; y++) {
+    const row = y * (1 + width * 3);
+    if (raw[row] !== 0) throw new Error('pngToBmp: only filter 0 is supported');
+    for (let x = 0; x < width; x++) {
+      const i = row + 1 + x * 3;
+      const o = 54 + y * stride + x * 3;
+      bmp[o] = raw[i + 2]!; // B
+      bmp[o + 1] = raw[i + 1]!; // G
+      bmp[o + 2] = raw[i]!; // R
+    }
+  }
+  return bmp;
+}
+
 /**
  * Captures every outbound Telegram API call a grammY Bot makes when driven
  * via handleUpdate. Pass `stub.fetch` as `client.fetch` in the Bot config.
@@ -352,7 +397,8 @@ export class TelegramStub {
         chatId,
         caption: fields.caption?.value ?? '',
         filename: photoName,
-        bytes: photoBytes,
+        // A PNG is turned back into the renderer's BMP, so every test decodes photos the same way
+        bytes: isPng(photoBytes) ? await pngToBmp(photoBytes) : photoBytes,
         replyMarkup,
       });
       this.messageId += 1;

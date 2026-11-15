@@ -17,6 +17,7 @@ import {
 import { type ReceiptReader, ReceiptReaderError } from '../receipt-reader';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
+import { bmpToPng } from '../sgqr/png';
 import { renderQrPng } from '../sgqr/qr-render';
 import type { VoiceReader } from '../voice-reader';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
@@ -72,6 +73,18 @@ const CLAIM = 17; // the claim message is open and any member can tap items
 const MAX_DESCRIPTION = 25;
 // Each round of simultaneous taps lets one write through, so this many taps at once all fit
 const MAX_TAP_RETRIES = 25;
+/**
+ * The QR as a PNG file. The renderer makes a 1 MB BMP; as a PNG it is about 20 KB, so each upload
+ * to Telegram takes a fraction of the time (the whole Confirm must finish within the 30 seconds
+ * Cloudflare gives background work).
+ */
+async function qrPhoto(payload: string, lines: string[]): Promise<InputFile> {
+  return new InputFile(await bmpToPng(await renderQrPng(payload, lines)), 'paynow-qr.png');
+}
+
+/** Stop starting new QR sends after this long, so a slow Confirm says what is missing. */
+const SEND_BUDGET_MS = 20_000;
+
 const VOICE_MAX_SECONDS = 60; // a longer voice note is refused before any download or AI call
 const VOICE_MAX_BYTES = 1_000_000;
 const IDLE_MS = 10 * 60 * 1000;
@@ -1506,12 +1519,15 @@ export class SplitCommandHandler {
           return [{ cents: share, lines: [`${sgd(share)} each (split ${people} ways)`] }];
         })();
 
+    // Cloudflare stops background work 30 seconds after the update arrived, without a word: stop
+    // starting sends in good time, so the chat is told which QRs are missing
+    const deadline = Date.now() + SEND_BUDGET_MS;
     let sent = 0;
     try {
       for (const job of jobs) {
+        if (Date.now() > deadline) break;
         const lines = [...(description ? [description] : []), ...job.lines];
-        const image = await renderQrPng(payloadFor(job.cents), lines);
-        await ctx.replyWithPhoto(new InputFile(image, 'paynow-qr.bmp'), {
+        await ctx.replyWithPhoto(await qrPhoto(payloadFor(job.cents), lines), {
           caption: `${lines.join('\n')}\n\n${caution} Send /split for another.`,
         });
         sent++;
@@ -1519,10 +1535,16 @@ export class SplitCommandHandler {
       }
     } catch {
       // No console logging: the answers include a payee number
+    }
+    if (sent < jobs.length) {
+      const missing = jobs
+        .slice(sent)
+        .map((j) => j.lines.join(' '))
+        .join('; ');
       await ctx.reply(
         jobs.length === 1
           ? 'Could not make the QR. Please send /split to try again.'
-          : `Sent ${sent} of ${jobs.length} QRs; the other ${jobs.length - sent} could not be sent. Please send /split to try again.`
+          : `Sent ${sent} of ${jobs.length} QRs; the other ${jobs.length - sent} could not be sent (${missing}). Please send /split to try again.`
       );
     }
   }
@@ -1701,8 +1723,7 @@ export class SplitCommandHandler {
     const name = claimersOf(c).find((x) => x.id === from.id)?.name ?? from.first_name;
     const lines = [...(description ? [description] : []), sgd(cents), name];
     try {
-      const image = await renderQrPng(payload, lines);
-      await ctx.replyWithPhoto(new InputFile(image, 'paynow-qr.bmp'), {
+      await ctx.replyWithPhoto(await qrPhoto(payload, lines), {
         caption: `${lines.join('\n')}\n\nScan with your banking app. Check the payee name before you pay.`,
       });
       await countAll(this.counter, [SPLIT_QR_CHAT]);

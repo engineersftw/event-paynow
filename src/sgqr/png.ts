@@ -1,6 +1,6 @@
 /**
- * Convert the renderer's 24-bit top-down BMP into a PNG (browsers show PNG everywhere; Telegram
- * keeps getting the BMP). Pure JS plus the platform CompressionStream, so it runs in Workers
+ * Convert the renderer's 24-bit top-down BMP into a PNG (browsers show PNG everywhere; the Split
+ * bot sends PNGs to Telegram too, about 20 KB instead of 1 MB; the Event bot still sends the BMP). Pure JS plus the platform CompressionStream, so it runs in Workers
  * and in Node.
  */
 

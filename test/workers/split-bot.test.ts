@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test';
 import type { Update } from 'grammy/types';
 import jsQR from 'jsqr';
-import { beforeAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { newExpiry, newToken } from '../../src/commands/split-claim';
 import { D1SplitDirectory } from '../../src/db/split-repository';
 import { D1UsageRepository } from '../../src/db/usage-repository';
@@ -411,6 +411,43 @@ describe('Split_PayNow_Bot custom amounts', () => {
     expect(stub.sentMessages).toHaveLength(0);
     await gsay(b, chat, owner, 'Ann 30\nBob 30');
     expect(stub.lastText()).toContain('Please check the split');
+  });
+
+  it('sends each QR as a small PNG', async () => {
+    const u = uid++;
+    const b = bot();
+    await toPayee(b, u, 'Ann 60\nBob 40');
+    await tap(b, u, 'split_confirm');
+    expect(stub.sentPhotos.map((p) => p.filename)).toEqual(['paynow-qr.png', 'paynow-qr.png']);
+  });
+
+  it('stops starting QR sends after 20 seconds and names the ones not sent', async () => {
+    const u = uid++;
+    let offset = 0;
+    const realNow = Date.now.bind(Date);
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => realNow() + offset);
+    const b = createSplitBot(env, 'split-token', {
+      botInfo: TEST_BOT_INFO,
+      client: {
+        fetch: async (url, init) => {
+          const res = await stub.fetch(url, init);
+          if (String(url).endsWith('/sendPhoto')) offset += 21_000; // a very slow upload
+          return res;
+        },
+      },
+    });
+    try {
+      await toPayee(b, u, 'Ann 50\nBob 30\nCy 20');
+      stub.reset();
+      await tap(b, u, 'split_confirm');
+    } finally {
+      clock.mockRestore();
+    }
+    expect(stub.sentPhotos).toHaveLength(1);
+    expect(stub.lastText()).toContain('Sent 1 of 3 QRs; the other 2 could not be sent');
+    expect(stub.lastText()).toContain('SGD 30.00 Bob');
+    expect(stub.lastText()).toContain('SGD 20.00 Cy');
+    expect(stub.lastText()).not.toContain('91234567');
   });
 
   it('stops and reports counts when a send fails part way', async () => {
