@@ -21,23 +21,15 @@ export function formatSplitStats(s: SplitUsageSnapshot, now: Date = new Date()):
       const t = s.confirmed.total;
       lines.push(
         `  equal ${s.types.equal} (${pct(s.types.equal, t)}), custom ${s.types.custom} (${pct(s.types.custom, t)}), receipt ${s.types.receipt} (${pct(s.types.receipt, t)})`,
-        `  private chats ${s.places.private}, groups ${s.places.group}`,
-        `  someone else was the payee: ${s.payeeOther}`
+        `  private chats ${s.places.private}, groups ${s.places.group}`
       );
     }
-    lines.push(`QR codes: ${s.qrs.chat} to the chat, ${s.qrs.dm} by direct message`);
+    lines.push(`QR codes posted in the chat: ${s.qrs.chat}`);
     lines.push(
       scans === 0
         ? 'Receipt scans: none yet'
         : `Receipt scans: ${s.scans.ok} read, ${s.scans.failed} failed (${pct(s.scans.ok, scans)} read)`
     );
-    lines.push(
-      `Waiting QRs: ${s.claims.created} created, ${s.claims.collected} collected, ${s.claims.waiting} waiting now`
-    );
-  }
-  lines.push(`People remembered for direct messages: ${s.contacts}`);
-  if (s.claims.waiting > 0 && s.confirmed.total === 0 && scans === 0) {
-    lines.push(`Waiting QRs now: ${s.claims.waiting}`);
   }
   lines.push('', 'Counting began when this report was added, so earlier splits are not included.');
   return lines.join('\n');

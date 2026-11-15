@@ -2,11 +2,8 @@ import { env } from 'cloudflare:test';
 import type { Update } from 'grammy/types';
 import jsQR from 'jsqr';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { newExpiry, newToken } from '../../src/commands/split-claim';
-import { D1SplitDirectory } from '../../src/db/split-repository';
 import { D1UsageRepository } from '../../src/db/usage-repository';
 import { ReceiptReaderError } from '../../src/receipt-reader';
-import { buildPayNowPayload } from '../../src/sgqr/paynow';
 import { acceptUpdate, createSplitBot } from '../../src/split-bot';
 import worker from '../../src/worker';
 import type { ConversationDO } from '../../src/worker/conversation-do';
@@ -678,7 +675,6 @@ describe('Split_PayNow_Bot amend and edited messages', () => {
 });
 
 describe('Split_PayNow_Bot mentions', () => {
-  const directory = () => new D1SplitDirectory(env.paynow_db);
   const asUser = (update: Update, username: string) => {
     (update as unknown as { message: { from: Record<string, unknown> } }).message.from.username =
       username;
@@ -687,36 +683,6 @@ describe('Split_PayNow_Bot mentions', () => {
   /** A person messaging the bot privately with a Telegram username. */
   const privately = (b: B, id: number, username: string, text: string) =>
     b.handleUpdate(asUser(textUpdate(id, text, upd++), username));
-  const counts = async () => {
-    const r = await env.paynow_db
-      .prepare(
-        'SELECT (SELECT COUNT(*) FROM split_contacts) AS contacts, (SELECT COUNT(*) FROM split_claims) AS claims'
-      )
-      .first<{ contacts: number; claims: number }>();
-    return `${r?.contacts}/${r?.claims}`;
-  };
-  /** A waiting QR as an earlier version of the bot created them (nothing creates them now). */
-  const waitingClaim = async (username: string, cents: number) => {
-    const token = newToken();
-    await directory().createClaim({
-      token,
-      username,
-      userId: null,
-      name: `@${username}`,
-      amountCents: cents,
-      description: null,
-      payload: buildPayNowPayload({
-        proxyType: 'mobile',
-        proxyValue: '+6591234567',
-        amountCents: cents,
-        editable: false,
-      }),
-      organiser: 'Test User',
-      chatId: -1,
-      expiresAt: newExpiry(),
-    });
-    return token;
-  };
   /** Run a confirmed custom split of `list` (total `total`) from a fresh organiser. */
   async function confirmSplit(b: B, organiser: number, total: string, list: string, desc?: string) {
     await say(b, organiser, '/split_custom');
@@ -762,39 +728,6 @@ describe('Split_PayNow_Bot mentions', () => {
     expect(sent.map((q) => q.caption).join('\n')).toContain('Cy');
   });
 
-  it('creates no waiting QR and no contact for anyone', async () => {
-    const b = bot();
-    const before = await counts();
-    await confirmSplit(b, uid++, '25', `@dee_${uid++} 25`);
-    expect(await counts()).toBe(before);
-  });
-
-  it('still lets a person collect a waiting QR made before this change, once, and not after it expires', async () => {
-    const b = bot();
-    const [dee, eve] = [uid++, uid++];
-    const token = await waitingClaim(`dee_${dee}`, 2500);
-
-    await privately(b, eve, `eve_${eve}`, `/start claim_${token}`);
-    expect(stub.lastText()).toContain('This QR is for someone else.');
-    expect(stub.sentPhotos).toHaveLength(0);
-
-    await privately(b, dee, `Dee_${dee}`, `/start claim_${token}`); // case-insensitive
-    expect(stub.sentPhotos).toHaveLength(1);
-    expect(stub.sentPhotos[0]!.chatId).toBe(String(dee));
-    await privately(b, dee, `Dee_${dee}`, `/start claim_${token}`);
-    expect(stub.lastText()).toContain('expired or was already collected');
-    expect(stub.sentPhotos).toHaveLength(1);
-
-    const old = await waitingClaim(`dee_${dee}`, 1000);
-    await env.paynow_db
-      .prepare('UPDATE split_claims SET expires_at = ?1 WHERE token = ?2')
-      .bind(new Date(Date.now() - 1000).toISOString(), old)
-      .run();
-    await privately(b, dee, `dee_${dee}`, `/start claim_${old}`);
-    expect(stub.lastText()).toContain('expired or was already collected');
-    expect(stub.sentPhotos).toHaveLength(1);
-  });
-
   it('a text mention is just a name: the QR is posted in the chat', async () => {
     const b = bot();
     const [target, org] = [uid++, uid++];
@@ -834,40 +767,33 @@ describe('Split_PayNow_Bot mentions', () => {
     expect(await run('Ann 40\nBob 30', 'omit')).toContain('shared by 3 people');
     expect(await run('Ann 40\nBob 30', 'even')).toContain('shared by 2 people');
   });
+});
 
-  it('/start records and replaces a contact, and /forget deletes it', async () => {
+describe('Split_PayNow_Bot /start and /forget', () => {
+  it('/start in a private chat begins a split and remembers nothing', async () => {
     const b = bot();
-    const [first, second] = [uid++, uid++];
-    const name = `shared_${first}`;
-    await privately(b, first, name, '/start');
-    expect((await directory().findContacts([name])).get(name)).toBe(first);
-    await privately(b, second, name, '/start'); // the username changed hands
-    expect((await directory().findContacts([name])).get(name)).toBe(second);
-    await privately(b, second, name, '/forget');
-    expect(stub.lastText()).toContain('Forgotten');
-    expect((await directory().findContacts([name])).size).toBe(0);
-    await b.handleUpdate(groupTextUpdate(-uid++, second, '/forget', undefined, upd++));
-    expect(stub.lastText()).toContain('private chat');
+    const u = uid++;
+    await b.handleUpdate(
+      (() => {
+        const x = textUpdate(u, '/start', upd++) as unknown as {
+          message: { from: Record<string, unknown> };
+        };
+        x.message.from.username = `person_${u}`;
+        return x as unknown as Update;
+      })()
+    );
+    expect(stub.lastText()).toContain('Who should be paid');
   });
 
-  it('writes nothing for an equal split or a custom split with no mentions', async () => {
+  it('/forget is no longer a command: the bot does not answer it', async () => {
     const b = bot();
-    const before = await counts();
-    const u = uid++;
-    await say(b, u, '/split');
-    await say(b, u, '91234567');
-    await say(b, u, '100');
-    await tap(b, u, 'split_skip_description');
-    await tap(b, u, 'split_mode:equal');
-    await say(b, u, '2');
-    await tap(b, u, 'split_confirm');
-    await confirmSplit(b, uid++, '65', 'Ann 40\nBob 25');
-    expect(await counts()).toBe(before);
+    stub.reset();
+    await say(b, uid++, '/forget');
+    expect(stub.sentMessages).toHaveLength(0);
   });
 });
 
 describe('Split_PayNow_Bot receipt scan', () => {
-  const directory = () => new D1SplitDirectory(env.paynow_db);
   // 30 + 10 + 20 = 60.00 of items on a 72.00 receipt: 12.00 of service charge and GST
   const RECEIPT = {
     merchant: 'Ah Seng Cafe',
@@ -1519,24 +1445,14 @@ describe('Split_PayNow_Bot receipt scan', () => {
     });
   });
 
-  it('keeps no receipt data after the split, and writes nothing to the database', async () => {
+  it('keeps no receipt data in the conversation after the split', async () => {
     const org = uid++;
     const b = receiptBot();
-    const before = await env.paynow_db
-      .prepare(
-        'SELECT (SELECT COUNT(*) FROM split_contacts) + (SELECT COUNT(*) FROM split_claims) AS n'
-      )
-      .first<{ n: number }>();
     await toSummary(b, org, '1 Ann\n2 Bob\n3 me');
     await tap(b, org, 'split_confirm');
-    expect((await peek(`split-${org}`)).flow).toBe('idle');
-    const after = await env.paynow_db
-      .prepare(
-        'SELECT (SELECT COUNT(*) FROM split_contacts) + (SELECT COUNT(*) FROM split_claims) AS n'
-      )
-      .first<{ n: number }>();
-    expect(after?.n).toBe(before?.n);
-    expect(directory()).toBeDefined();
+    const state = await peek(`split-${org}`);
+    expect(state.flow).toBe('idle');
+    expect(JSON.stringify(state.context)).not.toContain('Chilli crab');
   });
 });
 
@@ -1622,7 +1538,8 @@ describe('Split_PayNow_Bot /stats and counting', () => {
       const b = statsBot(`1, ${u},abc`);
       await say(b, u, '/stats');
       expect(stub.lastText()).toContain('Split_PayNow_Bot usage');
-      expect(stub.lastText()).toContain('People remembered for direct messages');
+      expect(stub.lastText()).not.toContain('People remembered');
+      expect(stub.lastText()).toContain('QR codes posted in the chat');
     });
 
     it('stays silent for anyone else, in a group, and with no list', async () => {
@@ -1654,9 +1571,7 @@ describe('Split_PayNow_Bot /stats and counting', () => {
       receipt: z.types.receipt - a.types.receipt,
       priv: z.places.private - a.places.private,
       group: z.places.group - a.places.group,
-      other: z.payeeOther - a.payeeOther,
       chat: z.qrs.chat - a.qrs.chat,
-      dm: z.qrs.dm - a.qrs.dm,
     });
 
     it('an equal split in a private chat', async () => {
@@ -1677,7 +1592,6 @@ describe('Split_PayNow_Bot /stats and counting', () => {
         custom: 0,
         priv: 1,
         group: 0,
-        other: 0,
         chat: 1,
       });
     });
@@ -1717,7 +1631,7 @@ describe('Split_PayNow_Bot /stats and counting', () => {
       await env.paynow_db.prepare('ALTER TABLE usage_counters_off RENAME TO usage_counters').run();
     });
 
-    it('counts chat QRs only: no direct message and no waiting QR is made', async () => {
+    it('counts the QRs posted in the chat', async () => {
       const [ann, dee, org] = [uid++, uid++, uid++];
       const b = bot();
       const before = await snap();
@@ -1729,8 +1643,6 @@ describe('Split_PayNow_Bot /stats and counting', () => {
       await tap(b, org, 'split_confirm');
       const after = await snap();
       expect(after.qrs.chat - before.qrs.chat).toBe(2);
-      expect(after.qrs.dm - before.qrs.dm).toBe(0);
-      expect(after.claims.created - before.claims.created).toBe(0);
     });
 
     it('records nothing but a day, a metric and a number', async () => {
