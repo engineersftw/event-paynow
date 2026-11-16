@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Gives event admins a read-only web page listing every payment of an event, opened from the bot and protected by Telegram sign-in, so they can review an event without paging through chat messages.
+Gives event admins a web page for an event, opened from the bot in the browser or as a Telegram Mini App and protected by a chat-admin check, where they review its payments, request and settle payments, pay back and check people in, without paging through chat messages.
 
 ## Requirements
 
