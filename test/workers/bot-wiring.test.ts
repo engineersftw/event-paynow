@@ -162,7 +162,13 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(stub.lastText()).toContain('not configured');
 
     const bot = createBot(
-      { ...(env as unknown as WorkerEnv), WEB_ADMIN_URL: 'https://web.test/' },
+      {
+        ...(env as unknown as WorkerEnv),
+        WEB_ADMIN_URL: 'https://web.test/',
+        BOT_USERNAME: 'my_bot',
+        // the deployed value must not decide this test
+        EVENT_APP_NAME: undefined as unknown as string,
+      },
       {
         botInfo: TEST_BOT_INFO,
         client: { fetch: stub.fetch },
@@ -174,6 +180,25 @@ describe('bot wiring (src/bot.ts)', () => {
     };
     expect(kb.inline_keyboard.flat()).toEqual([
       { text: '🟢 Web Event', url: 'https://web.test/events/EVT-WEB0021' },
+      { text: '💳 Pay', url: 'https://web.test/pay/EVT-WEB0021' },
+    ]);
+
+    const appBot = createBot(
+      {
+        ...(env as unknown as WorkerEnv),
+        WEB_ADMIN_URL: 'https://web.test/',
+        BOT_USERNAME: 'my_bot',
+        EVENT_APP_NAME: 'admin',
+      },
+      { botInfo: TEST_BOT_INFO, client: { fetch: stub.fetch } }
+    );
+    await appBot.handleUpdate(textUpdate(userId, '/web_admin'));
+    const appKb = stub.sentMessages.at(-1)!.replyMarkup as {
+      inline_keyboard: Array<Array<{ text: string; url?: string }>>;
+    };
+    expect(appKb.inline_keyboard.flat()).toEqual([
+      { text: '🟢 Web Event', url: 'https://t.me/my_bot/admin?startapp=EVT-WEB0021' },
+      { text: '🌐', url: 'https://web.test/events/EVT-WEB0021' },
       { text: '💳 Pay', url: 'https://web.test/pay/EVT-WEB0021' },
     ]);
 
