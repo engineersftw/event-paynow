@@ -5,6 +5,8 @@ import { D1EventRepository, D1Repository } from '../db/drizzle-repository';
 import { createPaybackFor } from '../db/payback-service';
 import { detectProxyType } from '../db/proxy-validation';
 import type { Event, Payback, Payment, PaymentStatus } from '../db/repository';
+import { buildRegistrantCsv } from '../payments/csv';
+import { isEmail, MAX_ANSWER, MAX_FULL_NAME, parseFormFields } from '../payments/form-fields';
 import { createPaymentRequest, paymentImageLines } from '../payments/payment-request';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { paymentReferenceFromPayload } from '../sgqr/paynow';
@@ -161,6 +163,9 @@ export async function handleWeb(
 
   if (url.pathname === '/api/me') return me(request, env);
 
+  const csv = url.pathname.match(/^\/api\/events\/([^/]+)\/export\.csv$/);
+  if (csv && REF.test(csv[1]!)) return exportCsv(request, env, csv[1]!, fetchFn);
+
   const payerPage = url.pathname.match(/^\/pay\/([^/]+)$/);
   if (payerPage && REF.test(payerPage[1]!)) {
     // The preview names the event, so crawlers (which do not run scripts) see it; any trouble falls back to generic wording
@@ -252,6 +257,33 @@ function pngDataUrl(png: Uint8Array): string {
   return `data:image/png;base64,${btoa(bin)}`;
 }
 
+const EXPORT_LIMIT = 5000;
+
+/** Registrants as CSV: chat admins only (session or bearer, live admin check), same as every event API. */
+async function exportCsv(
+  request: Request,
+  env: WebEnv,
+  ref: string,
+  fetchFn: typeof fetch
+): Promise<Response> {
+  const access = await eventAccess(request, env, ref, fetchFn);
+  if (access instanceof Response) return access;
+  const { payments, truncated } = await new D1Repository(env.paynow_db).listPaymentsForExport(
+    access.event.id,
+    EXPORT_LIMIT
+  );
+  return new Response(
+    buildRegistrantCsv(access.event.formFields, payments, truncated ? EXPORT_LIMIT : undefined),
+    {
+      headers: {
+        'Content-Type': 'text/csv; charset=utf-8',
+        'Content-Disposition': `attachment; filename="event-${ref}.csv"`,
+        'Cache-Control': 'no-store',
+      },
+    }
+  );
+}
+
 async function payerData(request: Request, env: WebEnv, ref: string): Promise<Response> {
   const access = await payerAccess(request, env, ref);
   if (access instanceof Response) return access;
@@ -261,6 +293,7 @@ async function payerData(request: Request, env: WebEnv, ref: string): Promise<Re
       status: access.event.status,
       defaultAmountCents: access.event.defaultAmountCents,
       websiteUrl: access.event.websiteUrl ?? null,
+      form: parseFormFields(access.event.formFields),
     },
     signedIn: access.userId !== null,
   });
@@ -296,7 +329,13 @@ async function createPayerPayment(
   if (access instanceof Response) return access;
   if (access.event.status !== 'open') return json({ error: 'event_closed' }, 409);
 
-  let body: { payer?: unknown; name?: unknown; amount?: unknown };
+  let body: {
+    payer?: unknown;
+    name?: unknown;
+    amount?: unknown;
+    email?: unknown;
+    answers?: unknown;
+  };
   try {
     body = (await request.json()) as typeof body;
   } catch {
@@ -305,7 +344,30 @@ async function createPayerPayment(
 
   const payer = detectProxyType(String(body.payer ?? ''));
   if (!payer) return json({ error: 'invalid_payer' }, 400);
-  const name = typeof body.name === 'string' ? body.name.trim().slice(0, MAX_PAYER_NAME) : '';
+  const form = parseFormFields(access.event.formFields);
+  const typedName = typeof body.name === 'string' ? body.name.trim() : '';
+  if (form.name && (typedName === '' || typedName.length > MAX_FULL_NAME)) {
+    return json(
+      { error: typedName === '' ? 'missing_field' : 'invalid_field', field: 'name' },
+      400
+    );
+  }
+  const name = form.name ? typedName : typedName.slice(0, MAX_PAYER_NAME);
+  let email: string | null = null;
+  if (form.email) {
+    email = typeof body.email === 'string' ? body.email.trim() : '';
+    if (email === '') return json({ error: 'missing_field', field: 'email' }, 400);
+    if (!isEmail(email)) return json({ error: 'invalid_email', field: 'email' }, 400);
+  }
+  const given = Array.isArray(body.answers) ? body.answers : [];
+  const answers: Array<{ label: string; value: string }> = [];
+  for (const [i, label] of form.custom.entries()) {
+    const value = typeof given[i] === 'string' ? (given[i] as string).trim() : '';
+    if (value === '') return json({ error: 'missing_field', field: `custom:${i}` }, 400);
+    if (value.length > MAX_ANSWER)
+      return json({ error: 'invalid_field', field: `custom:${i}` }, 400);
+    answers.push({ label, value });
+  }
   const amountCents = access.event.defaultAmountCents ?? parseAmount(String(body.amount ?? ''));
   if (amountCents === null) return json({ error: 'invalid_amount' }, 400);
 
@@ -321,6 +383,8 @@ async function createPayerPayment(
     payerType: payer.type,
     payerValue: payer.normalized,
     payerName: name || null,
+    payerEmail: email,
+    answers: answers.length > 0 ? JSON.stringify(answers) : null,
     amountCents,
     userId: access.userId ?? 0,
   });

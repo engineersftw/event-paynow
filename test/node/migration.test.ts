@@ -71,6 +71,7 @@ describe('migrations (whole history, applied in order)', () => {
       'closed_at',
       'default_amount_cents',
       'website_url',
+      'form_fields',
     ]);
     expect(columns(db, 'payments')).toEqual([
       'id',
@@ -93,6 +94,8 @@ describe('migrations (whole history, applied in order)', () => {
       'voided_by',
       'checked_in_at',
       'checked_in_by',
+      'payer_email',
+      'answers',
     ]);
     expect(columns(db, 'paybacks')).toEqual([
       'id',
@@ -122,7 +125,7 @@ describe('migrations (whole history, applied in order)', () => {
   });
 
   it('indexes the columns the queries filter by, without touching any data', () => {
-    expect(files().at(-1)).toBe('0004_add_query_indexes.sql');
+    expect(files()).toContain('0004_add_query_indexes.sql');
     const db = migrate();
     const names = (
       db

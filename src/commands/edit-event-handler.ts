@@ -5,10 +5,17 @@ import type { Event, EventPatch, EventRepository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 import { closedRequestAnswer } from './closed-request.js';
+import {
+  checkLabel,
+  describeFormFields,
+  parseFormFields,
+  serializeFormFields,
+  toggleRow,
+} from './form-fields.js';
 import { normalizeWebsiteUrl } from './website-url.js';
 
 /**
- * /edit_event — change the name, payee, default amount or website link of an open event.
+ * /edit_event — change the name, payee, default amount, website link or form fields of an open event.
  *
  * Flow `edit`: step 1 pick event, step 2 pick field, step 3 type the new value. One field per
  * run, saved at once; the reply lists every final value. Chat administrators only, checked at the
@@ -64,6 +71,10 @@ export class EditEventHandler {
     const text = ctx.message?.text?.trim();
     if (!text) return true;
 
+    if (state.step === 5) {
+      await this.addLabel(ctx, text, state);
+      return true;
+    }
     if (state.step !== 3) {
       await ctx.reply('⏳ Please tap a button above (or /cancel).');
       return true;
@@ -117,6 +128,8 @@ export class EditEventHandler {
       await this.save(ctx, event, { defaultAmountCents: null }, 'amount', state);
     } else if (data === 'edit_clear_website') {
       await this.save(ctx, event, { websiteUrl: null }, 'website', state);
+    } else if (data === 'edit_field:form' || data.startsWith('edit_form')) {
+      await this.formStep(ctx, event, state, data);
     } else if (data.startsWith('edit_field:')) {
       const field = data.slice('edit_field:'.length) as Field;
       if (FIELDS.includes(field)) await this.askValue(ctx, event, field, state);
@@ -133,10 +146,95 @@ export class EditEventHandler {
       .text('Default amount', 'edit_field:amount')
       .text('Website', 'edit_field:website')
       .row()
+      .text('📝 Form fields', 'edit_field:form')
+      .row()
       .text('❌ Cancel', 'edit_cancel');
     const text = `✏️ Editing:\n${details(event)}\n\nWhat do you want to change?`;
     if (edit) await ctx.editMessageText(text, { reply_markup: keyboard });
     else await ctx.reply(text, { reply_markup: keyboard });
+  }
+
+  /** The Form fields screen: switches save at once; a label is typed after Add field. */
+  private async formStep(
+    ctx: Context,
+    event: Event,
+    state: ConversationState,
+    data: string
+  ): Promise<void> {
+    if (
+      data !== 'edit_field:form' &&
+      !(await this.isAdmin(state.context.chatId as number, ctx.from!.id))
+    ) {
+      await this.reset();
+      await ctx.editMessageText(NOT_ADMIN, { reply_markup: { inline_keyboard: [] } });
+      return;
+    }
+    const form = parseFormFields(event.formFields);
+    if (data === 'edit_form:name' || data === 'edit_form:email') {
+      const key = data === 'edit_form:name' ? 'name' : 'email';
+      const updated = await this.eventRepository.updateEvent(event.ref, {
+        formFields: serializeFormFields({ ...form, [key]: !form[key] }),
+      });
+      if (updated) event = updated;
+    } else if (data.startsWith('edit_form_rm:')) {
+      const i = Number(data.slice('edit_form_rm:'.length));
+      if (Number.isInteger(i) && i >= 0 && i < form.custom.length) {
+        const updated = await this.eventRepository.updateEvent(event.ref, {
+          formFields: serializeFormFields({
+            ...form,
+            custom: form.custom.filter((_, j) => j !== i),
+          }),
+        });
+        if (updated) event = updated;
+      }
+    } else if (data === 'edit_form_add') {
+      await this.setState(5, state.context);
+      await ctx.editMessageText(
+        'Send the name of the new field, e.g. Dietary needs (1–30 characters). Payers must fill it in.',
+        { reply_markup: new InlineKeyboard().text('↩️ Back', 'edit_form_back') }
+      );
+      return;
+    } else if (data === 'edit_form_done') {
+      await this.reset();
+      await ctx.editMessageText(
+        `✅ Event updated\n📝 The payment page asks: ${describeFormFields(parseFormFields(event.formFields))}`,
+        { reply_markup: { inline_keyboard: [] } }
+      );
+      return;
+    }
+    await this.setState(4, state.context);
+    await ctx.editMessageText(...formScreen(event));
+  }
+
+  /** Step 5: the typed label of a new custom field. */
+  private async addLabel(ctx: Context, input: string, state: ConversationState): Promise<void> {
+    const event = await this.eventRepository.getEventByRef(state.context.eventRef as string);
+    if (event?.status !== 'open') {
+      await this.reset();
+      await ctx.reply('❌ Event not found or already closed.');
+      return;
+    }
+    if (!(await this.isAdmin(state.context.chatId as number, ctx.from!.id))) {
+      await this.reset();
+      await ctx.reply(NOT_ADMIN);
+      return;
+    }
+    const form = parseFormFields(event.formFields);
+    const checked = checkLabel(input, form);
+    if (!checked.ok) {
+      await ctx.reply(`❌ ${checked.reason} Try another name, or tap Back above.`);
+      return;
+    }
+    const updated = await this.eventRepository.updateEvent(event.ref, {
+      formFields: serializeFormFields({ ...form, custom: [...form.custom, checked.label] }),
+    });
+    if (!updated) {
+      await this.reset();
+      await ctx.reply('❌ Event not found or already closed.');
+      return;
+    }
+    await this.setState(4, state.context);
+    await ctx.reply(...formScreen(updated));
   }
 
   private async askValue(
@@ -280,6 +378,21 @@ export class EditEventHandler {
   }
 }
 
+/** Text and keyboard of the Form fields screen. */
+function formScreen(event: Event): [string, { reply_markup: InlineKeyboard }] {
+  const form = parseFormFields(event.formFields);
+  const kb = toggleRow(new InlineKeyboard(), form, 'edit_form').row();
+  form.custom.forEach((label, i) => {
+    kb.text(`🗑 ${label}`, `edit_form_rm:${i}`).row();
+  });
+  if (form.custom.length < 3) kb.text('➕ Add field', 'edit_form_add').row();
+  kb.text('✔️ Done', 'edit_form_done');
+  return [
+    `📝 Form fields\nThe payment page asks: ${describeFormFields(form)}\n\nTap a field to switch it on or off. Payers must fill in every field that is on.`,
+    { reply_markup: kb },
+  ];
+}
+
 /** Name / payee / default amount / website lines; the field just changed is marked. */
 function details(event: Event, changed?: Field): string {
   const mark = (f: Field) => (changed === f ? ' ✏️' : '');
@@ -287,6 +400,7 @@ function details(event: Event, changed?: Field): string {
     `📋 Name: ${event.name}${mark('name')}\n` +
     `📱 ${event.payeeType === 'mobile' ? 'Mobile number' : 'UEN'}: ${event.payeeValue}${mark('payee')}\n` +
     `💰 Default amount: ${event.defaultAmountCents === null ? 'none' : `SGD ${formatCents(event.defaultAmountCents)}`}${mark('amount')}\n` +
-    `🌐 Website: ${event.websiteUrl ?? 'none'}${mark('website')}`
+    `🌐 Website: ${event.websiteUrl ?? 'none'}${mark('website')}\n` +
+    `📝 Form: ${describeFormFields(parseFormFields(event.formFields))}`
   );
 }

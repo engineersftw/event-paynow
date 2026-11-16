@@ -32,7 +32,7 @@ Add the bot to your event's Telegram group (or chat with it directly) and use th
 4. Tap **✓ Received** on the QR message once the money arrives (or **✖ Void** to cancel a pending request). `/payments` lists everything and shows totals.
 5. `/payback` (or the Payback button on a received payment) makes a QR to refund the payer; tap **✓ Sent** when done.
 6. `/web_admin` opens the event's web page (as a Telegram Mini App when set up, or in the browser): search payments, mark received/void, pay back, and **Check-In** attendees by scanning their QR or tapping Check-In on their row.
-7. `/edit_event` changes the name, payee, default amount or website link; `/end_event` closes the event.
+7. `/edit_event` changes the name, payee, default amount, website link or **Form fields**: the details the payment page asks each payer for (Full name, Email, and up to three custom text fields you name, all required once on; `/init` shows the first two as switches on its confirmation). The details are stored with the payment, never shown in lists, QR captions or chat, and downloaded by chat admins with **Download CSV** on the event page (browser or Mini App). The database migration `0005` adds the columns; `/end_event` closes the event.
 
 **Payer / attendee**
 

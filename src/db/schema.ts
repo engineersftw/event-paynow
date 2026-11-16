@@ -30,6 +30,7 @@ export const events = sqliteTable(
     // Amount suggested for each payment request, in cents (null = none); set in /init
     defaultAmountCents: integer('default_amount_cents'),
     websiteUrl: text('website_url'), // optional link to the event's own page (http/https only)
+    formFields: text('form_fields'), // JSON: details the payer page asks for (see commands/form-fields.ts)
   },
   (t) => [index('events_chat_topic_idx').on(t.chatId, t.topicId)]
 );
@@ -51,6 +52,8 @@ export const payments = sqliteTable(
     payerType: text('payer_type'), // 'mobile' | 'uen' | null (legacy rows)
     payerValue: text('payer_value'),
     payerName: text('payer_name'),
+    payerEmail: text('payer_email'), // registrant detail; only the admin CSV export reads it
+    answers: text('answers'), // JSON [{label, value}] of the event's custom fields, label as asked
     createdAt: text('created_at').notNull(),
     receivedAt: text('received_at'),
     // Audit: Telegram user ids of whoever performed the action (null for older rows)

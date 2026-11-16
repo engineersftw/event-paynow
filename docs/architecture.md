@@ -166,7 +166,7 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 - Collects mobile number or UEN (payee for this event)
 - Optionally collects a default amount (text or Skip), stored as `events.default_amount_cents`; `/start` offers it as a "Use SGD x.xx" button and the web admin dialog pre-fills it
 - Optionally collects an event website link (text or Skip; http/https only, validated by `normalizeWebsiteUrl`), stored as `events.website_url` (migration `0001_event_website`) and shown on the admin and payment pages
-- Echoes name + payee (+ default amount, website) for confirmation via inline Confirm/Cancel buttons
+- Echoes name + payee (+ default amount, website, form fields) for confirmation via inline Confirm/Cancel buttons; two switches above them (`init_form:name` / `init_form:email`, `toggleRow` in `src/commands/form-fields.ts`) choose which details the payment page asks, updated in place at the same step
 - Creates an `events` row on confirm (status: open)
 - Events are scoped by (chat_id, topic_id)
 - All outcomes update the original message in place via `editMessageText`
@@ -188,7 +188,7 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 - Payment detail view shows status (⏳ / ✅ / 🚫), payer, timestamps, source and payback history with `Paid back` (sent), `Net`, `Pending paybacks` and `Remaining` (payable-back room); event names and descriptions are Markdown-escaped
 - An event from another chat reads as not found
 
-**`/edit_event` handler** (`src/commands/edit-event-handler.ts`): flow `edit` (pick event, pick field, type value). Admin check at start and before the write; one guarded `updateEvent` (open events only); the reply lists the final name, payee, default amount and website (Website is a fourth field, with Clear). Payments keep the payee/description they were created with.
+**`/edit_event` handler** (`src/commands/edit-event-handler.ts`): flow `edit` (pick event, pick field, type value). Admin check at start and before the write; one guarded `updateEvent` (open events only); the reply lists the final name, payee, default amount and website (Website is a fourth field, with Clear). **Form fields** is a fifth choice: a screen with Full name / Email switches (each tap saves at once), Add field (the next typed message is the label, 1-30 characters, at most three, no repeats ignoring case) and a remove button per custom field; the details are stored as JSON in `events.form_fields` (`parseFormFields` in `src/payments/form-fields.ts`, shared with the Pages Function; malformed reads as nothing asked). Payments keep the payee/description they were created with.
 
 **`/end_event` handler**:
 
@@ -219,6 +219,7 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 - The API returns payer names only (never PayNow numbers); per-payment `paidBackCents` / `netCents` and totals (`collectedCents` net of sent paybacks, `paidBackCents`, `pendingCents`); voided payments are listed but excluded from totals
 - Payback actions (all `POST`s require same-origin JSON, then session → event → live admin check): `POST /api/events/:ref/payments/:paymentRef/paybacks` (shared `createPaybackFor`, same validation and bound as the bot, stored payer as default recipient), `GET /api/events/:ref/paybacks/:ref/qr` (PNG via `bmpToPng`), `POST .../paybacks/:ref/sent` and `/cancel` (pending-only CAS)
 - Payment requests: `POST /api/events/:ref/payments` (shared `createPaymentRequest`, same payload/caption/image text as `/start`, open events only, owned by the signed-in admin), `GET .../payments/:ref/qr` (PNG), and the QR photo is also posted to the event's chat by the Pages Function (`src/web/telegram.ts`, `sendPhoto` with Received/Void buttons; failure keeps the payment and reports `posted: false`)
+- Registrant details: the payer page `GET /api/pay/:ref` returns `event.form` and `POST /api/pay/:ref/payments` requires every detail the event asks (`missing_field` / `invalid_email` / `invalid_field`, each with `field`), storing the email in `payments.payer_email` and the custom answers, label copied, as JSON in `payments.answers` (migration `0005_registrant_details`; the full name reuses `payer_name`). Email and answers are never selected into the list, history, caption or DM: only `GET /api/events/:ref/export.csv` (`eventAccess`, so session or bearer plus the live admin check) returns them, as UTF-8 CSV with a byte order mark and CRLF lines (`buildRegistrantCsv` in `src/payments/csv.ts`, oldest first, at most 5000 rows with a note row, no PayNow numbers, formula-looking cells prefixed with an apostrophe)
 - Settling: `POST .../payments/:ref/received` and `/void` (pending-only CAS recording the acting admin; races with Telegram taps have one winner, the chat message keeps stale buttons the bot already handles)
 - Reads the same D1 database through the Pages `paynow_db` binding and the shared repository code
 

@@ -188,6 +188,24 @@ describe('event page shell', () => {
   });
 });
 
+describe('payer page form fields', () => {
+  it('has the dynamic fields, the organiser notice and valid script', () => {
+    const html = renderPayerPage('EVT1', 'my_bot', 'https://x.test');
+    expect(html).toContain('The organiser will see the details you give here.');
+    expect(html).toContain('function setForm(');
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+    for (const code of scripts) expect(() => new Function(code)).not.toThrow();
+  });
+});
+
+describe('event page CSV download', () => {
+  it('has the Download CSV button wired to the export route', () => {
+    const html = renderPage('EVT1', 'my_bot');
+    expect(html).toContain('id="export"');
+    expect(html).toContain('/api/events/EVT1/export.csv');
+  });
+});
+
 describe('mini app entry page', () => {
   it('serves valid inline script that posts the launch data', () => {
     const html = renderMiniPage();

@@ -36,6 +36,13 @@
       "when": 1794734111094,
       "tag": "0004_add_query_indexes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794800000000,
+      "tag": "0005_registrant_details",
+      "breakpoints": true
     }
   ]
 }

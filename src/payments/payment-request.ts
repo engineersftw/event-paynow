@@ -13,6 +13,9 @@ export interface PaymentRequestInput {
   payerType: PayeeType;
   payerValue: string;
   payerName: string | null;
+  /** Registrant details asked by the event's form; stored, never shown outside the admin CSV. */
+  payerEmail?: string | null;
+  answers?: string | null;
   amountCents: number;
   /** Telegram user id of whoever creates it; becomes the payment's owner. */
   userId: number;
@@ -49,6 +52,8 @@ export async function createPaymentRequest(
     payerType: input.payerType,
     payerValue: input.payerValue,
     payerName: input.payerName,
+    payerEmail: input.payerEmail ?? null,
+    answers: input.answers ?? null,
     status: 'pending',
     source: 'manual',
     qrPayload,
