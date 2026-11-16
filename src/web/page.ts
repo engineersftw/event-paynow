@@ -716,7 +716,7 @@ ${cta}
 </ul>
 <h2>What it keeps</h2>
 <ul>
-<li>Nothing beyond the conversation: your answers are forgotten when the split ends, or after 10 minutes (an hour while a group is claiming items). A QR waits in a send queue only for the moment until it is posted, and a photo or voice note is read in the background by a job that holds only ids, never the photo, the audio or what was read.</li>
+<li>Nothing beyond the conversation: your answers are forgotten when the split ends, or after 30 minutes without an answer (an hour while a group is claiming items). A QR waits in a send queue only for the moment until it is posted, and a photo or voice note is read in the background by a job that holds only ids, never the photo, the audio or what was read.</li>
 <li>Receipt photos are read and never stored. The organiser's screen for claims reads and changes only those same answers in the conversation, and keeps nothing of its own.</li>
 <li>A QR never shows the payee's number. In a group, the number you type stays in the chat unless the bot may delete messages, so use a private chat if that matters.</li>
 </ul>
