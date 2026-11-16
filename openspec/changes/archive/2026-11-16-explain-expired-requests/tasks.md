@@ -27,7 +27,7 @@
 
 ## 6. Rollout
 
-- [ ] 6.1 Deploy, then in a real chat: finish or cancel a Simple bot request and tap a button on one of its old messages, type a number to the Simple bot and to the Event bot in private chats with nothing open (the hints), run `/start` in the Event bot and tap a button on a summary that was already confirmed (the popup), and confirm a group stays silent and the payments list still works
+- [x] 6.1 Deploy, then in a real chat: finish or cancel a Simple bot request and tap a button on one of its old messages, type a number to the Simple bot and to the Event bot in private chats with nothing open (the hints), run `/start` in the Event bot and tap a button on a summary that was already confirmed (the popup), and confirm a group stays silent and the payments list still works
 
 ## Workflow follow-up
 
