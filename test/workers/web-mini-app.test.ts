@@ -2,6 +2,7 @@ import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { INIT_DATA_MAX_AGE_SEC } from '../../src/access/init-data';
 import { D1EventRepository } from '../../src/db/drizzle-repository';
+import { signSession } from '../../src/web/auth';
 import { handleWeb, type WebEnv } from '../../src/web/handler';
 import { launchFields, signInitData } from '../helpers/sign-init-data';
 import { applyTestSchema } from './harness';
@@ -46,7 +47,7 @@ describe('POST /api/miniapp-login', () => {
   it('signs in from valid launch data and returns the signed event reference', async () => {
     const res = await login(await signInitData('tok', launchFields(ann, 'MINIEVT001')));
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ref: 'MINIEVT001' });
+    expect(await res.json()).toMatchObject({ ref: 'MINIEVT001' });
     const [session, name] = cookies(res);
     expect(session).toMatch(/^session=42\./);
     expect(decodeURIComponent(name!)).toBe('tg_name=Ann Lee');
@@ -68,7 +69,7 @@ describe('POST /api/miniapp-login', () => {
 
   it('drops a start value that is not a reference', async () => {
     const res = await login(await signInitData('tok', launchFields(ann, '../x y')));
-    expect(await res.json()).toEqual({ ref: null });
+    expect(await res.json()).toMatchObject({ ref: null });
   });
 
   it('refuses forged, stale and missing launch data and sets nothing', async () => {
@@ -107,5 +108,30 @@ describe('pages', () => {
 
   it('the browser sign-in redirect works as before', async () => {
     expect((await page('/api/login?ref=MINIEVT001')).status).toBe(403);
+  });
+});
+
+describe('session without a cookie', () => {
+  const asBearer = async (value: string, fetchFn: typeof fetch) =>
+    handleWeb(
+      new Request('https://x.test/api/events/MINIEVT001', {
+        headers: { Authorization: `Bearer ${value}` },
+      }),
+      webEnv,
+      fetchFn
+    );
+
+  it('the token from the sign-in answer opens the event API for an admin', async () => {
+    const res = await login(await signInitData('tok', launchFields(ann, 'MINIEVT001')));
+    const { token } = (await res.json()) as { token: string };
+    expect((await asBearer(token, answer('administrator'))).status).toBe(200);
+    expect((await asBearer(token, answer('member'))).status).toBe(403);
+  });
+
+  it('a forged or expired token is not signed in', async () => {
+    const forged = `42.${Date.now() + 1e9}.deadbeef`;
+    expect((await asBearer(forged, answer('administrator'))).status).toBe(401);
+    const old = await signSession(42, 'sess', Date.now() - 13 * 60 * 60 * 1000);
+    expect((await asBearer(old, answer('administrator'))).status).toBe(401);
   });
 });

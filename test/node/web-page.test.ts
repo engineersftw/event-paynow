@@ -195,6 +195,7 @@ describe('mini app entry page', () => {
     expect(scripts.length).toBe(1);
     for (const code of scripts) expect(() => new Function(code)).not.toThrow();
     expect(html).toContain('/api/miniapp-login');
+    expect(html).toContain('Authorization');
   });
 });
 

@@ -24,6 +24,8 @@ The event page is one Pages Function (`handleWeb`). Its sign-in is the Login Wid
 4. **Shared check in `src/access/`.** `verifyInitData` moves to `src/access/init-data.ts` and the Split app imports it from there, because the Pages Function bundles `src/access/` but must not import `src/split-app/` (the Worker deploy filter and the folder rule). It is pure Web Crypto, so it runs in both. Its tests move with it.
 5. **`/web_admin` buttons.** With `EVENT_APP_NAME` (Worker var) set, each event row is `[name → Mini App link] [🌐 browser] [💳 Pay]`; unset, the row is `[name → browser] [💳 Pay]` as now. The link uses the existing `BOT_USERNAME`.
 
+6. **A bearer copy of the session for clients that drop cookies.** Telegram Desktop's web view did not keep the session cookie, so the page showed the Login Widget. `POST /api/miniapp-login` also returns the signed session value; the page keeps it in `sessionStorage`, adds `Authorization: Bearer <value>` to every same-origin request (a small `fetch` wrapper) and loads QR images through `fetch` as blob URLs because an `<img>` cannot send headers. The server reads the cookie first, then the header, through the one `sessionCookie` function, so the expiry and the admin check are unchanged. The header is not sent by a browser on its own, so it adds no cross-site request risk; the value is as exposed as the cookie was, except that script on the page can read it (the page writes all data with `textContent`).
+
 ## Risks / Trade-offs
 
 - **Cookies inside Telegram's web view.** If a client blocks the cookie, the page shows the Login Widget as it does today; nothing gets worse. Checked in the live test on one phone and one desktop client.

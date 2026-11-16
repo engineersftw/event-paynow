@@ -53,7 +53,10 @@ function cookieValue(request: Request, name: string): string | undefined {
     ?.slice(name.length + 1);
 }
 
-const sessionCookie = (request: Request) => cookieValue(request, 'session');
+/** The session: the cookie, or (Mini App clients that drop cookies) an `Authorization: Bearer` copy of it. */
+const sessionCookie = (request: Request) =>
+  cookieValue(request, 'session') ??
+  request.headers.get('Authorization')?.match(/^Bearer (\S+)$/)?.[1];
 
 const COOKIE_FLAGS = 'HttpOnly; Secure; SameSite=Lax; Path=/';
 const MAX_DISPLAY_NAME = 64;
@@ -107,11 +110,12 @@ async function miniAppLogin(request: Request, env: WebEnv): Promise<Response> {
   const { first_name, last_name, username } = data.user;
   const name =
     [first_name, last_name].filter(Boolean).join(' ').trim() || (username ? `@${username}` : '');
+  const token = await signSession(data.user.id, env.SESSION_SECRET);
   const headers = await sessionHeaders(env, data.user.id, name.slice(0, MAX_DISPLAY_NAME));
   headers.set('Content-Type', 'application/json');
   headers.set('Cache-Control', 'no-store');
   const ref = data.startParam && REF.test(data.startParam) ? data.startParam : null;
-  return new Response(JSON.stringify({ ref }), { headers });
+  return new Response(JSON.stringify({ ref, token }), { headers });
 }
 
 /** Clear this browser's session. Sessions are stateless, so a copied cookie stays valid until expiry. */
