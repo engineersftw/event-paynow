@@ -281,6 +281,8 @@ export class TelegramStub {
   editedCaptions: CapturedCaptionEdit[] = [];
   deletedMessages: Array<{ chatId: string; messageId: number }> = [];
   callbackAnswers: string[] = [];
+  /** The answers that were popups (`show_alert`), as opposed to the short toasts. */
+  callbackAlerts: string[] = [];
   /** The url a callback answer opened (a start link), in order. */
   callbackUrls: string[] = [];
   /** Chats that refuse photos, as a user who never started or has blocked the bot would. */
@@ -296,6 +298,7 @@ export class TelegramStub {
     this.editedCaptions = [];
     this.deletedMessages = [];
     this.callbackAnswers = [];
+    this.callbackAlerts = [];
     this.callbackUrls = [];
     this.blockedChats = new Set();
     this.otherCalls = [];
@@ -422,8 +425,13 @@ export class TelegramStub {
     }
 
     if (method === 'answerCallbackQuery') {
-      const body = JSON.parse(String(init?.body)) as { text?: string; url?: string };
+      const body = JSON.parse(String(init?.body)) as {
+        text?: string;
+        url?: string;
+        show_alert?: boolean;
+      };
       this.callbackAnswers.push(body.text ?? '');
+      if (body.show_alert) this.callbackAlerts.push(body.text ?? '');
       if (body.url) this.callbackUrls.push(body.url);
       return this.ok(true);
     }

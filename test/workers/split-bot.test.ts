@@ -1,4 +1,4 @@
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import type { Update } from 'grammy/types';
 import jsQR from 'jsqr';
 import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -267,6 +267,137 @@ describe('Split_PayNow_Bot in a group', () => {
     await gtap(b, chat, owner, 'split_mode:equal');
     await gsay(b, chat, owner, '2');
     expect(stub.lastText()).toContain('Please check the split');
+  });
+});
+
+describe('Split_PayNow_Bot a split that is no longer open', () => {
+  const CLOSED = 'This split is no longer open';
+  /** What the conversation looks like once the time ran out (the alarm deletes it). */
+  const timeOut = (key: string) =>
+    env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(key)).fetch(
+      new Request('http://localhost/reset', { method: 'POST' })
+    );
+  /** The keyboard the bot last put on a message (the markup is a JSON string inside the body). */
+  const lastKeyboard = () => {
+    const body = stub.otherCalls.findLast((c) => c.method === 'editMessageReplyMarkup')?.body;
+    const markup = body ? JSON.parse(body).reply_markup : undefined;
+    return (typeof markup === 'string' ? JSON.parse(markup) : markup) as
+      | { inline_keyboard: unknown[] }
+      | undefined;
+  };
+  async function toSummary(b: B, u: number) {
+    await say(b, u, '/split');
+    await say(b, u, '91234567');
+    await say(b, u, '100');
+    await tap(b, u, 'split_skip_description');
+    await tap(b, u, 'split_mode:equal');
+    await say(b, u, '4');
+    expect(buttons()).toEqual(['split_confirm', 'split_amend', 'split_cancel']);
+  }
+
+  it('tells whoever taps Confirm after the time ran out that no split is open, in a popup, and takes the buttons off', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    await timeOut(`split-${u}`);
+    await tap(b, u, 'split_confirm');
+    const popup = stub.callbackAlerts.at(-1)!;
+    expect(popup).toContain(CLOSED);
+    expect(popup).toContain('timed out after 30 minutes');
+    expect(popup).toContain('Send /split to start a new one');
+    expect(stub.callbackAnswers.at(-1)).toBe(popup);
+    expect(lastKeyboard()?.inline_keyboard.flat()).toEqual([]); // no buttons left
+    expect(stub.sentPhotos).toHaveLength(0); // nothing was created
+  });
+
+  it('says the same after the split was confirmed or cancelled', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    await tap(b, u, 'split_cancel');
+    await tap(b, u, 'split_confirm'); // a client still showing the old buttons
+    expect(stub.callbackAlerts.at(-1)).toContain(CLOSED);
+
+    const v = uid++;
+    await toSummary(b, v);
+    await tap(b, v, 'split_confirm');
+    expect(stub.sentPhotos).toHaveLength(1);
+    await tap(b, v, 'split_confirm');
+    expect(stub.callbackAlerts.at(-1)).toContain(CLOSED);
+    expect(stub.sentPhotos).toHaveLength(1); // not a second QR
+  });
+
+  it('keeps the short notice, with no popup, when the split is still open at another step', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    await tap(b, u, 'split_mode:custom'); // a button of an earlier step
+    expect(stub.callbackAnswers.at(-1)).toBe('That step is over.');
+    expect(stub.callbackAlerts).toEqual([]);
+    expect(buttons()).toEqual(['split_confirm', 'split_amend', 'split_cancel']); // still tappable
+  });
+
+  it('answers the voice button and an old menu button of a closed split with the popup too', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    await timeOut(`split-${u}`);
+    await tap(b, u, 'split_voice:use');
+    expect(stub.callbackAlerts.at(-1)).toContain(CLOSED);
+    stub.reset();
+    await tap(b, u, 'split_who:1:mine');
+    expect(stub.callbackAlerts.at(-1)).toContain(CLOSED);
+  });
+
+  it('replies once to a typed answer in a private chat when no split is open', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/split');
+    await say(b, u, '91234567'); // now waiting for the total
+    await timeOut(`split-${u}`);
+    const sent = stub.sentMessages.length;
+    await say(b, u, '100');
+    expect(stub.sentMessages).toHaveLength(sent + 1);
+    expect(stub.lastText()).toBe(
+      'No split is open. Send /split to start one. (A split is forgotten after 30 minutes without an answer.)'
+    );
+    await say(b, u, '/help'); // a command is not answered by the hint
+    expect(stub.lastText()).not.toContain('No split is open');
+  });
+
+  it('stays silent about chatter in a group with no split open', async () => {
+    const chat = -uid++;
+    const user = uid++;
+    const b = bot();
+    stub.reset();
+    await gsay(b, chat, user, 'who is paying tonight?');
+    expect(stub.sentMessages).toHaveLength(0);
+  });
+
+  it('still reads a typed answer as the answer while a split is open', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/split');
+    await say(b, u, '91234567');
+    await say(b, u, '100');
+    expect(stub.lastText()).toContain('Add a short description');
+    expect(stub.lastText()).not.toContain('No split is open');
+  });
+
+  it('keeps a split open for 30 minutes outside the claiming', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/split');
+    await say(b, u, '91234567');
+    expect(((await peek(`split-${u}`)) as unknown as { idleMs?: number }).idleMs).toBe(
+      30 * 60 * 1000
+    );
+    const alarm = await runInDurableObject(
+      env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`split-${u}`)),
+      async (_instance, state) => state.storage.getAlarm()
+    );
+    expect(alarm).toBeGreaterThan(Date.now() + 29 * 60 * 1000);
+    expect(alarm).toBeLessThan(Date.now() + 31 * 60 * 1000);
   });
 });
 
@@ -1119,9 +1250,10 @@ describe('Split_PayNow_Bot receipt scan', () => {
     const org = uid++;
     const b = receiptBot(false);
     await say(b, org, '/split_receipt');
-    await say(b, org, '91234567');
     expect(stub.lastText()).toContain('not available');
     expect((await peek(`split-${org}`)).flow).not.toBe('split');
+    await say(b, org, '91234567'); // no split was started, so a typed answer gets the hint
+    expect(stub.lastText()).toContain('No split is open');
   });
 
   it('names assignment mistakes and asks for the whole message again', async () => {
@@ -2327,6 +2459,47 @@ describe('Split_PayNow_Bot group claiming', () => {
       expect(photos.every(([to]) => to === String(chat))).toBe(true); // nobody gets a DM
       expect(photos.some(([, cap]) => cap!.includes('Ann'))).toBe(true);
       expect(photos.some(([, cap]) => cap!.includes('Uncle Lim'))).toBe(true);
+    });
+  });
+
+  describe('a claiming that is no longer open', () => {
+    const CLOSED = 'This split is no longer open';
+    const timeOut = (chat: number) =>
+      env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`split-${chat}`)).fetch(
+        new Request('http://localhost/reset', { method: 'POST' })
+      );
+
+    it('tells a member who taps an item or Get my QR after the claiming timed out, and takes the buttons off', async () => {
+      const { b, chat, ann, bob, msg } = await startClaiming();
+      await tapOn(b, chat, ann, 'split_claim:0', msg);
+      await timeOut(chat);
+      await tapOn(b, chat, bob, 'split_claim:1', msg);
+      expect(stub.callbackAlerts.at(-1)).toContain(CLOSED);
+      expect(stub.callbackAlerts.at(-1)).toContain('Send /split');
+      const keyboard = () => {
+        const body = stub.otherCalls.findLast((c) => c.method === 'editMessageReplyMarkup')?.body;
+        const markup = body ? JSON.parse(body).reply_markup : undefined;
+        return (typeof markup === 'string' ? JSON.parse(markup) : markup) as {
+          inline_keyboard: unknown[];
+        };
+      };
+      expect(keyboard().inline_keyboard.flat()).toEqual([]);
+      stub.reset();
+      await tapOn(b, chat, ann, 'split_claim:qr', msg);
+      expect(stub.callbackAlerts.at(-1)).toContain(CLOSED);
+      expect(stub.sentPhotos).toHaveLength(0); // no QR from a closed claiming
+    });
+
+    it('keeps the short notice when the claiming was closed but the split goes on', async () => {
+      const { b, chat, org, ann, bob, msg } = await startClaiming();
+      await tapOn(b, chat, ann, 'split_claim:0', msg);
+      await tapOn(b, chat, bob, 'split_claim:1', msg);
+      await orgClaim(b, chat, org, 2, msg);
+      await tapOn(b, chat, org, 'split_claim:done', msg); // now at the summary
+      stub.reset();
+      await tapOn(b, chat, bob, 'split_claim:0', msg);
+      expect(stub.callbackAnswers.at(-1)).toBe('That step is over.');
+      expect(stub.callbackAlerts).toEqual([]);
     });
   });
 

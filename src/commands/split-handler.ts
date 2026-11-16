@@ -94,7 +94,13 @@ const SEND_BUDGET_MS = 20_000;
 
 const VOICE_MAX_SECONDS = 60; // a longer voice note is refused before any download or AI call
 const VOICE_MAX_BYTES = 1_000_000;
-const IDLE_MS = 10 * 60 * 1000;
+/** How long a split waits for an answer outside the claiming; the text users read is built from it. */
+const IDLE_MINUTES = 30;
+const IDLE_MS = IDLE_MINUTES * 60 * 1000;
+/** What a private chat is told when it types an answer and no split is open. */
+const NO_SPLIT_OPEN = `No split is open. Send /split to start one. (A split is forgotten after ${IDLE_MINUTES} minutes without an answer.)`;
+/** What someone is told when they tap a button of a split that is no longer open. */
+const SPLIT_CLOSED = `This split is no longer open: it finished, was cancelled, or timed out after ${IDLE_MINUTES} minutes without an answer. Send /split to start a new one.`;
 
 type Field = 'total' | 'people' | 'list' | 'assign' | 'payee' | 'description';
 const FIELD_OF_STEP: Record<number, Field> = {
@@ -756,7 +762,8 @@ export class SplitCommandHandler {
       !pending ||
       ctx.callbackQuery?.message?.message_id !== pending.msg
     ) {
-      await ctx.answerCallbackQuery({ text: 'That voice note is no longer waiting.' });
+      if (state.flow !== 'split') await this.expiredTap(ctx);
+      else await ctx.answerCallbackQuery({ text: 'That voice note is no longer waiting.' });
       return true;
     }
     await ctx.answerCallbackQuery();
@@ -798,7 +805,13 @@ export class SplitCommandHandler {
   async handleText(ctx: Context): Promise<boolean> {
     const text = ctx.message?.text?.trim() ?? '';
     const state = await this.getState();
-    if (state.flow !== 'split' || !this.isOwner(ctx, state)) return false;
+    if (state.flow !== 'split') {
+      // No split is open: a private chat is told so, a group's chatter is not for the bot
+      if (isGroup(ctx)) return false;
+      await ctx.reply(NO_SPLIT_OPEN);
+      return true;
+    }
+    if (!this.isOwner(ctx, state)) return false;
 
     if (state.step === ADD_ITEM) {
       const scan = state.context.scan as { receipt: Receipt };
@@ -886,7 +899,8 @@ export class SplitCommandHandler {
     }
     if (data.startsWith('split_who:')) {
       // A button of a menu posted before the menu was removed
-      await ctx.answerCallbackQuery({ text: 'That menu is gone. Use Edit in app.' });
+      if (state.flow !== 'split') await this.expiredTap(ctx);
+      else await ctx.answerCallbackQuery({ text: 'That menu is gone. Use Edit in app.' });
       return true;
     }
     if (data === 'split_voice:use') return this.voiceUse(ctx, state);
@@ -936,7 +950,8 @@ export class SplitCommandHandler {
       c.summaryMsg === undefined ||
       ctx.callbackQuery?.message?.message_id === c.summaryMsg;
     if (step !== expected || !onLatest) {
-      await ctx.answerCallbackQuery({ text: 'That step is over.' });
+      if (state.flow !== 'split') await this.expiredTap(ctx);
+      else await ctx.answerCallbackQuery({ text: 'That step is over.' });
       return true;
     }
     if (data === 'split_claim:done') {
@@ -1353,6 +1368,24 @@ export class SplitCommandHandler {
   }
 
   /** Replace the buttons under the message that was tapped (best effort). */
+  /**
+   * A tap on a button of a split that is no longer open (it timed out, was cancelled or finished; the
+   * bot cannot tell which, nothing is kept): a popup that stays until it is dismissed, and the buttons
+   * go from the tapped message so they cannot be tapped again.
+   */
+  private async expiredTap(ctx: Context): Promise<void> {
+    await ctx.answerCallbackQuery({ text: SPLIT_CLOSED, show_alert: true });
+    await this.setButtons(ctx, new InlineKeyboard());
+  }
+
+  /** A claim tap or Get my QR that found the claiming closed: the popup when no split is open, else the short notice. */
+  private async staleTap(ctx: Context): Promise<void> {
+    const response = await this.conversationDO.fetch(new Request('http://localhost/peek'));
+    const { flow } = (await response.json()) as ConversationState;
+    if (flow !== 'split') await this.expiredTap(ctx);
+    else await ctx.answerCallbackQuery({ text: 'That step is over.' });
+  }
+
   private async setButtons(ctx: Context, markup: InlineKeyboard): Promise<void> {
     await ctx.editMessageReplyMarkup({ reply_markup: markup }).catch(() => undefined);
   }
@@ -1571,7 +1604,7 @@ export class SplitCommandHandler {
           ? { refuse: '' }
           : applyClaim(c, index, { kind: 'toggle', from })
     );
-    if (r.kind === 'stale') await ctx.answerCallbackQuery({ text: 'That step is over.' });
+    if (r.kind === 'stale') await this.staleTap(ctx);
     else if (r.kind === 'busy') await ctx.answerCallbackQuery({ text: 'Busy. Please tap again.' });
     else if (r.kind === 'refused') {
       await ctx.answerCallbackQuery(r.text ? { text: r.text, show_alert: true } : undefined);
@@ -1615,7 +1648,7 @@ export class SplitCommandHandler {
       }
     );
     if (r.kind === 'stale') {
-      await ctx.answerCallbackQuery({ text: 'That step is over.' });
+      await this.staleTap(ctx);
     } else if (r.kind === 'busy') {
       await ctx.answerCallbackQuery({ text: 'Busy. Please tap again.' });
     } else if (r.kind === 'refused') {
