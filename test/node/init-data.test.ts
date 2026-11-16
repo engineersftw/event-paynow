@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { INIT_DATA_MAX_AGE_SEC, verifyInitData } from '../../src/split-app/init-data';
+import { INIT_DATA_MAX_AGE_SEC, verifyInitData } from '../../src/access/init-data';
 import { launchFields, signInitData } from '../helpers/sign-init-data';
 
 const TOKEN = '123456:split-token';

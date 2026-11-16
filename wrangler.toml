@@ -45,6 +45,9 @@ SPLIT_BOT_USERNAME = "Split_PayNow_Bot"
 # Mini App for the organiser of a claim split: in BotFather run /newapp for the Split bot with the URL
 # <this Worker>/split-app, a short name and a 640x360 picture, then set the short name here.
 SPLIT_APP_NAME = "Manage_Split_Claims"
+# Mini App for the Event bot's web admin: in BotFather run /newapp for the Event bot with the URL
+# <Pages site>/mini, a short name and a 640x360 picture, then set the short name here.
+EVENT_APP_NAME = "web_admin"
 # Vision model for Split_PayNow_Bot receipt scans (Workers AI). Llama 4 Scout read a real 10-item receipt
 # completely in every test run (about 8 s, 70 neurons a scan); Llama 3.2 11B missed one or two items every time.
 RECEIPT_MODEL = "@cf/meta/llama-4-scout-17b-16e-instruct"

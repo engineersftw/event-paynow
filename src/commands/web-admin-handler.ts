@@ -9,7 +9,9 @@ import type { EventRepository } from '../db/repository.js';
 export class WebAdminCommandHandler {
   constructor(
     private eventRepository: EventRepository,
-    private baseUrl: string | undefined
+    private baseUrl: string | undefined,
+    /** Event bot username and its Mini App short name; both set turns on the Mini App button. */
+    private app: { bot?: string | undefined; name?: string | undefined } = {}
   ) {}
 
   async handle(ctx: Context): Promise<void> {
@@ -29,15 +31,18 @@ export class WebAdminCommandHandler {
     const base = this.baseUrl.replace(/\/+$/, '');
     const keyboard = new InlineKeyboard();
     for (const event of events.slice(0, 20)) {
-      keyboard
-        .url(
-          `${event.status === 'open' ? '🟢' : '🔴'} ${event.name}`,
-          `${base}/events/${event.ref}`
-        )
-        .url('💳 Pay', `${base}/pay/${event.ref}`)
-        .row();
+      const label = `${event.status === 'open' ? '🟢' : '🔴'} ${event.name}`;
+      const page = `${base}/events/${event.ref}`;
+      if (this.app.bot && this.app.name) {
+        keyboard
+          .url(label, `https://t.me/${this.app.bot}/${this.app.name}?startapp=${event.ref}`)
+          .url('🌐', page);
+      } else {
+        keyboard.url(label, page);
+      }
+      keyboard.url('💳 Pay', `${base}/pay/${event.ref}`).row();
     }
-    await ctx.reply('🌐 Open an event page (chat admins only, sign in with Telegram):', {
+    await ctx.reply('🌐 Open an event page (chat admins only):', {
       reply_markup: keyboard,
     });
   }

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { handleWeb, type WebEnv } from '../../src/web/handler';
 import {
   renderLandingPage,
+  renderMiniPage,
   renderPage,
   renderPayerPage,
   socialMeta,
@@ -184,6 +185,16 @@ describe('event page shell', () => {
     );
     expect(html).toContain('id="keep"');
     expect(html).toContain('rate_limited');
+  });
+});
+
+describe('mini app entry page', () => {
+  it('serves valid inline script that posts the launch data', () => {
+    const html = renderMiniPage();
+    const scripts = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]!);
+    expect(scripts.length).toBe(1);
+    for (const code of scripts) expect(() => new Function(code)).not.toThrow();
+    expect(html).toContain('/api/miniapp-login');
   });
 });
 

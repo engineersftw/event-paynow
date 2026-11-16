@@ -31,7 +31,7 @@ Add the bot to your event's Telegram group (or chat with it directly) and use th
 3. Or issue a QR yourself with `/start`: pick the event, enter the payer's PayNow number and optional name, the amount, then Confirm. The QR is posted in the chat.
 4. Tap **✓ Received** on the QR message once the money arrives (or **✖ Void** to cancel a pending request). `/payments` lists everything and shows totals.
 5. `/payback` (or the Payback button on a received payment) makes a QR to refund the payer; tap **✓ Sent** when done.
-6. `/web_admin` opens the event's web page: search payments, mark received/void, pay back, and **Check-In** attendees by scanning their QR or tapping Check-In on their row.
+6. `/web_admin` opens the event's web page (as a Telegram Mini App when set up, or in the browser): search payments, mark received/void, pay back, and **Check-In** attendees by scanning their QR or tapping Check-In on their row.
 7. `/edit_event` changes the name, payee, default amount or website link; `/end_event` closes the event.
 
 **Payer / attendee**
@@ -250,6 +250,12 @@ cd .. && npm run web:deploy
 npx wrangler secret put WEB_ADMIN_URL      # https://event-paynow-web.pages.dev
 npm run deploy
 ```
+
+**Optional Mini App.** The event page also opens inside Telegram as a Mini App that signs the admin in from Telegram's
+signed launch data (no Login Widget). In BotFather run `/newapp` for the Event bot with the Web App URL
+`https://event-paynow-web.pages.dev/mini`, then set the app's short name as `EVENT_APP_NAME` in `wrangler.toml` and
+redeploy the Worker. `/web_admin` then gives each event a Mini App button, a 🌐 browser button and Pay; without
+`EVENT_APP_NAME` it is as before, and `/events/<ref>` keeps working in a browser.
 
 Preview deployments cannot sign in (the widget only works on the registered domain).
 

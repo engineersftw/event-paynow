@@ -14,6 +14,8 @@ export interface Env {
   /** Simple_PayNow_Bot (QR-only bot on /webhook/simple); the route answers 404 until all three are set. */
   SIMPLE_BOT_TOKEN?: string;
   SIMPLE_WEBHOOK_SECRET?: string;
+  /** Short name of the Event bot's Mini App (BotFather /newapp, Web App URL `<pages-site>/mini`); without it /web_admin has no Mini App button. */
+  EVENT_APP_NAME?: string;
   SIMPLE_BOT_USERNAME?: string;
   /** Split_PayNow_Bot (bill splitter on /webhook/split); the route answers 404 until token and secret are set. */
   SPLIT_BOT_TOKEN?: string;

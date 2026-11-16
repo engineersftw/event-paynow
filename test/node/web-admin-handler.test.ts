@@ -6,10 +6,18 @@ import type { Event, EventRepository } from '../../src/db/repository';
 const ev = (ref: string, name: string, status: Event['status'] = 'open') =>
   ({ id: 1, ref, chatId: 5, topicId: 0, name, status }) as Event;
 
-function setup(events: Event[], baseUrl: string | undefined = 'https://web.test') {
+function setup(
+  events: Event[],
+  baseUrl: string | undefined = 'https://web.test',
+  app: { bot?: string; name?: string } = {}
+) {
   const repo = { listAllEventsByChat: vi.fn(async () => events) } as unknown as EventRepository;
   const ctx = { chat: { id: 5 }, from: { id: 5 }, message: {}, reply: vi.fn() };
-  return { ctx, run: () => new WebAdminCommandHandler(repo, baseUrl).handle(ctx as never), repo };
+  return {
+    ctx,
+    run: () => new WebAdminCommandHandler(repo, baseUrl, app).handle(ctx as never),
+    repo,
+  };
 }
 
 describe('WebAdminCommandHandler', () => {
@@ -22,6 +30,19 @@ describe('WebAdminCommandHandler', () => {
       { text: '💳 Pay', url: 'https://web.test/pay/AAA' },
       { text: '🔴 Trip', url: 'https://web.test/events/BBB' },
       { text: '💳 Pay', url: 'https://web.test/pay/BBB' },
+    ]);
+  });
+
+  it('adds the Mini App button and a browser button when the Mini App is configured', async () => {
+    const { ctx, run } = setup([ev('AAA', 'Dinner')], 'https://web.test', {
+      bot: 'my_bot',
+      name: 'Admin',
+    });
+    await run();
+    expect(ctx.reply.mock.calls[0]![1].reply_markup.inline_keyboard[0]).toEqual([
+      { text: '🟢 Dinner', url: 'https://t.me/my_bot/Admin?startapp=AAA' },
+      { text: '🌐', url: 'https://web.test/events/AAA' },
+      { text: '💳 Pay', url: 'https://web.test/pay/AAA' },
     ]);
   });
 
