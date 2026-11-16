@@ -13,7 +13,7 @@
 
 ## 3. Rollout
 
-- [ ] 3.1 Deploy, then in a real group tap Add on a name in the app: the app updates faster than before, the claim message in the chat shows the change a moment later, and several quick changes all appear in the chat
+- [x] 3.1 Deploy, then in a real group tap Add on a name in the app: the app updates faster than before, the claim message in the chat shows the change a moment later, and several quick changes all appear in the chat
 
 ## Workflow follow-up
 
