@@ -21,7 +21,7 @@
 
 ## 5. Rollout
 
-- [ ] 5.1 Deploy, then in a real chat: finish or cancel a split and tap a button on one of its old messages (the popup appears and the buttons go), type the total into a private chat with no split open (the hint), and start a split to confirm the normal flow is unchanged
+- [x] 5.1 Deploy, then in a real chat: finish or cancel a split and tap a button on one of its old messages (the popup appears and the buttons go), type the total into a private chat with no split open (the hint), and start a split to confirm the normal flow is unchanged
 
 ## Workflow follow-up
 
