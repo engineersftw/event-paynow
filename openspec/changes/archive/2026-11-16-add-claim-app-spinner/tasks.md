@@ -13,7 +13,7 @@
 
 ## 3. Rollout
 
-- [ ] 3.1 Deploy, then in a real group open the app, tap Add on a name and confirm the spinner appears at once and goes when the name is added, and that the idle app shows no spinner
+- [x] 3.1 Deploy, then in a real group open the app, tap Add on a name and confirm the spinner appears at once and goes when the name is added, and that the idle app shows no spinner
 
 ## Workflow follow-up
 
