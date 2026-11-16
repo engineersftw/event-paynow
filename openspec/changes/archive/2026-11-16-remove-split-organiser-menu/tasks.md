@@ -18,7 +18,7 @@
 
 ## 4. Rollout
 
-- [ ] 4.1 Deploy, then in a real group run one claim split: the organiser's tap claims for them and a second tap takes it back, no menu appears, the claim message names Edit in app, and Edit in app still edits who had what
+- [x] 4.1 Deploy, then in a real group run one claim split: the organiser's tap claims for them and a second tap takes it back, no menu appears, the claim message names Edit in app, and Edit in app still edits who had what
 
 ## Workflow follow-up
 

@@ -65,7 +65,7 @@ The system SHALL show, in the app, every item with its name, price, holders and 
 
 ### Requirement: The organiser can add or remove people on an item
 
-The system SHALL let the organiser, in the app, tap a person on an item to add or remove them, claim an item for themselves, and remove all claims from an item. These changes SHALL follow the rules of the chat menu: a person SHALL NOT hold two shares of the same item, and an item whose shares are all held SHALL refuse another person.
+The system SHALL let the organiser, in the app, tap a person on an item to add or remove them, claim an item for themselves, and remove all claims from an item. A person SHALL NOT hold two shares of the same item, and an item whose shares are all held SHALL refuse another person.
 
 #### Scenario: Add a person
 
@@ -86,6 +86,11 @@ The system SHALL let the organiser, in the app, tap a person on an item to add o
 
 - **WHEN** a 3-way item is held by three people and the organiser adds a fourth
 - **THEN** the app refuses and says all shares are taken
+
+#### Scenario: The organiser claims for themselves
+
+- **WHEN** the organiser taps Me on item 3 in the app
+- **THEN** the organiser holds item 3, and tapping again takes it back
 
 ### Requirement: The organiser can add everyone to an item in one step
 
@@ -113,7 +118,7 @@ The system SHALL let the organiser add every person listed in the app to an item
 
 ### Requirement: The organiser can add people by name in the app
 
-The system SHALL let the organiser add a person to the claim by typing a name or an `@username`, with the rules of the chat's Someone else option: a name matching an existing person reuses them, a name longer than 20 characters is refused, a plain name has no Telegram identity, and the total number of people SHALL NOT exceed 20.
+The system SHALL let the organiser add a person to the claim by typing a name or an `@username`. A name matching an existing person (ignoring case) SHALL reuse that person, a name longer than 20 characters SHALL be refused, a plain name SHALL have no Telegram identity, and the total number of people SHALL NOT exceed 20.
 
 #### Scenario: Plain name
 
@@ -137,7 +142,7 @@ The system SHALL let the organiser add a person to the claim by typing a name or
 
 ### Requirement: The organiser can share an item in a number of ways in the app
 
-The system SHALL let the organiser set an item to be shared 2 to 20 ways, change it, or remove it, with the rules of the chat: each holder holds one share, and the number SHALL NOT be set below the number of people who already hold the item.
+The system SHALL let the organiser set an item to be shared 2 to 20 ways, change it, or remove it. Each holder holds one share, and the number SHALL NOT be set below the number of people who already hold the item.
 
 #### Scenario: Share an item
 
@@ -148,6 +153,11 @@ The system SHALL let the organiser set an item to be shared 2 to 20 ways, change
 
 - **WHEN** three people hold an item and the organiser sets it to 2 ways
 - **THEN** the app refuses and says three people already hold it
+
+#### Scenario: Not a valid number
+
+- **WHEN** the organiser sets the number of ways to 1 or 21
+- **THEN** the app refuses and says a whole number from 2 to 20 is needed
 
 #### Scenario: Remove the ways
 
@@ -170,7 +180,7 @@ The system SHALL show an item as locked, and refuse every change to it, when any
 
 ### Requirement: Changes from the app and from the chat are all kept
 
-The system SHALL apply a change from the app on the newest claims, so that members' taps, the organiser's chat menu and the app's changes made at the same moment are all recorded and none overwrites another. After a change, the claim message in the chat SHALL show the new claims.
+The system SHALL apply a change from the app on the newest claims, so that members' taps in the chat and the app's changes made at the same moment are all recorded and none overwrites another. After a change, the claim message in the chat SHALL show the new claims.
 
 #### Scenario: Simultaneous changes
 
