@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Defines which text messages the bot responds to: only those that belong to an active conversation of the person sending them, so ordinary chat in a group or private chat gets no reply from the bot.
+Defines which text messages the bot responds to: in a group, only those that belong to an active conversation of the person sending them, so ordinary group chat gets no reply; in a private chat, a message that belongs to no conversation gets one short hint instead of silence.
 
 ## Requirements
 
