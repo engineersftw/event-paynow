@@ -977,29 +977,11 @@ export class SplitCommandHandler {
       await this.setState({ flow: 'split', step: next, context });
       await this.askStep(ctx, next, context);
     } else if (data === 'split_claim:done') {
-      const receipt = c.receipt as Receipt;
-      const a = assignmentFromClaims(
-        receipt.items,
-        claimsOf(c),
-        claimersOf(c),
-        ctx.from!.id,
-        waysOf(c)
-      );
-      const shared = Object.keys(waysOf(c)).length > 0;
-      const result = assignmentPatch(
-        a,
-        c,
-        { ...receipt, items: a.lines },
-        shared ? a.lines : undefined,
-        lockedPeople(c)
-      );
-      if (!result.ok) {
-        await ctx.reply(result.error);
+      const closed = await this.closeClaiming(ctx, c, ctx.from!.id);
+      if (!closed.ok) {
+        await ctx.reply(closed.reason);
         return true;
       }
-      // Claiming is over for now (Keep claiming opens a fresh message): the buttons go
-      await ctx.editMessageText(`${claimText(c)}\n\nClaiming is closed.`).catch(() => undefined);
-      await this.proceed(ctx, { ...c, ...result.patch });
     } else if (data === 'split_claim:keep') {
       await this.setButtons(ctx, new InlineKeyboard()); // the question is answered
       const { partial, gap, unassignedChoice, shareItems, ...rest } = c;
@@ -1521,6 +1503,59 @@ export class SplitCommandHandler {
         reply_markup: claimButtons(c, this.appUrl(ctx)),
       })
       .catch(() => undefined);
+  }
+
+  /**
+   * Close the claiming: build the assignment from the claims, close the claim message (its buttons
+   * go), then ask about unclaimed items or post the summary. Used by Done in the chat and by Done in
+   * the Mini App, so both have the same result. Says why it cannot close instead of posting about it;
+   * nothing is changed or posted then.
+   */
+  private async closeClaiming(
+    ctx: Context,
+    c: Ctx,
+    organiserId: number
+  ): Promise<{ ok: true } | { ok: false; reason: string }> {
+    const claimers = claimersOf(c);
+    if (!claimers.some((x) => x.id !== organiserId)) {
+      return { ok: false, reason: 'Someone other than you must claim an item first.' };
+    }
+    const receipt = c.receipt as Receipt;
+    const a = assignmentFromClaims(receipt.items, claimsOf(c), claimers, organiserId, waysOf(c));
+    const shared = Object.keys(waysOf(c)).length > 0;
+    const result = assignmentPatch(
+      a,
+      c,
+      { ...receipt, items: a.lines },
+      shared ? a.lines : undefined,
+      lockedPeople(c)
+    );
+    if (!result.ok) return { ok: false, reason: result.error };
+    // Claiming is over for now (Keep claiming opens a fresh message): the buttons go. The message
+    // is edited by its id, so this also works when no button was tapped (the Mini App).
+    const msg = (c.claimMsg as number | undefined) ?? ctx.callbackQuery?.message?.message_id;
+    if (ctx.chat && msg !== undefined) {
+      await ctx.api
+        .editMessageText(ctx.chat.id, msg, `${claimText(c)}\n\nClaiming is closed.`)
+        .catch(() => undefined);
+    }
+    await this.proceed(ctx, { ...c, ...result.patch });
+    return { ok: true };
+  }
+
+  /**
+   * Done from the Mini App: the same as Done in the chat for the organiser `organiserId`. `over`
+   * is set when the claiming is not open (already closed, cancelled or expired).
+   */
+  async closeClaimingFor(
+    ctx: Context,
+    organiserId: number
+  ): Promise<{ ok: true } | { ok: false; reason: string; over?: true }> {
+    const state = await this.getState();
+    if (state.flow !== 'split' || state.step !== CLAIM) {
+      return { ok: false, reason: 'The claiming is over.', over: true };
+    }
+    return this.closeClaiming(ctx, state.context, organiserId);
   }
 
   /** Anyone, the organiser included, taps an item: claim it, or take their claim back. */

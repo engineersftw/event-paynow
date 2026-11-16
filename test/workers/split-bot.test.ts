@@ -2041,6 +2041,143 @@ describe('Split_PayNow_Bot group claiming', () => {
       return { status: r.status, body: (await r.json()) as { error?: string } };
     }
 
+    /** Done in the Mini App: the real interface with signed launch data of `userId` for this chat. */
+    async function appDone(chat: number, userId: number, topic = 0) {
+      const init = await signInitData(
+        'split-token',
+        launchFields(
+          { id: userId, first_name: NAMES[userId] ?? `User${userId}` },
+          `${chat}_${topic}`
+        )
+      );
+      const r = await handleSplitAppApi(
+        new Request('https://worker.test/split-app/api/done', {
+          method: 'POST',
+          headers: { Authorization: `tma ${init}` },
+        }),
+        appEnv,
+        { fetch: stub.fetch }
+      );
+      return { status: r.status, body: (await r.json()) as { ok?: boolean; error?: string } };
+    }
+    const closedMessages = () =>
+      stub.editedMessages.filter((e) => e.text.includes('Claiming is closed.'));
+
+    describe('Done in the Mini App', () => {
+      async function claimAll(
+        b: B,
+        chat: number,
+        org: number,
+        ann: number,
+        bob: number,
+        msg: number
+      ) {
+        await tapOn(b, chat, ann, 'split_claim:0', msg);
+        await tapOn(b, chat, bob, 'split_claim:1', msg);
+        await orgClaim(b, chat, org, 2, msg);
+      }
+
+      it('has the same result as Done in the chat: the claim message closed, the summary posted, the conversation at the summary', async () => {
+        const viaApp = await startClaiming();
+        await claimAll(viaApp.b, viaApp.chat, viaApp.org, viaApp.ann, viaApp.bob, viaApp.msg);
+        const r = await appDone(viaApp.chat, viaApp.org);
+        expect(r).toEqual({ status: 200, body: { ok: true } });
+        const appSummary = stub.lastText();
+        expect(appSummary).toContain('Please check the split');
+        expect((await stateOf(viaApp.chat)).step).toBe(8); // CONFIRM
+        const closed = closedMessages();
+        expect(closed).toHaveLength(1);
+        expect(closed[0]!.chatId).toBe(String(viaApp.chat));
+        expect(closed[0]!.replyMarkup).toBeUndefined(); // the buttons are gone
+
+        const viaChat = await startClaiming();
+        await claimAll(viaChat.b, viaChat.chat, viaChat.org, viaChat.ann, viaChat.bob, viaChat.msg);
+        await tapOn(viaChat.b, viaChat.chat, viaChat.org, 'split_claim:done', viaChat.msg);
+        expect(stub.lastText()).toBe(appSummary);
+      });
+
+      it('asks what to do with items nobody claimed, as Done in the chat does', async () => {
+        const { b, chat, org, ann, msg } = await startClaiming();
+        await tapOn(b, chat, ann, 'split_claim:0', msg);
+        expect((await appDone(chat, org)).status).toBe(200);
+        expect(stub.lastText()).toContain('not claimed by anyone');
+        expect((await stateOf(chat)).step).toBe(13); // UNASSIGNED
+        expect(closedMessages()).toHaveLength(1);
+      });
+
+      it('is refused, with the chat’s reason and nothing posted, until someone else has claimed', async () => {
+        const { b, chat, org, ann, msg } = await startClaiming();
+        await tapOn(b, chat, org, 'split_claim:1', msg);
+        const sent = stub.sentMessages.length;
+        const edits = stub.editedMessages.length;
+        const r = await appDone(chat, org);
+        expect(r.status).toBe(422);
+        expect(r.body.error).toBe('Someone other than you must claim an item first.');
+        expect(stub.sentMessages.length).toBe(sent);
+        expect(stub.editedMessages.length).toBe(edits);
+        expect((await stateOf(chat)).step).toBe(17); // still claiming, and the buttons still work
+        await tapOn(b, chat, ann, 'split_claim:0', msg);
+        expect((await stateOf(chat)).context.claims).toEqual({ '1': [org], '0': [ann] });
+      });
+
+      it('is refused for a member and for a stranger, and changes nothing', async () => {
+        const { b, chat, ann, msg } = await startClaiming();
+        await tapOn(b, chat, ann, 'split_claim:0', msg);
+        const sent = stub.sentMessages.length;
+        expect((await appDone(chat, ann)).status).toBe(403);
+        expect((await appDone(chat, uid++)).status).toBe(403);
+        expect(stub.sentMessages.length).toBe(sent);
+        expect((await stateOf(chat)).step).toBe(17);
+      });
+
+      it('finds the claiming already closed when Done was tapped in the chat first, and the other way round', async () => {
+        const first = await startClaiming();
+        await tapOn(first.b, first.chat, first.ann, 'split_claim:0', first.msg);
+        await tapOn(first.b, first.chat, first.org, 'split_claim:done', first.msg);
+        const sent = stub.sentMessages.length;
+        const late = await appDone(first.chat, first.org);
+        expect(late).toEqual({ status: 409, body: { error: 'over' } });
+        expect(stub.sentMessages.length).toBe(sent);
+
+        const second = await startClaiming();
+        await tapOn(second.b, second.chat, second.ann, 'split_claim:0', second.msg);
+        expect((await appDone(second.chat, second.org)).status).toBe(200);
+        const after = stub.sentMessages.length;
+        await tapOn(second.b, second.chat, second.org, 'split_claim:done', second.msg);
+        expect(stub.callbackAnswers.at(-1)).toBe('That step is over.');
+        expect(stub.sentMessages.length).toBe(after);
+      });
+
+      it('posts in the forum topic of the split', async () => {
+        const chat = -uid++;
+        const org = uid++;
+        const ann = uid++;
+        NAMES[org] = 'Olive';
+        NAMES[ann] = 'Ann';
+        const b = claimBot();
+        stub.reset();
+        await gsay(b, chat, org, '/split_receipt', 9);
+        await gsay(b, chat, org, '91234567', 9);
+        const photo = photoUpdate(chat, org, 'file-1', upd++) as unknown as {
+          message: { chat: Record<string, unknown>; message_thread_id?: number };
+        };
+        photo.message.chat = { id: chat, type: 'supergroup' };
+        photo.message.message_thread_id = 9;
+        await b.handleUpdate(photo as unknown as Update);
+        await gtap(b, chat, org, 'split_scan:use', 9);
+        await gtap(b, chat, org, 'split_skip_description', 9);
+        await gtap(b, chat, org, 'split_how:claim', 9);
+        await tapOn(b, chat, ann, 'split_claim:0', lastId());
+        expect((await appDone(chat, org, 9)).status).toBe(200);
+        expect(stub.sentMessages.at(-1)!.text).toContain('not claimed by anyone');
+        expect(stub.sentMessages.at(-1)!.threadId).toBe(9);
+        // the right user in the wrong topic is not the organiser of this split
+        const other = await startClaiming();
+        await tapOn(other.b, other.chat, other.ann, 'split_claim:0', other.msg);
+        expect((await appDone(other.chat, other.org, 5)).status).toBe(403);
+      });
+    });
+
     it('the organiser taps an item like a member: it is claimed for them, no menu opens, and a second tap takes it back', async () => {
       const { b, chat, org, msg } = await startClaiming();
       const before = stub.sentMessages.length;
