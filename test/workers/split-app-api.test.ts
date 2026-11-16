@@ -1,8 +1,8 @@
 import { env } from 'cloudflare:test';
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyClaim, mutateClaimsOn } from '../../src/commands/split-claims';
 import type { Env } from '../../src/env';
-import { handleSplitAppApi } from '../../src/split-app/api';
+import { handleSplitAppApi, type SplitAppDeps } from '../../src/split-app/api';
 import worker from '../../src/worker';
 import { launchFields, signInitData } from '../helpers/sign-init-data';
 import { TelegramStub } from './harness';
@@ -69,7 +69,8 @@ async function call(
   chatId: number,
   body?: unknown,
   user: { id: number; first_name: string; last_name?: string } = organiser,
-  topicId = 0
+  topicId = 0,
+  opts: { deps?: SplitAppDeps; env?: Env } = {}
 ) {
   const init = await signInitData(TOKEN, launchFields(user, `${chatId}_${topicId}`));
   const response = await handleSplitAppApi(
@@ -78,8 +79,8 @@ async function call(
       headers: { Authorization: `tma ${init}` },
       ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     }),
-    APP_ENV,
-    { fetch: stub.fetch }
+    opts.env ?? APP_ENV,
+    opts.deps ?? { fetch: stub.fetch }
   );
   return { status: response.status, body: (await response.json()) as any };
 }
@@ -375,6 +376,172 @@ describe('Split Mini App interface: with the chat', () => {
     const after = await peek(chatId);
     expect(after.rev).toBe(before.rev);
     expect(after.context).toEqual(before.context);
+  });
+});
+
+describe('Split Mini App interface: answered before the chat message is updated', () => {
+  const isEdit = (url: unknown) => String(url).endsWith('/editMessageText');
+  /** A Telegram whose edits wait for `release()`, and a collector for the work handed to waitUntil. */
+  function held() {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const waits: Promise<unknown>[] = [];
+    const deps: SplitAppDeps = {
+      fetch: async (url, init) => {
+        if (isEdit(url)) await gate;
+        return stub.fetch(url, init);
+      },
+      waitUntil: (p) => void waits.push(p),
+    };
+    return { deps, release, finish: () => Promise.all(waits) };
+  }
+  const change = (chatId: number, item: number, text: string, deps: SplitAppDeps) =>
+    call('POST', 'claim', chatId, { item, op: 'add', text }, organiser, 0, { deps });
+
+  it('answers as soon as the change is recorded, and the chat shows it when Telegram accepts the edit', async () => {
+    const chatId = await seed();
+    const t = held();
+    const r = await change(chatId, 2, 'Uncle Lim', t.deps);
+    expect(r.status).toBe(200);
+    expect(r.body.items[2].holders).toHaveLength(1);
+    expect(stub.editedMessages).toHaveLength(0); // Telegram has not accepted anything yet
+    t.release();
+    await t.finish();
+    expect(stub.editedMessages.at(-1)!.text).toContain('3. Beer SGD 8.00: Uncle Lim');
+  });
+
+  it('ends on the newest claims after quick changes', async () => {
+    const chatId = await seed();
+    const t = held();
+    await change(chatId, 2, 'Uncle Lim', t.deps);
+    await change(chatId, 3, 'Auntie May', t.deps);
+    t.release();
+    await t.finish();
+    const last = stub.editedMessages.at(-1)!.text;
+    expect(last).toContain('3. Beer SGD 8.00: Uncle Lim');
+    expect(last).toContain('4. Salad SGD 5.00: Auntie May');
+  });
+
+  it('corrects an earlier edit that finishes after a later one', async () => {
+    const chatId = await seed();
+    let edits = 0;
+    let releaseFirst!: () => void;
+    const first = new Promise<void>((r) => (releaseFirst = r));
+    const waits: Promise<unknown>[] = [];
+    const deps: SplitAppDeps = {
+      fetch: async (url, init) => {
+        // the first edit is slow; every later one is quick
+        if (isEdit(url) && ++edits === 1) await first;
+        return stub.fetch(url, init);
+      },
+      waitUntil: (p) => void waits.push(p),
+    };
+    await change(chatId, 2, 'Uncle Lim', deps); // its edit is held
+    await change(chatId, 3, 'Auntie May', deps); // its edit goes through at once
+    await vi.waitFor(() => expect(stub.editedMessages).toHaveLength(1)); // the quick one is in
+    expect(stub.editedMessages[0]!.text).toContain('Auntie May');
+    releaseFirst(); // the older edit now lands last...
+    await Promise.all(waits);
+    const last = stub.editedMessages.at(-1)!.text; // ...and is put right again
+    expect(last).toContain('Uncle Lim');
+    expect(last).toContain('Auntie May');
+  });
+
+  it("includes a member's tap that happens while the message is being updated", async () => {
+    const chatId = await seed();
+    const t = held();
+    await change(chatId, 2, 'Uncle Lim', t.deps);
+    await mutateClaimsOn(doOf(chatId), (c) =>
+      applyClaim(c, 3, { kind: 'toggle', from: { id: 12, first_name: 'Bob' } })
+    );
+    t.release();
+    await t.finish();
+    const last = stub.editedMessages.at(-1)!.text;
+    expect(last).toContain('3. Beer SGD 8.00: Uncle Lim');
+    expect(last).toContain('4. Salad SGD 5.00: Bob');
+  });
+
+  it('does not edit when the claiming was closed before the update started', async () => {
+    const chatId = await seed();
+    // hold the update's own read of the conversation (the second /peek) until the claiming is closed
+    let peeks = 0;
+    let releasePeek!: () => void;
+    const gate = new Promise<void>((r) => (releasePeek = r));
+    const real = doOf(chatId);
+    const gated = {
+      ...env,
+      SPLIT_BOT_TOKEN: TOKEN,
+      SPLIT_BOT_USERNAME: 'Split_PayNow_Bot',
+      SPLIT_APP_NAME: 'Manage_Split_Claims',
+      CHAT_SESSION: {
+        idFromName: (n: string) => n,
+        get: () => ({
+          fetch: async (req: Request) => {
+            if (new URL(req.url).pathname === '/peek' && ++peeks === 2) await gate;
+            return real.fetch(req);
+          },
+        }),
+      },
+    } as unknown as Env;
+    const waits: Promise<unknown>[] = [];
+    const deps: SplitAppDeps = { fetch: stub.fetch, waitUntil: (p) => void waits.push(p) };
+    const r = await call('POST', 'claim', chatId, { item: 2, op: 'mine' }, organiser, 0, {
+      deps,
+      env: gated,
+    });
+    expect(r.status).toBe(200);
+    await post(chatId, '/reset', {}); // Done, or a cancel, in the chat
+    releasePeek();
+    await Promise.all(waits);
+    expect(stub.editedMessages).toHaveLength(0);
+  });
+
+  it('does not start another round once the claiming is closed during an edit', async () => {
+    const chatId = await seed();
+    const t = held();
+    await change(chatId, 2, 'Uncle Lim', t.deps); // its edit is in flight
+    await post(chatId, '/reset', {}); // closed while it is
+    t.release();
+    await t.finish();
+    expect(stub.editedMessages).toHaveLength(1); // only the edit that was already on its way
+  });
+
+  it('is not harmed by a Telegram that refuses the edit: the answer has already gone', async () => {
+    const chatId = await seed();
+    const waits: Promise<unknown>[] = [];
+    const deps: SplitAppDeps = {
+      fetch: async (url) => {
+        if (isEdit(url)) throw new Error('telegram is down');
+        return new Response('{}');
+      },
+      waitUntil: (p) => void waits.push(p),
+    };
+    const r = await change(chatId, 2, 'Uncle Lim', deps);
+    expect(r.status).toBe(200);
+    await expect(Promise.all(waits)).resolves.toBeDefined();
+    expect((await peek(chatId)).context.claims['2']).toHaveLength(1);
+  });
+
+  it('hands the update to the Worker through waitUntil when a change comes in through the Worker', async () => {
+    const chatId = await seed({ claimMsg: undefined }); // nothing to edit: no call to Telegram
+    const waits: Promise<unknown>[] = [];
+    const ctx = {
+      waitUntil: (p: Promise<unknown>) => void waits.push(p),
+      passThroughOnException() {},
+    } as unknown as ExecutionContext;
+    const init = await signInitData(TOKEN, launchFields(organiser, `${chatId}_0`));
+    const r = await worker.fetch(
+      new Request('https://worker.test/split-app/api/claim', {
+        method: 'POST',
+        headers: { Authorization: `tma ${init}` },
+        body: JSON.stringify({ item: 2, op: 'mine' }),
+      }),
+      APP_ENV,
+      ctx
+    );
+    expect(r.status).toBe(200);
+    expect(waits).toHaveLength(1);
+    await Promise.all(waits);
   });
 });
 
