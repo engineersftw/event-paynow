@@ -4,6 +4,7 @@ import { detectProxyType } from '../db/proxy-validation.js';
 import type { Event, EventPatch, EventRepository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
+import { closedRequestAnswer } from './closed-request.js';
 import { normalizeWebsiteUrl } from './website-url.js';
 
 /**
@@ -80,6 +81,7 @@ export class EditEventHandler {
       await ctx.editMessageText('❌ Session expired. Run /edit_event again.', {
         reply_markup: { inline_keyboard: [] },
       });
+      await closedRequestAnswer(ctx, '/edit_event');
       return true;
     }
     // Only the person who started the flow may drive it

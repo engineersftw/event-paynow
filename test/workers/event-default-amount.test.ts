@@ -103,14 +103,14 @@ describe('/start with a default amount', () => {
     expect(buttons(stub.editedMessages.at(-1)!.replyMarkup)).toEqual([]);
   });
 
-  it('a stale tap (no conversation) says the session expired and creates nothing', async () => {
+  it('a stale tap (no conversation) says the request is no longer open and creates nothing', async () => {
     const userId = 930000005;
     await seedEvent(userId, 2100);
     const b = bot();
 
     await b.handleUpdate(callbackUpdate(userId, 'start_use_default', 500, 3));
 
-    expect(stub.callbackAnswers.join(' ')).toContain('Session expired');
+    expect(stub.callbackAlerts.join(' ')).toContain('no longer open');
     expect(stub.sentPhotos).toHaveLength(0);
   });
 

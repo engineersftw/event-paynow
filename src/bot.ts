@@ -2,6 +2,7 @@ import type { BotConfig, Context } from 'grammy';
 import { Bot } from 'grammy';
 import { acceptUpdate } from './accept-update';
 import { isChatAdmin } from './access/chat-admin';
+import { EVENT_NOTHING_WAITING } from './commands/closed-request';
 import { EditEventHandler } from './commands/edit-event-handler';
 import { EndEventHandler } from './commands/end-event-handler';
 import { InitCommandHandler } from './commands/init-handler';
@@ -253,7 +254,14 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   // Only the owner's text (same user, same topic) in a chat with an active conversation is
   // relevant; everything else is ordinary chatter and gets no reply.
   bot.on('message:text', async (ctx) => {
-    if (!(await ownActiveConversation(ctx))) return;
+    if (!(await ownActiveConversation(ctx))) {
+      // Nothing is waiting for this message. A private chat is only with the bot, so it is told so
+      // (once, and not for a command); a group's chatter and other people's conversations are ignored.
+      if (ctx.chat.type === 'private' && !ctx.message.text.startsWith('/')) {
+        await ctx.reply(EVENT_NOTHING_WAITING);
+      }
+      return;
+    }
     const doStub = conversation(ctx);
     if (await new PaybackCommandHandler(doStub, repository, canAct).handleInput(ctx)) return;
     if (await new StartCommandHandler(doStub, repository, eventRepository).handleInput(ctx)) return;

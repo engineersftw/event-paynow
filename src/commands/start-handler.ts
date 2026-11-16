@@ -10,6 +10,7 @@ import {
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
+import { closedRequestTap } from './closed-request.js';
 import { plainPayerLabel } from './payer-label.js';
 
 const MAX_PAYER_NAME = 40;
@@ -175,7 +176,7 @@ export class StartCommandHandler {
 
     const state = await this.getState();
     if (state?.flow !== 'start' || state.step !== 1) {
-      await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /start again.' });
+      await this.staleTap(ctx, state);
       return true;
     }
 
@@ -208,10 +209,16 @@ export class StartCommandHandler {
     return true;
   }
 
+  /** A tap that no longer matches: the popup when no `/start` is open, else the short notice. */
+  private async staleTap(ctx: Context, state: ConversationState | null): Promise<void> {
+    if (state?.flow !== 'start') await closedRequestTap(ctx, '/start');
+    else await ctx.answerCallbackQuery({ text: 'That step is over.' });
+  }
+
   private async handleSkipName(ctx: Context): Promise<boolean> {
     const state = await this.getState();
     if (state?.flow !== 'start' || state.step !== 3) {
-      await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /start again.' });
+      await this.staleTap(ctx, state);
       return true;
     }
     await this.setState({
@@ -242,7 +249,7 @@ export class StartCommandHandler {
   private async handleUseDefault(ctx: Context): Promise<boolean> {
     const state = await this.getState();
     if (state?.flow !== 'start' || state.step !== 4) {
-      await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /start again.' });
+      await this.staleTap(ctx, state);
       return true;
     }
     const event = await this.eventRepository.getEventByRef(state.context.eventRef as string);
@@ -373,9 +380,7 @@ export class StartCommandHandler {
   private async handleConfirm(ctx: Context): Promise<boolean> {
     const claimed = await this.claimConfirmStep();
     if (!claimed) {
-      await ctx.answerCallbackQuery({
-        text: '⚠️ Already processed or expired. Run /start again.',
-      });
+      await closedRequestTap(ctx, '/start');
       return true;
     }
 
@@ -390,7 +395,7 @@ export class StartCommandHandler {
   private async handleCancelButton(ctx: Context): Promise<boolean> {
     const claimed = await this.claimConfirmStep();
     if (!claimed) {
-      await ctx.answerCallbackQuery({ text: '⚠️ Already processed or expired.' });
+      await closedRequestTap(ctx, '/start');
       return true;
     }
 

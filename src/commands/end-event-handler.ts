@@ -2,6 +2,7 @@ import type { Context } from 'grammy';
 import { InlineKeyboard } from 'grammy';
 import type { EventRepository } from '../db/repository.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
+import { closedRequestAnswer } from './closed-request.js';
 
 export class EndEventHandler {
   private conversationDO: ConversationDO;
@@ -89,6 +90,7 @@ export class EndEventHandler {
       await ctx.editMessageText('❌ Session expired. Run /end_event again.', {
         reply_markup: { inline_keyboard: [] },
       });
+      await closedRequestAnswer(ctx, '/end_event');
       return true;
     }
 

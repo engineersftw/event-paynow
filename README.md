@@ -133,7 +133,7 @@ Open Telegram, message your bot:
 
 ## Simple_PayNow_Bot (optional second bot)
 
-A QR-only bot served by the same Worker at `POST /webhook/simple`: in a private chat, `/start` asks for the payee (mobile or UEN), an optional amount (Skip leaves it to the payer; if given, it asks whether the payer may change it) and an optional description (up to 25 characters), then shows a summary of everything entered with Confirm / Cancel; the PayNow QR is made only after Confirm. It stores no payee, amount, description or identity (answers sit in the chat's Durable Object under `simple-<id>` for at most 10 minutes) and never prints the payee number on the QR or caption; the only thing it records is an anonymous count per day (table `usage_counters`: QRs made, and whether the amount was skipped, fixed or changeable by the payer). Until configured, the route answers 404.
+A QR-only bot served by the same Worker at `POST /webhook/simple`: in a private chat, `/start` asks for the payee (mobile or UEN), an optional amount (Skip leaves it to the payer; if given, it asks whether the payer may change it) and an optional description (up to 25 characters), then shows a summary of everything entered with Confirm / Cancel; the PayNow QR is made only after Confirm. It stores no payee, amount, description or identity (answers sit in the chat's Durable Object under `simple-<id>` for at most 10 minutes); a tap on a button of a request that is no longer open (finished, cancelled or timed out) gets a popup saying so and to send `/start`, and the buttons go, while typed text with no request open gets one hint and never prints the payee number on the QR or caption; the only thing it records is an anonymous count per day (table `usage_counters`: QRs made, and whether the amount was skipped, fixed or changeable by the payer). Until configured, the route answers 404.
 
 ```bash
 # 1. BotFather: /newbot -> Simple_PayNow_Bot; commands: start - Make a PayNow QR, cancel - Stop, help - How it works
@@ -309,6 +309,7 @@ src/
 │   ├── api.ts             # JSON interface (state, claim) and the page route; organiser only
 │   └── page.ts            # the page: one HTML string, CSP with a nonce
 ├── commands/
+│   ├── closed-request.ts  # popup and hints for a dead conversation button / typed text (Simple and Event bots)
 │   ├── simple-handler.ts  # Simple_PayNow_Bot conversation (payee → amount → payer-may-change → description → confirm)
 │   ├── split-handler.ts   # Split_PayNow_Bot conversation (total → people → payee → description → confirm)
 │   ├── split-math.ts      # equal split, rounded up to the cent

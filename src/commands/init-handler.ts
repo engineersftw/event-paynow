@@ -4,6 +4,7 @@ import { detectProxyType, generateRef } from '../db/proxy-validation.js';
 import type { EventRepository, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
+import { closedRequestAnswer } from './closed-request.js';
 import { escapeMarkdown } from './payer-label.js';
 import { normalizeWebsiteUrl } from './website-url.js';
 
@@ -239,6 +240,7 @@ export class InitCommandHandler {
         await ctx.editMessageText('❌ Session expired. Run /init again.', {
           reply_markup: { inline_keyboard: [] },
         });
+        await this.answerExpired(ctx, state);
         return true;
       }
       await this.setState({
@@ -258,6 +260,7 @@ export class InitCommandHandler {
         await ctx.editMessageText('❌ Session expired. Run /init again.', {
           reply_markup: { inline_keyboard: [] },
         });
+        await this.answerExpired(ctx, state);
         return true;
       }
       await this.setState({
@@ -276,6 +279,7 @@ export class InitCommandHandler {
       await ctx.editMessageText('❌ Session expired. Run /init again.', {
         reply_markup: { inline_keyboard: [] },
       });
+      await this.answerExpired(ctx, state);
       return true;
     }
 
@@ -357,6 +361,12 @@ export class InitCommandHandler {
   /**
    * Get conversation state from DO
    */
+  /** After the stale message was replaced: the popup when no `/init` is open, else just clear the tap. */
+  private async answerExpired(ctx: Context, state: ConversationState | null): Promise<void> {
+    if (state?.flow !== 'init') await closedRequestAnswer(ctx, '/init');
+    else await ctx.answerCallbackQuery();
+  }
+
   private async getState(): Promise<ConversationState | null> {
     const response = await this.conversationDO.fetch(
       new Request('http://localhost/state', { method: 'GET' })

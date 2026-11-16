@@ -196,8 +196,8 @@ describe('Simple_PayNow_Bot conversation', () => {
     const after = await peek(`simple-${u}`);
     expect(after.flow).toBe('idle');
     expect(after.context).toEqual({});
-    await tap(b, u, 'simple_confirm'); // stale button after cancel
-    expect(stub.callbackAnswers).toContain('That step is over.');
+    await tap(b, u, 'simple_confirm'); // stale button after cancel: no request is open any more
+    expect(stub.callbackAlerts.at(-1)).toContain('no longer open');
     expect(stub.sentPhotos).toHaveLength(0);
   });
 
@@ -225,6 +225,85 @@ describe('Simple_PayNow_Bot conversation', () => {
     stub.reset();
     await b.handleUpdate(groupTextUpdate(-900, 5, '91234567', undefined, upd++));
     expect(stub.sentMessages).toHaveLength(0);
+  });
+});
+
+describe('Simple_PayNow_Bot a request that is no longer open', () => {
+  const timeOut = (u: number) =>
+    env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`simple-${u}`)).fetch(
+      new Request('http://localhost/reset', { method: 'POST' })
+    );
+  const lastKeyboard = () => {
+    const body = stub.otherCalls.findLast((c) => c.method === 'editMessageReplyMarkup')?.body;
+    const markup = body ? JSON.parse(body).reply_markup : undefined;
+    return (typeof markup === 'string' ? JSON.parse(markup) : markup) as
+      | { inline_keyboard: unknown[] }
+      | undefined;
+  };
+  async function toSummary(b: ReturnType<typeof bot>, u: number) {
+    await say(b, u, '/start');
+    await say(b, u, '91234567');
+    await tap(b, u, 'simple_skip_amount');
+    await tap(b, u, 'simple_skip_description');
+  }
+
+  it('answers a tap after the time ran out with a popup that says what to do, and takes the buttons off', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    await timeOut(u);
+    await tap(b, u, 'simple_confirm');
+    const popup = stub.callbackAlerts.at(-1)!;
+    expect(popup).toContain('no longer open');
+    expect(popup).toContain('timed out after 10 minutes');
+    expect(popup).toContain('Send /start to make a new QR');
+    expect(lastKeyboard()?.inline_keyboard.flat()).toEqual([]);
+    expect(stub.sentPhotos).toHaveLength(0); // no QR from a dead request
+  });
+
+  it('says the same to a button of a request that already finished', async () => {
+    const u = uid++;
+    const b = bot();
+    await toSummary(b, u);
+    await tap(b, u, 'simple_confirm');
+    expect(stub.sentPhotos).toHaveLength(1);
+    await tap(b, u, 'simple_confirm');
+    expect(stub.callbackAlerts.at(-1)).toContain('no longer open');
+    expect(stub.sentPhotos).toHaveLength(1); // not a second QR
+  });
+
+  it('keeps the short notice, with no popup, while the request is open at another step', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/start');
+    await tap(b, u, 'simple_edit_yes'); // a button of a later step
+    expect(stub.callbackAnswers.at(-1)).toBe('That step is over.');
+    expect(stub.callbackAlerts).toEqual([]);
+  });
+
+  it('replies once to typed text when no request is open, but not to a command', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/start');
+    await say(b, u, '91234567'); // now waiting for the amount
+    await timeOut(u);
+    const sent = stub.sentMessages.length;
+    await say(b, u, '25');
+    expect(stub.sentMessages).toHaveLength(sent + 1);
+    expect(stub.lastText()).toBe(
+      'No QR is being made. Send /start to make one. (A request is forgotten after 10 minutes without an answer.)'
+    );
+    await say(b, u, '/help');
+    expect(stub.lastText()).not.toContain('No QR is being made');
+  });
+
+  it('still reads typed text as the answer while a request is open', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/start');
+    await say(b, u, '91234567');
+    expect(stub.lastText()).not.toContain('No QR is being made');
+    expect((await peek(`simple-${u}`)).step).toBe(2); // waiting for the amount
   });
 });
 

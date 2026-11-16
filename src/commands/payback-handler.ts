@@ -6,6 +6,7 @@ import type { PayeeType, Payment, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
+import { closedRequestTap } from './closed-request.js';
 import {
   captionPart,
   escapeMarkdown,
@@ -249,14 +250,14 @@ export class PaybackCommandHandler {
 
     const state = await this.getState();
     if (state?.flow !== 'payback') {
-      await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /payback <ref> again.' });
+      await closedRequestTap(ctx, '/payback <ref>');
       return true;
     }
 
     // Handle payer confirmation
     if (data.startsWith('payback_confirm_payer:')) {
       if (state.step !== 2) {
-        await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /payback <ref> again.' });
+        await ctx.answerCallbackQuery({ text: 'That step is over.' });
         return true;
       }
       await this.proceedToAmountStep(ctx, state);
@@ -266,7 +267,7 @@ export class PaybackCommandHandler {
     // Change recipient: back to the payer prompt, for this payback only
     if (data.startsWith('payback_change_payer:')) {
       if (state.step !== 2) {
-        await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /payback <ref> again.' });
+        await ctx.answerCallbackQuery({ text: 'That step is over.' });
         return true;
       }
       const { pendingPayer: _discarded, ...rest } = state.context;
@@ -293,7 +294,7 @@ export class PaybackCommandHandler {
     // Handle amount confirmation
     if (data.startsWith('payback_confirm_amount:')) {
       if (state.step !== 4) {
-        await ctx.answerCallbackQuery({ text: '❌ Session expired. Run /payback <ref> again.' });
+        await ctx.answerCallbackQuery({ text: 'That step is over.' });
         return true;
       }
       await this.createPaybackRecord(ctx, state);

@@ -13,6 +13,7 @@ import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
 import { renderQrPng } from '../sgqr/qr-render';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
+import { closedRequestTap, SIMPLE_NO_REQUEST } from './closed-request';
 
 /** Steps of the `simple` flow. */
 const PAYEE = 1;
@@ -83,7 +84,11 @@ export class SimpleCommandHandler {
   async handleText(ctx: Context): Promise<boolean> {
     const text = ctx.message?.text?.trim() ?? '';
     const state = await this.getState();
-    if (state.flow !== 'simple') return false;
+    if (state.flow !== 'simple') {
+      // The bot is private-chat only, so a message with no request open is meant for it
+      await ctx.reply(SIMPLE_NO_REQUEST);
+      return true;
+    }
 
     if (state.step === PAYEE) {
       const payee = detectProxyType(text);
@@ -157,7 +162,9 @@ export class SimpleCommandHandler {
               ? CONFIRM
               : -1;
     if (step !== expected) {
-      await ctx.answerCallbackQuery({ text: 'That step is over.' });
+      // No request open at all: say so and take the dead buttons off; else the request just moved on
+      if (state.flow !== 'simple') await closedRequestTap(ctx, '/start', 'make a new QR');
+      else await ctx.answerCallbackQuery({ text: 'That step is over.' });
       return true;
     }
     await ctx.answerCallbackQuery();

@@ -369,13 +369,14 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(await readDoFlow(userId)).toBe('idle');
   });
 
-  it('free text outside any flow is ignored: no reply, no state change', async () => {
+  it('free text outside any flow gets one hint in a private chat and changes no state', async () => {
     const userId = 800000008;
     const { bot } = makeWiredBot();
 
     await bot.handleUpdate(textUpdate(userId, 'just chatting'));
 
-    expect(stub.sentMessages).toHaveLength(0);
+    expect(stub.sentMessages).toHaveLength(1);
+    expect(stub.lastText()).toContain('Nothing is waiting for an answer');
     expect(await readDoFlow(userId)).toBe('idle');
   });
 

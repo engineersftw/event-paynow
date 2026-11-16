@@ -286,7 +286,7 @@ describe('/start confirmation step (end-to-end)', () => {
 
     expect(await repo.listPaymentsByUser(userId)).toHaveLength(1);
     expect(stub.sentPhotos).toHaveLength(1);
-    expect(stub.callbackAnswers.filter((t) => t.includes('Already processed'))).toHaveLength(2);
+    expect(stub.callbackAlerts.filter((t) => t.includes('no longer open'))).toHaveLength(2);
   });
 
   it('Cancel button creates nothing and a later Confirm is rejected', async () => {
@@ -298,7 +298,7 @@ describe('/start confirmation step (end-to-end)', () => {
     expect(await readDoFlow(userId)).toBe('idle');
 
     await bot.handleUpdate(callbackUpdate(userId, 'start_confirm'));
-    expect(stub.callbackAnswers.at(-1)).toContain('Already processed or expired');
+    expect(stub.callbackAlerts.at(-1)).toContain('no longer open');
     expect(await repo.listPaymentsByUser(userId)).toHaveLength(0);
     expect(stub.sentPhotos).toHaveLength(0);
   });
