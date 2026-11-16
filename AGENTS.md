@@ -126,6 +126,7 @@ This project uses OpenSpec for change management. All changes are archived:
 59. `run-split-ai-in-workflow` (13 tasks) — archived 2026-11-15
 60. `add-split-claim-app` (21 tasks) — archived 2026-11-15
 61. `remove-split-organiser-menu` (8 tasks) — archived 2026-11-16
+62. `add-claim-app-spinner` (6 tasks) — archived 2026-11-16
 
 **Workflow commands:**
 
