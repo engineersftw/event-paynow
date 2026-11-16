@@ -25,6 +25,12 @@
 
 - [x] 5.1 Create the BotFather app (Web App URL `<pages-site>/mini`) and set `EVENT_APP_NAME`; deploy; then on a phone and a desktop client run `/web_admin` in a group and a private chat, open an event through the Mini App button as an admin (signed in, no Login Widget), open it as a non-admin (not allowed), and open the browser button and a saved `/events/<ref>` link (Login Widget as before)
 
+## 6. Session without cookies (found on Telegram Desktop)
+
+- [x] 6.1 Return the session value from `POST /api/miniapp-login`, accept `Authorization: Bearer` beside the cookie in `src/web/handler.ts`, and in `src/web/page.ts` keep the value, send it on every same-origin request and load QR images through `fetch` when it is set; verify with `npm run build`
+- [x] 6.2 Tests: the bearer value opens the event API with no cookie, a forged or expired one does not, the cookie still works, the page script parses and includes the token wrapper; verify `npm test`
+- [ ] 6.3 After deploy, on Telegram Desktop open an event from the Mini App button as an admin: it loads signed in, and a payment QR and the scan dialog still work; a phone client still works
+
 ## Workflow follow-up
 
-- Archive the change after 5.1 is confirmed on a real chat.
+- Archive the change after 6.3 is confirmed on a real chat.

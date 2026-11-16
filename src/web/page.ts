@@ -14,7 +14,8 @@ loadMe();
  * resolves false and the page behaves as before. Resolves the signed start value (an event ref) or true.
  */
 const MINI_JS = `
-async function miniLogin(){const w=window.Telegram&&Telegram.WebApp;if(!w||!w.initData)return false;try{w.ready();w.expand()}catch(e){}try{const r=await fetch('/api/miniapp-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:w.initData})});if(r.ok){$('signout').hidden=true;return (await r.json()).ref||true}}catch(e){}return false}
+function useToken(t){window.tgToken=t;const f=window.fetch;window.fetch=(u,o)=>{o=Object.assign({},o);if(typeof u==='string'&&u[0]==='/')o.headers=Object.assign({},o.headers,{Authorization:'Bearer '+t});return f(u,o)}}
+async function miniLogin(){const w=window.Telegram&&Telegram.WebApp;if(!w||!w.initData){let t=null;try{t=sessionStorage.getItem('tgToken')}catch(e){}if(t&&w){useToken(t);return true}return false}try{w.ready();w.expand()}catch(e){}try{const r=await fetch('/api/miniapp-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:w.initData})});if(r.ok){const d=await r.json();useToken(d.token);try{sessionStorage.setItem('tgToken',d.token)}catch(e){}$('signout').hidden=true;return d.ref||true}}catch(e){}return false}
 `;
 const MINI_SCRIPT = '<script src="https://telegram.org/js/telegram-web-app.js"></script>';
 const ME_HTML =
@@ -230,7 +231,7 @@ function toggle(key, label, count) {
   b.onclick = () => { if (open.has(key)) open.delete(key); else open.add(key); load(); };
   return b;
 }
-function qrImage(path, alt) { const img = el('img'); img.src = path; img.alt = alt; img.width = 220; return img; }
+function qrImage(path, alt) { const img = el('img'); if (window.tgToken) fetch(path).then((r) => r.blob()).then((b) => { img.src = URL.createObjectURL(b); }); else img.src = path; img.alt = alt; img.width = 220; return img; }
 function pendingPanel(p) {
   const panel = el('div', undefined, 'panel');
   const base = '/api/events/${ref}/payments/' + encodeURIComponent(p.ref);

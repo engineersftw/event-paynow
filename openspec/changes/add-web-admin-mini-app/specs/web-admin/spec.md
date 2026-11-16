@@ -28,6 +28,20 @@ The system SHALL accept Mini App sign-in only from launch data that carries a va
 - **WHEN** the event page is opened in a browser outside Telegram
 - **THEN** it shows the Telegram Login Widget as before
 
+### Requirement: The Mini App works where cookies are blocked
+
+The system SHALL let the Mini App page keep its session without a cookie: the sign-in answer SHALL carry the session value, and the system SHALL accept that value from the page in an `Authorization: Bearer` header wherever it accepts the session cookie, with the same expiry and the same chat-admin check. A missing, forged or expired value SHALL count as not signed in.
+
+#### Scenario: Cookie dropped by the client
+
+- **WHEN** the Mini App signs in and the client keeps no cookie
+- **THEN** the event page still loads its data and its QR images using the session value in the header
+
+#### Scenario: Forged value
+
+- **WHEN** a request carries a bearer value that is not a valid session
+- **THEN** the system treats it as not signed in
+
 ### Requirement: One Mini App opens any event
 
 The system SHALL provide a Mini App entry address that opens the event named by the signed start value of the launch, so one Mini App serves every event. The start value SHALL come only from the verified launch data.
