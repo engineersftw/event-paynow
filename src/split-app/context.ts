@@ -1,10 +1,10 @@
 import { Api, Context } from 'grammy';
 import type { Update, UserFromGetMe } from 'grammy/types';
+import type { InitDataUser } from '../access/init-data';
 import { SplitCommandHandler } from '../commands/split-handler';
 import { D1UsageRepository } from '../db/usage-repository';
 import type { Env } from '../env';
 import type { ConversationDO } from '../worker/conversation-do';
-import type { InitDataUser } from './init-data';
 
 /**
  * Bot code needs a grammY `Context`, and a Mini App request has none. This builds one as if the

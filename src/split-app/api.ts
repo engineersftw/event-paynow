@@ -1,4 +1,5 @@
 import { Api } from 'grammy';
+import { type InitDataUser, verifyInitData } from '../access/init-data';
 import { type Receipt, resolveTyped } from '../commands/receipt';
 import {
   appLink,
@@ -19,7 +20,6 @@ import {
 import type { Env } from '../env';
 import type { ConversationState } from '../worker/conversation-do';
 import { organiserContext } from './context';
-import { type InitDataUser, verifyInitData } from './init-data';
 import { renderSplitAppPage, splitAppPageHeaders } from './page';
 
 /**

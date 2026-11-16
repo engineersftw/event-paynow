@@ -121,7 +121,10 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
   );
 
   bot.command('web_admin', (ctx) =>
-    new WebAdminCommandHandler(eventRepository, env.WEB_ADMIN_URL).handle(ctx)
+    new WebAdminCommandHandler(eventRepository, env.WEB_ADMIN_URL, {
+      bot: env.BOT_USERNAME,
+      name: env.EVENT_APP_NAME,
+    }).handle(ctx)
   );
 
   bot.command('web_payment', (ctx) =>

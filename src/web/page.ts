@@ -8,6 +8,15 @@ async function loadMe(){try{const r=await fetch('/api/me',{credentials:'same-ori
 $('signout').onclick=async()=>{try{await fetch('/api/logout',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:'{}'})}catch(e){}location.reload()};
 loadMe();
 `;
+/**
+ * Mini App sign-in, run before the first data request: inside Telegram, post the signed launch data
+ * so the same session cookie the Login Widget sets exists. Outside Telegram (or on any failure) it
+ * resolves false and the page behaves as before. Resolves the signed start value (an event ref) or true.
+ */
+const MINI_JS = `
+async function miniLogin(){const w=window.Telegram&&Telegram.WebApp;if(!w||!w.initData)return false;try{w.ready();w.expand()}catch(e){}try{const r=await fetch('/api/miniapp-login',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({initData:w.initData})});if(r.ok){$('signout').hidden=true;return (await r.json()).ref||true}}catch(e){}return false}
+`;
+const MINI_SCRIPT = '<script src="https://telegram.org/js/telegram-web-app.js"></script>';
 const ME_HTML =
   '<div id="me" class="me" hidden><span id="me-name" class="me-name"></span><button id="signout" class="btn">Sign out</button></div>';
 
@@ -128,6 +137,7 @@ img{max-width:100%;height:auto}
 ${FOOTER_CSS}
 ${SITE_CSS}
 </style></head><body>
+${MINI_SCRIPT}
 ${TOPBAR_HTML}
 <div class="head"><div class="brand"><img src="/logo.png" alt="" width="40" height="40"><h1 id="title">Event</h1></div></div>
 <p id="site" class="muted sm" hidden></p>
@@ -489,8 +499,24 @@ $('np-again').onclick = showForm;
 $('dlg').addEventListener('click', (e) => { if (e.target === $('dlg')) $('dlg').close(); });
 $('dlg-form').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRequest(); });
 $('np-go').onclick = createRequest;
-load();
+${MINI_JS}miniLogin().then(() => { load(); loadMe(); });
 ${ME_JS}</script></body></html>`;
+}
+
+/** Mini App entry: signs in from the launch data, then opens the event the signed link names. */
+export function renderMiniPage(): string {
+  return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Event</title>
+<style>body{font-family:system-ui,sans-serif;margin:0;padding:24px;color:#111;background:#fff}@media (prefers-color-scheme:dark){body{color:#eee;background:#111}}</style></head><body>
+<p id="msg">Opening…</p><button id="signout" hidden></button>
+${MINI_SCRIPT}
+<script>
+const $ = (id) => document.getElementById(id);
+${MINI_JS}
+miniLogin().then((ref) => {
+  if (typeof ref === 'string') location.replace('/events/' + encodeURIComponent(ref));
+  else $('msg').textContent = ref ? 'Open an event from the chat with /web_admin.' : 'Sign-in failed. Open this from Telegram with /web_admin.';
+});
+</script></body></html>`;
 }
 
 /** YouTube id of the explainer video on the landing page (11 characters of A-Z a-z 0-9 _ -). */

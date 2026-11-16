@@ -1,4 +1,5 @@
 import { isChatAdmin } from '../access/chat-admin';
+import { verifyInitData } from '../access/init-data';
 import { captionPart, recipientName } from '../commands/payer-label';
 import { D1EventRepository, D1Repository } from '../db/drizzle-repository';
 import { createPaybackFor } from '../db/payback-service';
@@ -13,6 +14,7 @@ import { SESSION_MAX_AGE_SEC, signSession, verifySession, verifyTelegramLogin } 
 import {
   cleanUsername,
   renderLandingPage,
+  renderMiniPage,
   renderPage,
   renderPayerPage,
   renderSplitLandingPage,
@@ -80,6 +82,38 @@ async function me(request: Request, env: WebEnv): Promise<Response> {
   return json({ user: userId === null ? null : { name: storedName(request) } });
 }
 
+/** Headers that sign `userId` in: the signed session cookie plus the display-only name cookie. */
+async function sessionHeaders(env: WebEnv, userId: number, name: string): Promise<Headers> {
+  const headers = new Headers();
+  const age = `Max-Age=${SESSION_MAX_AGE_SEC}`;
+  headers.append(
+    'Set-Cookie',
+    `session=${await signSession(userId, env.SESSION_SECRET)}; ${COOKIE_FLAGS}; ${age}`
+  );
+  headers.append('Set-Cookie', `tg_name=${encodeURIComponent(name)}; ${COOKIE_FLAGS}; ${age}`);
+  return headers;
+}
+
+/** Mini App sign-in: Telegram's signed launch data in, the same cookies as the Login Widget out. */
+async function miniAppLogin(request: Request, env: WebEnv): Promise<Response> {
+  let initData = '';
+  try {
+    initData = String(((await request.json()) as { initData?: unknown }).initData ?? '');
+  } catch {
+    // treated as missing
+  }
+  const data = initData ? await verifyInitData(initData, env.TELEGRAM_BOT_TOKEN) : null;
+  if (!data) return json({ error: 'sign_in_failed' }, 403);
+  const { first_name, last_name, username } = data.user;
+  const name =
+    [first_name, last_name].filter(Boolean).join(' ').trim() || (username ? `@${username}` : '');
+  const headers = await sessionHeaders(env, data.user.id, name.slice(0, MAX_DISPLAY_NAME));
+  headers.set('Content-Type', 'application/json');
+  headers.set('Cache-Control', 'no-store');
+  const ref = data.startParam && REF.test(data.startParam) ? data.startParam : null;
+  return new Response(JSON.stringify({ ref }), { headers });
+}
+
 /** Clear this browser's session. Sessions are stateless, so a copied cookie stays valid until expiry. */
 function logout(): Response {
   const headers = new Headers();
@@ -110,15 +144,15 @@ export async function handleWeb(
       return new Response('Sign-in failed. Go back and try again.', { status: 403 });
     }
     const next = url.searchParams.get('next');
-    const cookie = await signSession(userId, env.SESSION_SECRET);
-    const headers = new Headers({ Location: `${next === 'pay' ? '/pay' : '/events'}/${ref}` });
-    const age = `Max-Age=${SESSION_MAX_AGE_SEC}`;
-    headers.append('Set-Cookie', `session=${cookie}; ${COOKIE_FLAGS}; ${age}`);
-    headers.append(
-      'Set-Cookie',
-      `tg_name=${encodeURIComponent(displayName(url.searchParams))}; ${COOKIE_FLAGS}; ${age}`
-    );
+    const headers = await sessionHeaders(env, userId, displayName(url.searchParams));
+    headers.set('Location', `${next === 'pay' ? '/pay' : '/events'}/${ref}`);
     return new Response(null, { status: 302, headers });
+  }
+
+  if (url.pathname === '/mini') {
+    return new Response(renderMiniPage(), {
+      headers: { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' },
+    });
   }
 
   if (url.pathname === '/api/me') return me(request, env);
@@ -361,6 +395,10 @@ async function handlePost(
   fetchFn: typeof fetch
 ): Promise<Response> {
   const path = url.pathname;
+  if (path === '/api/miniapp-login') {
+    if (!sameOriginJson(request, url)) return json({ error: 'forbidden' }, 403);
+    return miniAppLogin(request, env);
+  }
   if (path === '/api/logout') {
     if (!sameOriginJson(request, url)) return json({ error: 'forbidden' }, 403);
     return logout();
