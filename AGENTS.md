@@ -131,6 +131,7 @@ This project uses OpenSpec for change management. All changes are archived:
 63. `answer-claim-app-first` (6 tasks) — archived 2026-11-16
 64. `add-claim-app-done` (9 tasks) — archived 2026-11-16
 65. `explain-expired-split` (8 tasks) — archived 2026-11-16
+66. `explain-expired-requests` (11 tasks) — archived 2026-11-16
 
 **Workflow commands:**
 
