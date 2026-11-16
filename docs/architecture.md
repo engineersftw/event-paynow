@@ -149,6 +149,7 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 - Stores FSM state: current flow, step, context data, last activity timestamp
 - `POST /claim {flow, step}`: atomic compare-and-reset (200 = the caller won and gets the previous state, 409 = lost), so a double tap on Confirm creates exactly one payment
 - Validates all state transitions with Zod schema
+- The Simple and Event bots use the 10-minute default (`DEFAULT_IDLE_MINUTES`, which the texts users read also use) and answer a tap on a button of a conversation that is no longer open with a popup and remove the buttons (`src/commands/closed-request.ts`); typed text with no conversation open gets one hint in the Simple bot and, in a private chat only, in the Event bot (groups stay silent)
 - Automatically expires idle conversations after 10 minutes by default (the Split bot writes its own `idleMs`: 30 minutes, an hour while claiming). A button of a split that is no longer open is answered with a popup and loses its buttons (`expiredTap`), and a typed answer in a private chat with no split open gets one hint (`NO_SPLIT_OPEN`); both read the same `IDLE_MINUTES` constant
 - Records the conversation's owner (user and topic) beside `flow`; `POST /owner` stamps it, `GET /peek` reads without side effects, and it is dropped when the flow returns to idle
 - Survives cold starts and deployments (persistent storage)

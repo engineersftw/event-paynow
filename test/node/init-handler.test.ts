@@ -1,4 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { closedRequestText } from '../../src/commands/closed-request';
 import { InitCommandHandler } from '../../src/commands/init-handler';
 import type { Event, EventRepository, Repository } from '../../src/db/repository';
 import type { ConversationDO } from '../../src/worker/conversation-do';
@@ -338,6 +339,7 @@ describe('/init command handler (event creation)', () => {
         from: { id: 789 },
         callbackQuery: { data: 'init_skip_amount:789' },
         editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
       } as any;
       (mockConversationDO.fetch as any).mockResolvedValueOnce({
         status: 200,
@@ -350,6 +352,8 @@ describe('/init command handler (event creation)', () => {
         '❌ Session expired. Run /init again.',
         expect.anything()
       );
+      // the /init is open at another step: the tap is only cleared, no popup
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith();
     });
   });
 
@@ -445,6 +449,7 @@ describe('/init command handler (event creation)', () => {
         from: { id: 789 },
         callbackQuery: { data: 'init_skip_website:789' },
         editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
       } as any;
       (mockConversationDO.fetch as any).mockResolvedValueOnce({
         status: 200,
@@ -457,6 +462,8 @@ describe('/init command handler (event creation)', () => {
         '❌ Session expired. Run /init again.',
         expect.anything()
       );
+      // the /init is open at another step: the tap is only cleared, no popup
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith();
     });
   });
 
@@ -717,6 +724,7 @@ describe('/init command handler (event creation)', () => {
         from: { id: 789 },
         callbackQuery: { data: 'init_confirm:789' },
         editMessageText: vi.fn(),
+        answerCallbackQuery: vi.fn(),
       } as any;
 
       (mockConversationDO.fetch as any).mockResolvedValueOnce({
@@ -735,6 +743,11 @@ describe('/init command handler (event creation)', () => {
       expect(mockEventRepository.createEvent).not.toHaveBeenCalled();
       expect(mockCtx.editMessageText).toHaveBeenCalledWith('❌ Session expired. Run /init again.', {
         reply_markup: { inline_keyboard: [] },
+      });
+      // no /init is open at all: the popup says so too
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
+        text: closedRequestText('/init'),
+        show_alert: true,
       });
     });
 

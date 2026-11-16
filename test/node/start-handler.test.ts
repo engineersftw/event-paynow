@@ -1,5 +1,6 @@
 import type { Context } from 'grammy';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { closedRequestText } from '../../src/commands/closed-request';
 import { StartCommandHandler } from '../../src/commands/start-handler.js';
 import type { Event, EventRepository, Repository } from '../../src/db/repository.js';
 import { renderQrPng } from '../../src/sgqr/qr-render.js';
@@ -89,6 +90,7 @@ describe('StartCommandHandler', () => {
       reply: vi.fn(),
       replyWithPhoto: vi.fn(),
       editMessageText: vi.fn(),
+      editMessageReplyMarkup: vi.fn().mockResolvedValue(true),
       answerCallbackQuery: vi.fn(),
     } as unknown as Context;
 
@@ -379,8 +381,10 @@ describe('StartCommandHandler', () => {
       expect(await handler.handleCallback(callback('start_confirm'))).toBe(true);
 
       expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
-        text: '⚠️ Already processed or expired. Run /start again.',
+        text: closedRequestText('/start'),
+        show_alert: true,
       });
+      expect(mockCtx.editMessageReplyMarkup).toHaveBeenCalled(); // the dead buttons go
       expect(mockRepository.createPayment).not.toHaveBeenCalled();
       expect(mockCtx.replyWithPhoto).not.toHaveBeenCalled();
     });
@@ -428,7 +432,8 @@ describe('StartCommandHandler', () => {
       await handler.handleCallback(callback('start_cancel'));
 
       expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
-        text: '⚠️ Already processed or expired.',
+        text: closedRequestText('/start'),
+        show_alert: true,
       });
       expect(mockCtx.editMessageText).not.toHaveBeenCalled();
     });

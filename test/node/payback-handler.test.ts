@@ -1,6 +1,7 @@
 import type { Context } from 'grammy';
 import { InputFile } from 'grammy';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { closedRequestText } from '../../src/commands/closed-request';
 import { PaybackCommandHandler } from '../../src/commands/payback-handler.js';
 import type { CreatePaybackBoundedResult, Payment, Repository } from '../../src/db/repository.js';
 import { buildPayNowPayload } from '../../src/sgqr/paynow.js';
@@ -98,6 +99,7 @@ describe('PaybackCommandHandler', () => {
       reply: vi.fn(),
       replyWithPhoto: vi.fn(),
       editMessageText: vi.fn(),
+      editMessageReplyMarkup: vi.fn().mockResolvedValue(true),
       answerCallbackQuery: vi.fn(),
     } as unknown as Context;
 
@@ -277,9 +279,7 @@ describe('PaybackCommandHandler', () => {
 
       await handler.handleCallback(ctx);
 
-      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({
-        text: '❌ Session expired. Run /payback <ref> again.',
-      });
+      expect(mockCtx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'That step is over.' });
       expect(await postedStates()).toHaveLength(0);
     });
   });
@@ -471,9 +471,12 @@ describe('PaybackCommandHandler', () => {
       const result = await handler.handleCallback(ctx);
 
       expect(result).toBe(true);
+      // no payback is open at all: a popup, and the buttons go from the tapped message
       expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
-        text: '❌ Session expired. Run /payback <ref> again.',
+        text: closedRequestText('/payback <ref>'),
+        show_alert: true,
       });
+      expect(ctx.editMessageReplyMarkup).toHaveBeenCalled();
     });
 
     it('should reject confirm callback when state is not at step 2', async () => {
@@ -487,9 +490,7 @@ describe('PaybackCommandHandler', () => {
       const result = await handler.handleCallback(ctx);
 
       expect(result).toBe(true);
-      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({
-        text: '❌ Session expired. Run /payback <ref> again.',
-      });
+      expect(ctx.answerCallbackQuery).toHaveBeenCalledWith({ text: 'That step is over.' });
     });
 
     it('should handle session expiry gracefully (missing paymentId)', async () => {

@@ -100,6 +100,9 @@ export class ConversationSerializer {
 // Durable Object
 // ============================================================================
 
+/** How long a conversation waits for an answer unless its state says otherwise. Users are told this number. */
+export const DEFAULT_IDLE_MINUTES = 10;
+
 /**
  * Conversation Durable Object.
  * Manages conversation state for a single chat.
@@ -107,7 +110,7 @@ export class ConversationSerializer {
 export class ConversationDO {
   public state: DurableObjectState;
   private serializer: ConversationSerializer;
-  private alarmTimeoutMs = 10 * 60 * 1000; // 10 minutes unless the state says otherwise
+  private alarmTimeoutMs = DEFAULT_IDLE_MINUTES * 60 * 1000; // unless the state says otherwise
 
   // workerd constructs DOs with (state, env); this DO only needs storage,
   // so env is accepted but intentionally unused.
