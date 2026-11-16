@@ -32,6 +32,14 @@ button,select,input{font:inherit}
 .btn.link{background:transparent;color:var(--accent);padding:8px 6px}
 select{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-radius:8px;padding:6px 8px;min-height:36px}
 .empty{color:var(--hint);font-size:14px}
+.head{position:sticky;top:0;z-index:1;display:flex;justify-content:space-between;align-items:center;gap:8px;background:var(--bg);padding:4px 0}
+.spin{display:flex;align-items:center;gap:8px;color:var(--hint);font-size:14px}
+.spin[hidden]{display:none}
+.dot{width:18px;height:18px;border:2px solid var(--line);border-top-color:var(--accent);border-radius:50%;animation:turn .8s linear infinite}
+@keyframes turn{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.dot{animation:none;border-top-color:var(--accent)}}
+#items{transition:opacity .15s}
+#items.busy{opacity:.55;pointer-events:none}
 `;
 
 const JS = `
@@ -40,11 +48,20 @@ const JS = `
   var msg = document.getElementById('msg');
   var list = document.getElementById('items');
   var title = document.getElementById('hint');
+  var spin = document.getElementById('spin');
   var data = null;
   var busy = false;
   var closed = false;
   var timer = null;
   var waysOpen = {};
+
+  /** Shows the spinner and keeps the items from being tapped while a request the organiser waits for is open. */
+  function setBusy(on) {
+    busy = on;
+    spin.hidden = !on;
+    list.classList.toggle('busy', on);
+    list.setAttribute('aria-busy', on ? 'true' : 'false');
+  }
 
   function say(text, isError) { msg.textContent = text || ''; msg.className = isError ? 'err' : ''; }
   function stop(text) { closed = true; clearInterval(timer); list.textContent = ''; say(text, false); }
@@ -89,7 +106,7 @@ const JS = `
 
   async function change(item, op, more) {
     if (busy || closed) return;
-    busy = true;
+    setBusy(true);
     say('');
     var body = { item: item, op: op };
     for (var k in (more || {})) body[k] = more[k];
@@ -102,8 +119,8 @@ const JS = `
         render();
       } else if (r.status === 422) refused = true;
     } catch (e) { say('No connection. Please try again.', true); }
-    busy = false;
-    if (refused) await load(); // show what the chat says now, keeping the reason on screen
+    setBusy(false);
+    if (refused) await load(true); // show what the chat says now, keeping the reason on screen
   }
 
   function money(cents) { return 'SGD ' + (cents / 100).toFixed(2); }
@@ -226,18 +243,21 @@ const JS = `
     title.textContent = 'Tap a name to add or remove it. When everyone has claimed, tap Done in the chat.';
   }
 
-  async function load() {
+  /** loud shows the spinner (the first load, the reload after a refusal); the poll is silent. */
+  async function load(loud) {
     if (busy || closed) return;
+    if (loud) setBusy(true);
     try {
       var r = await api('state');
       if (accept(r)) { data = r.body; render(); }
     } catch (e) { say('No connection. Trying again\\u2026', true); }
+    if (loud) setBusy(false);
   }
 
   if (!tg || !tg.initData) { stop('Open this page from the Edit in app button in Telegram.'); return; }
   tg.ready();
   tg.expand();
-  load();
+  load(true);
   timer = setInterval(function () { if (!document.hidden) load(); }, 4000);
   document.addEventListener('visibilitychange', function () { if (!document.hidden) load(); });
 })();
@@ -257,7 +277,10 @@ export function renderSplitAppPage(nonce: string): string {
 </head>
 <body>
 <main>
+<div class="head">
 <h1>Who had what</h1>
+<div id="spin" class="spin" role="status" hidden><span class="dot" aria-hidden="true"></span><span>Updating…</span></div>
+</div>
 <p class="hint" id="hint">Loading…</p>
 <div id="msg" role="status" aria-live="polite"></div>
 <div id="items"></div>
