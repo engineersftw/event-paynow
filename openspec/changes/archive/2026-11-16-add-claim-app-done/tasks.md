@@ -19,7 +19,7 @@
 
 ## 4. Rollout
 
-- [ ] 4.1 Deploy, then in a real group: tap Done in the app with everything claimed (the app closes, the claim message shows it is closed, the summary is in the chat); repeat with an unclaimed item (the chat asks about it); try it with nobody else claimed (the reason shows in the app); and confirm Done in the chat still works on another split
+- [x] 4.1 Deploy, then in a real group: tap Done in the app with everything claimed (the app closes, the claim message shows it is closed, the summary is in the chat); repeat with an unclaimed item (the chat asks about it); try it with nobody else claimed (the reason shows in the app); and confirm Done in the chat still works on another split
 
 ## Workflow follow-up
 
