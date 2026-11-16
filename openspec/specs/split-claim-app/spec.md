@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Lets the organiser of a group's self-claim receipt split see every item and every person on one screen inside Telegram and change who has what, instead of working through the chat menu one item at a time.
+Lets the organiser of a group's self-claim receipt split see every item and every person on one screen inside Telegram and change who has what for everyone: add or remove people, add someone by name, share an item in a number of ways, or clear an item.
 
 ## Requirements
 
