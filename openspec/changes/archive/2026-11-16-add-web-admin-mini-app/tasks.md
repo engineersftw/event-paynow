@@ -29,7 +29,7 @@
 
 - [x] 6.1 Return the session value from `POST /api/miniapp-login`, accept `Authorization: Bearer` beside the cookie in `src/web/handler.ts`, and in `src/web/page.ts` keep the value, send it on every same-origin request and load QR images through `fetch` when it is set; verify with `npm run build`
 - [x] 6.2 Tests: the bearer value opens the event API with no cookie, a forged or expired one does not, the cookie still works, the page script parses and includes the token wrapper; verify `npm test`
-- [ ] 6.3 After deploy, on Telegram Desktop open an event from the Mini App button as an admin: it loads signed in, and a payment QR and the scan dialog still work; a phone client still works
+- [x] 6.3 After deploy, on Telegram Desktop open an event from the Mini App button as an admin: it loads signed in, and a payment QR and the scan dialog still work; a phone client still works
 
 ## Workflow follow-up
 
