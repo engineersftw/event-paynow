@@ -51,7 +51,8 @@ export default {
       request.method === 'GET'
     )
       return handleSplitAppPage(env);
-    if (url.pathname.startsWith(`${SPLIT_APP_API}/`)) return handleSplitAppApi(request, env);
+    if (url.pathname.startsWith(`${SPLIT_APP_API}/`))
+      return handleSplitAppApi(request, env, { waitUntil: (work) => ctx.waitUntil(work) });
 
     return new Response('Not found', { status: 404 });
   },

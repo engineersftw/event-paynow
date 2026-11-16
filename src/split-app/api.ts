@@ -34,7 +34,16 @@ const MAX_TEXT = 500; // typed names for one change; far above what 20 short nam
 /** What a test can replace: the Bot API client used to refresh the claim message. */
 export interface SplitAppDeps {
   fetch?: typeof fetch;
+  /** Lets work finish after the answer has gone (the Worker's `ctx.waitUntil`); without it the chat update is awaited. */
+  waitUntil?: (work: Promise<unknown>) => void;
 }
+
+/** How many times one chat update repeats when the claims changed while it was editing. */
+const MAX_REFRESH_ROUNDS = 3;
+
+/** The chat's conversation as it is now, without touching it (no write, no expiry change). */
+const peekState = async (store: { fetch(r: Request): Promise<Response> }) =>
+  (await (await store.fetch(new Request('http://localhost/peek'))).json()) as ConversationState;
 
 /** On when the Mini App is named and the Split bot has its token. */
 export const splitAppConfigured = (env: Env): boolean =>
@@ -71,9 +80,7 @@ async function authorise(request: Request, env: Env): Promise<Session | Response
 
   const store = env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`split-${chatId}`));
   // Read-only: a call for a chat with no conversation creates nothing and extends no expiry
-  const state = (await (
-    await store.fetch(new Request('http://localhost/peek'))
-  ).json()) as ConversationState;
+  const state = await peekState(store);
   if (state.flow !== 'split' || state.step !== CLAIM) return json({ error: 'over' }, 409);
   if (state.owner?.userId !== launch.user.id || state.owner.topicId !== topicId) {
     return json({ error: 'not_organiser' }, 403);
@@ -173,24 +180,29 @@ function operation(
   }
 }
 
-/** Show the new claims in the chat; a message that did not change or cannot be edited is not an error. */
-async function refreshClaimMessage(
-  env: Env,
-  s: Session,
-  c: Ctx,
-  deps: SplitAppDeps
-): Promise<void> {
-  if (c.claimMsg === undefined) return;
+/**
+ * Bring the claim message in the chat up to date. It renders from the conversation as it is when it
+ * runs (not from the change that started it) and repeats while the claims changed during the edit,
+ * so the message ends on the newest claims however updates overlap or finish. It does nothing when
+ * the claiming is not open. A refused or failed edit is not an error: the stored claims win.
+ */
+async function refreshClaimMessage(env: Env, s: Session, deps: SplitAppDeps): Promise<void> {
   const api = new Api(env.SPLIT_BOT_TOKEN!, deps.fetch ? { fetch: deps.fetch } : undefined);
   const link =
     env.SPLIT_BOT_USERNAME && env.SPLIT_APP_NAME
       ? appLink(env.SPLIT_BOT_USERNAME, env.SPLIT_APP_NAME, s.chatId, s.topicId)
       : undefined;
-  await api
-    .editMessageText(s.chatId, c.claimMsg as number, claimText(c, link), {
-      reply_markup: claimButtons(c, link),
-    })
-    .catch(() => undefined);
+  for (let round = 0; round < MAX_REFRESH_ROUNDS; round++) {
+    const state = await peekState(s.store);
+    const c = state.context;
+    if (state.flow !== 'split' || state.step !== CLAIM || c.claimMsg === undefined) return;
+    await api
+      .editMessageText(s.chatId, c.claimMsg as number, claimText(c, link), {
+        reply_markup: claimButtons(c, link),
+      })
+      .catch(() => undefined);
+    if ((await peekState(s.store)).rev === state.rev) return;
+  }
 }
 
 /** `GET /split-app`: the Mini App page. Nothing in it depends on the chat; every call it makes is signed. */
@@ -234,7 +246,10 @@ export async function handleSplitAppApi(
     if (result.kind === 'busy') return json({ error: 'busy' }, 503);
     if (result.kind === 'refused') return json({ error: result.text || refusal }, 422);
 
-    await refreshClaimMessage(env, s, result.context, deps);
+    // The answer does not wait for Telegram: the chat message catches up afterwards
+    const refresh = refreshClaimMessage(env, s, deps).catch(() => undefined);
+    if (deps.waitUntil) deps.waitUntil(refresh);
+    else await refresh;
     return json({ ok: true, note: result.note, ...view(result.context, s.user) });
   }
 
