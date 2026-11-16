@@ -30,7 +30,7 @@
 
 ## 6. Rollout
 
-- [ ] 6.1 After deploy (the migration runs first), in a real chat: `/edit_event` switch Full name and Email on and add "Dietary needs", open the payment page and check each required field is enforced, pay as a registrant, confirm the event page list shows no email, download the CSV in a browser and in the Mini App on desktop and a phone, and open it in a spreadsheet (a value starting with `=` shows as text)
+- [x] 6.1 After deploy (the migration runs first), in a real chat: `/edit_event` switch Full name and Email on and add "Dietary needs", open the payment page and check each required field is enforced, pay as a registrant, confirm the event page list shows no email, download the CSV in a browser and in the Mini App on desktop and a phone, and open it in a spreadsheet (a value starting with `=` shows as text)
 
 ## Workflow follow-up
 
