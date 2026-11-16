@@ -53,11 +53,30 @@ describe('Split Mini App page', () => {
     expect(html).toContain('prefers-reduced-motion');
     expect(script).toContain('function setBusy');
     expect(script).toContain('setBusy(true)');
-    expect(script.match(/setBusy\(false\)/g)).toHaveLength(2); // after a change, after a loud load
+    expect(script.match(/setBusy\(false\)/g)).toHaveLength(3); // after a change, a loud load and Done
     expect(script).toContain('load(true)'); // the first load is loud
     // the poll and the refresh on returning to the page are not
     expect(script).toContain('if (!document.hidden) load(); }, 4000)');
     expect(script).toContain("visibilitychange', function () { if (!document.hidden) load(); }");
+  });
+
+  it('has a Done button that closes the claiming, then closes the app', () => {
+    expect(html).toContain(
+      '<footer id="foot" class="foot" hidden><button id="done" class="btn" type="button">Done</button></footer>'
+    );
+    expect(html).toContain('.foot{position:sticky;bottom:0'); // in view however far the list is scrolled
+    expect(html).toContain('.foot[hidden]{display:none}');
+    expect(script).toContain("api('done', {})");
+    expect(script).toContain("doneBtn.addEventListener('click', finish)");
+    expect(script).toContain('doneBtn.disabled = on'); // not tappable while a request waits
+    expect(script).toContain('foot.hidden = true'); // gone once the claiming is over
+    expect(script).toContain('foot.hidden = false'); // shown once the items are
+    // on success the next question is in the chat: say so, then close the app when it can
+    expect(script).toContain("stop('Claiming is closed. Finish in the chat.');");
+    expect(script).toContain('if (tg.close) tg.close();');
+    // the hint no longer sends the organiser to the chat to tap Done
+    expect(script).toContain('When everyone has claimed, tap Done.');
+    expect(script).not.toContain('tap Done in the chat');
   });
 
   it('is told, not guessed: a page opened outside Telegram says how to open it', () => {

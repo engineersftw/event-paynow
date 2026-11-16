@@ -40,6 +40,9 @@ select{border:1px solid var(--line);background:var(--bg);color:var(--fg);border-
 @media (prefers-reduced-motion:reduce){.dot{animation:none;border-top-color:var(--accent)}}
 #items{transition:opacity .15s}
 #items.busy{opacity:.55;pointer-events:none}
+.foot{position:sticky;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:8px 16px calc(8px + env(safe-area-inset-bottom))}
+.foot[hidden]{display:none}
+.foot .btn{display:block;width:100%;max-width:640px;margin:0 auto}
 `;
 
 const JS = `
@@ -49,6 +52,8 @@ const JS = `
   var list = document.getElementById('items');
   var title = document.getElementById('hint');
   var spin = document.getElementById('spin');
+  var foot = document.getElementById('foot');
+  var doneBtn = document.getElementById('done');
   var data = null;
   var busy = false;
   var closed = false;
@@ -61,10 +66,11 @@ const JS = `
     spin.hidden = !on;
     list.classList.toggle('busy', on);
     list.setAttribute('aria-busy', on ? 'true' : 'false');
+    doneBtn.disabled = on;
   }
 
   function say(text, isError) { msg.textContent = text || ''; msg.className = isError ? 'err' : ''; }
-  function stop(text) { closed = true; clearInterval(timer); list.textContent = ''; say(text, false); }
+  function stop(text) { closed = true; clearInterval(timer); list.textContent = ''; foot.hidden = true; say(text, false); }
 
   async function api(path, body) {
     var res = await fetch('/split-app/api/' + path, {
@@ -121,6 +127,24 @@ const JS = `
     } catch (e) { say('No connection. Please try again.', true); }
     setBusy(false);
     if (refused) await load(true); // show what the chat says now, keeping the reason on screen
+  }
+
+  /** Done: close the claiming like Done in the chat; the next question is in the chat, so close the app. */
+  async function finish() {
+    if (busy || closed) return;
+    setBusy(true);
+    say('');
+    var closedOk = false;
+    try {
+      var r = await api('done', {});
+      if (r.status === 200) closedOk = true;
+      else accept(r);
+    } catch (e) { say('No connection. Please try again.', true); }
+    setBusy(false);
+    if (closedOk) {
+      stop('Claiming is closed. Finish in the chat.');
+      if (tg.close) tg.close();
+    }
   }
 
   function money(cents) { return 'SGD ' + (cents / 100).toFixed(2); }
@@ -240,7 +264,8 @@ const JS = `
       if (typed[inp.dataset.item] !== undefined) inp.value = typed[inp.dataset.item];
       if (focusItem !== undefined && inp.dataset.item === focusItem) inp.focus();
     });
-    title.textContent = 'Tap a name to add or remove it. When everyone has claimed, tap Done in the chat.';
+    title.textContent = 'Tap a name to add or remove it. When everyone has claimed, tap Done.';
+    foot.hidden = false;
   }
 
   /** loud shows the spinner (the first load, the reload after a refusal); the poll is silent. */
@@ -254,6 +279,7 @@ const JS = `
     if (loud) setBusy(false);
   }
 
+  doneBtn.addEventListener('click', finish);
   if (!tg || !tg.initData) { stop('Open this page from the Edit in app button in Telegram.'); return; }
   tg.ready();
   tg.expand();
@@ -285,6 +311,7 @@ export function renderSplitAppPage(nonce: string): string {
 <div id="msg" role="status" aria-live="polite"></div>
 <div id="items"></div>
 </main>
+<footer id="foot" class="foot" hidden><button id="done" class="btn" type="button">Done</button></footer>
 <script nonce="${nonce}">${JS}</script>
 </body>
 </html>

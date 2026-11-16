@@ -18,6 +18,7 @@ import {
 } from '../commands/split-claims';
 import type { Env } from '../env';
 import type { ConversationState } from '../worker/conversation-do';
+import { organiserContext } from './context';
 import { type InitDataUser, verifyInitData } from './init-data';
 import { renderSplitAppPage, splitAppPageHeaders } from './page';
 
@@ -251,6 +252,17 @@ export async function handleSplitAppApi(
     if (deps.waitUntil) deps.waitUntil(refresh);
     else await refresh;
     return json({ ok: true, note: result.note, ...view(result.context, s.user) });
+  }
+
+  // Done: close the claiming exactly as Done in the chat does. Awaited (not sent to waitUntil): the
+  // organiser needs to know whether it worked, and the next question or the summary is posted by it.
+  if (request.method === 'POST' && path === `${SPLIT_APP_API}/done`) {
+    const s = await authorise(request, env);
+    if (s instanceof Response) return s;
+    const { ctx, handler } = organiserContext(env, s, s.store, deps.fetch);
+    const closed = await handler.closeClaimingFor(ctx, s.user.id);
+    if (closed.ok) return json({ ok: true });
+    return closed.over ? json({ error: 'over' }, 409) : json({ error: closed.reason }, 422);
   }
 
   return new Response('Not found', { status: 404 });

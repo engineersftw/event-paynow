@@ -120,6 +120,8 @@ export const TEST_BOT_INFO = {
 export interface CapturedSend {
   chatId: string;
   messageId?: number;
+  /** The forum topic the message was sent to, when it was sent to one. */
+  threadId?: number;
   text: string;
   replyMarkup?: Record<string, unknown>;
   parseMode?: string;
@@ -319,11 +321,13 @@ export class TelegramStub {
         text: string;
         parse_mode?: string;
         reply_markup?: Record<string, unknown>;
+        message_thread_id?: number;
       };
       this.messageId += 1;
       this.sentMessages.push({
         chatId: String(body.chat_id),
         messageId: this.messageId,
+        ...(body.message_thread_id ? { threadId: body.message_thread_id } : {}),
         text: body.text,
         replyMarkup: body.reply_markup,
         parseMode: body.parse_mode,
