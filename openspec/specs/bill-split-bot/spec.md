@@ -762,9 +762,9 @@ The system SHALL accept a name line in the pasted-list format with or without a 
 - **WHEN** the user sends `Sam`, `1. Pizza`, `All`, `2. Steak`
 - **THEN** item 2 is shared by everyone named, exactly as with `All:`
 
-### Requirement: Any member can claim and un-claim items
+### Requirement: Any member, the organiser included, can claim and un-claim items
 
-The system SHALL show in the claim message each numbered item with its price and the names of the people who have claimed it, with one button per item. Any member of the group SHALL be able to tap an item to claim it for themselves and tap it again to un-claim it, and the message SHALL update after each tap. An item claimed by several people SHALL be shared equally between them. A member SHALL NOT be able to claim for, or un-claim for, anyone else, and nobody, the organiser included, SHALL be able to change an item that is locked because a holder has taken their QR.
+The system SHALL show in the claim message each numbered item with its price and the names of the people who have claimed it, with one button per item. Any member of the group, the organiser included, SHALL be able to tap an item to claim it for themselves and tap it again to un-claim it, and the message SHALL update after each tap.
 
 #### Scenario: Claiming an item
 
@@ -776,25 +776,29 @@ The system SHALL show in the claim message each numbered item with its price and
 - **WHEN** the same member taps item 2 again
 - **THEN** their name is removed from item 2
 
-#### Scenario: Sharing an item
-
-- **WHEN** two members tap item 3
-- **THEN** both names are shown against item 3 and it will be split equally between them
-
 #### Scenario: Same tap time
 
 - **WHEN** several members tap different items at nearly the same moment
 - **THEN** every tap is recorded
 
+#### Scenario: The organiser taps an item
+
+- **WHEN** the organiser taps item 4 in the claim message
+- **THEN** item 4 is claimed for the organiser, no menu or other message is posted, and a second tap takes the claim back
+
+### Requirement: An item claimed by several people is shared equally, and in the chat nobody claims for another
+
+The system SHALL share an item claimed by several people equally between them. Nobody SHALL be able to claim for, or un-claim for, anyone else in the chat (the organiser does that in the Mini App), and nobody, the organiser included, SHALL be able to change an item that is locked because a holder has taken their QR.
+
+#### Scenario: Sharing an item
+
+- **WHEN** two members tap item 3
+- **THEN** both names are shown against item 3 and it will be split equally between them
+
 #### Scenario: Locked item
 
 - **WHEN** a member taps an item that a holder has locked by taking their QR
 - **THEN** nothing changes and they are told the item is locked
-
-#### Scenario: Organiser's menu on a locked item
-
-- **WHEN** the organiser tries to add someone to, remove someone from or clear a locked item, or change its number of ways
-- **THEN** nothing changes and the organiser is told the item is locked
 
 ### Requirement: Claimers are identified by their Telegram account
 
@@ -939,112 +943,52 @@ The system SHALL, in every split that is started with `/split`, `/split_custom`,
 - **WHEN** the user amends the payee on the summary
 - **THEN** the bot asks for the new payee and then shows the summary again
 
-### Requirement: The organiser's tap on an item opens a menu
+### Requirement: An item shared in a number of ways gives each holder one share
 
-The system SHALL, when the organiser taps an item in the claim message, post a menu for that item instead of claiming it directly, with the buttons Mine, one for each person who has claimed something, Someone else, Shared by all and Close, and, when the item already has claimants, a Remove all claims button that empties the item in one tap. This SHALL replace, for the organiser only, the rule that a tap claims the item for the tapper; other members' taps are unchanged. The menu SHALL stay open for several choices and update itself, and SHALL be removed when the organiser taps Close, taps Done or Keep claiming, or opens the menu for another item. Only the organiser SHALL be able to use the menu.
-
-#### Scenario: Organiser taps an item
-
-- **WHEN** the organiser taps item 3 in the claim message
-- **THEN** the bot posts a menu for item 3 with Mine, the people who have claimed, Someone else, Shared by all and Close
-
-#### Scenario: Clear all claims
-
-- **WHEN** item 3 is held by Ann and Bob and the organiser taps it again and then Remove all claims
-- **THEN** item 3 has no claimants in the claim message, its number of ways is kept, and the menu no longer offers Remove all claims
-
-#### Scenario: No claims to remove
-
-- **WHEN** the organiser opens the menu for an item nobody holds
-- **THEN** there is no Remove all claims button
-
-#### Scenario: Remove one person
-
-- **WHEN** item 3 is held by Ann and Bob and the organiser taps Ann in the menu
-- **THEN** only Ann is removed from item 3
-
-#### Scenario: Mine
-
-- **WHEN** the organiser taps Mine in the menu for item 3
-- **THEN** item 3 is claimed by the organiser, shown in the claim message, and tapping Mine again removes it
-
-#### Scenario: Member taps the menu
-
-- **WHEN** a member who is not the organiser taps a button of the menu
-- **THEN** nothing changes and they are told it is the organiser's button
-
-#### Scenario: Menu closed
-
-- **WHEN** the organiser taps Close, Done or Keep claiming
-- **THEN** the menu message is removed
-
-### Requirement: The organiser can claim an item for someone else
-
-The system SHALL let the organiser add a person to an item, or remove them, by tapping that person in the menu; a tapped person who already holds the item SHALL be removed from it. The organiser SHALL also be able to tap Someone else and send one or more names or @mentions separated by commas, and each SHALL be added to the item. A person picked from the member list SHALL be identified by their Telegram account, an @username SHALL be matched to an existing claimer or kept so their QR can be delivered when they start the bot, and a plain name SHALL have no identity. A name matching an existing claimer SHALL reuse that claimer. A name longer than 20 characters SHALL be refused. The people added this way SHALL count towards the 20-person limit and SHALL be paid for like any claimer.
-
-#### Scenario: Pick a claimer
-
-- **WHEN** the organiser taps Ann in the menu for item 3
-- **THEN** Ann is shown against item 3 in the claim message
-
-#### Scenario: Plain name
-
-- **WHEN** the organiser taps Someone else and sends `Uncle Lim` for item 2
-- **THEN** Uncle Lim is shown against item 2 and is included in the amounts
-
-#### Scenario: Several people
-
-- **WHEN** the organiser sends `Ann, @bob_lee` for item 2
-- **THEN** both are added to item 2
-
-#### Scenario: Name too long
-
-- **WHEN** the organiser sends a name longer than 20 characters
-- **THEN** the bot refuses it and asks again
-
-#### Scenario: Typed person taps later
-
-- **WHEN** a typed @username later taps an item in the claim message
-- **THEN** their claims and the typed ones belong to the same person
-
-### Requirement: The organiser can share an item in a number of ways
-
-The system SHALL, when the organiser taps Shared by all, ask how many ways to split the item, with a whole number from 2 to 20. The item SHALL become that many equal shares, with any odd cents on the first shares, and each person who claims the item SHALL hold one share and pay one share. A person SHALL NOT hold two shares of the same item, and claims on the item SHALL stop when every share is held. The claim message SHALL show the item with its number of ways, its holders and how many shares are left. The number of ways SHALL be changeable and removable from the same menu, but SHALL NOT be set below the number of people who already hold the item. Shares that are still unfilled when the claiming is closed SHALL be handled like unclaimed items: the organiser chooses between covering them or splitting them evenly between those who claimed.
-
-#### Scenario: Ask for the number
-
-- **WHEN** the organiser taps Shared by all in the menu for item 3
-- **THEN** the bot asks how many ways to split it and accepts a number from 2 to 20
+The system SHALL, when an item is set to be shared 2 to 20 ways (by the organiser in the Mini App), make it that many equal shares, with any odd cents on the first shares; each person who claims it SHALL hold one share and pay one share. A person SHALL NOT hold two shares of the same item, and claims on it SHALL stop when every share is held.
 
 #### Scenario: Shares claimed
 
 - **WHEN** item 3 (30.00) is shared 3 ways and Ann and Bob claim it
-- **THEN** the claim message shows both names and one share left, and each pays 10.00 for it
+- **THEN** each pays 10.00 for it
 
 #### Scenario: All shares taken
 
 - **WHEN** every share of an item is held and another member taps it
 - **THEN** nothing changes and they are told all shares are taken
 
+#### Scenario: Back to a normal item
+
+- **WHEN** the organiser removes the number of ways from an item in the Mini App
+- **THEN** the item is shared equally between whoever holds it, as before
+
+### Requirement: The claim message shows an item's shares, and unfilled shares are handled like unclaimed items
+
+The system SHALL show an item shared in a number of ways in the claim message with its number of ways, its holders and how many shares are left. Shares still unfilled when the claiming is closed SHALL be handled like unclaimed items: the organiser chooses between covering them or splitting them evenly between those who claimed.
+
+#### Scenario: Shares left shown
+
+- **WHEN** item 3 is shared 3 ways and Ann and Bob claim it
+- **THEN** the claim message shows both names and one share left
+
 #### Scenario: Unfilled share
 
 - **WHEN** the claiming is closed with one share of a 3-way item unfilled
 - **THEN** the bot asks the organiser what to do with that share, as with an unclaimed item
 
-#### Scenario: Number too low
+### Requirement: A person added by name is paid for like any claimer
 
-- **WHEN** three people hold an item and the organiser sets it to 2 ways
-- **THEN** the bot refuses and says three people already hold it
+The system SHALL treat a person the organiser added by name or `@username` in the Mini App as a claimer without a Telegram identity, paid for like any other claimer. A typed `@username` SHALL become the same person as the Telegram user with that username when that user taps an item, with their claims merged.
 
-#### Scenario: Back to a normal item
+#### Scenario: Plain name paid for
 
-- **WHEN** the organiser removes the number of ways from an item
-- **THEN** the item is shared equally between whoever holds it, as before
+- **WHEN** the organiser adds `Uncle Lim` to item 2 in the Mini App and the claiming is closed
+- **THEN** Uncle Lim's amount is in the summary and his QR is posted in the chat with the others
 
-#### Scenario: Not a valid number
+#### Scenario: Typed username taps later
 
-- **WHEN** the organiser sends 1 or `lots` as the number of ways
-- **THEN** the bot says a whole number from 2 to 20 is needed and asks again
+- **WHEN** the organiser added `@bob_lee` to item 2 and the user with that username later taps item 3
+- **THEN** item 2 and item 3 belong to one person
 
 ### Requirement: Taking the QR locks the member's items and fixes their amount
 
