@@ -5,6 +5,12 @@ import type { EventRepository, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 import { closedRequestAnswer } from './closed-request.js';
+import {
+  describeFormFields,
+  type FormFields,
+  serializeFormFields,
+  toggleRow,
+} from './form-fields.js';
 import { escapeMarkdown } from './payer-label.js';
 import { normalizeWebsiteUrl } from './website-url.js';
 
@@ -214,7 +220,7 @@ export class InitCommandHandler {
     });
 
     await ctx.reply(`${summary(context)}\n\nTap a button to confirm or cancel:`, {
-      reply_markup: confirmKeyboard(state.context.userId as number),
+      reply_markup: confirmKeyboard(state.context),
     });
   }
 
@@ -228,7 +234,8 @@ export class InitCommandHandler {
       (!data.startsWith('init_confirm:') &&
         !data.startsWith('init_cancel:') &&
         !data.startsWith('init_skip_amount:') &&
-        !data.startsWith('init_skip_website:'))
+        !data.startsWith('init_skip_website:') &&
+        !data.startsWith('init_form:'))
     ) {
       return false;
     }
@@ -270,7 +277,29 @@ export class InitCommandHandler {
         lastActivity: new Date().toISOString(),
       });
       await ctx.editMessageText(`${summary(state.context)}\n\nTap a button to confirm or cancel:`, {
-        reply_markup: confirmKeyboard(state.context.userId as number),
+        reply_markup: confirmKeyboard(state.context),
+      });
+      return true;
+    }
+
+    if (data.startsWith('init_form:') && state?.flow === 'init' && state.step === 5) {
+      if (state.context.userId !== ctx.from?.id) {
+        await ctx.answerCallbackQuery({ text: 'This is not your conversation.' });
+        return true;
+      }
+      const key =
+        data === 'init_form:name' ? 'formName' : data === 'init_form:email' ? 'formEmail' : null;
+      const context = key
+        ? { ...state.context, [key]: state.context[key] !== true }
+        : state.context;
+      await this.setState({
+        flow: 'init',
+        step: 5,
+        context,
+        lastActivity: new Date().toISOString(),
+      });
+      await ctx.editMessageText(`${summary(context)}\n\nTap a button to confirm or cancel:`, {
+        reply_markup: confirmKeyboard(context),
       });
       return true;
     }
@@ -328,6 +357,7 @@ export class InitCommandHandler {
         status: 'open',
         defaultAmountCents: (state.context.defaultAmountCents as number | undefined) ?? null,
         websiteUrl: (state.context.websiteUrl as string | undefined) ?? null,
+        formFields: serializeFormFields(formOf(state.context)),
         timestamp: new Date().toISOString(),
       });
 
@@ -346,6 +376,9 @@ export class InitCommandHandler {
             ? ''
             : `💰 Default amount: SGD ${formatCents(event.defaultAmountCents)}\n`) +
           (event.websiteUrl ? `🌐 Website: ${escapeMarkdown(event.websiteUrl)}\n` : '') +
+          (event.formFields
+            ? `📝 Payers fill in: ${escapeMarkdown(describeFormFields(formOf(state.context)))}\n`
+            : '') +
           `🔗 Ref: \`${event.ref}\`\n\n` +
           'Use /start to create payments for this event.',
         { parse_mode: 'Markdown', reply_markup: { inline_keyboard: [] } }
@@ -397,10 +430,18 @@ const WEBSITE_PROMPT =
 const skipWebsiteKeyboard = (userId: number) =>
   new InlineKeyboard().text('Skip', `init_skip_website:${userId}`);
 
-const confirmKeyboard = (userId: number) =>
-  new InlineKeyboard()
-    .text('✅ Confirm', `init_confirm:${userId}`)
-    .text('❌ Cancel', `init_cancel:${userId}`);
+/** Confirm / Cancel, with the two switches for what payers fill in (custom fields: /edit_event). */
+const confirmKeyboard = (context: Record<string, unknown>) =>
+  toggleRow(new InlineKeyboard(), formOf(context), 'init_form')
+    .row()
+    .text('✅ Confirm', `init_confirm:${context.userId}`)
+    .text('❌ Cancel', `init_cancel:${context.userId}`);
+
+const formOf = (context: Record<string, unknown>): FormFields => ({
+  name: context.formName === true,
+  email: context.formEmail === true,
+  custom: [],
+});
 
 /** Event / payee / optional default amount / optional website lines shown on the confirmation and cancel messages. */
 function summary(context: Record<string, unknown>): string {
@@ -411,6 +452,9 @@ function summary(context: Record<string, unknown>): string {
     `📋 Event: ${context.eventName}\n` +
     `📱 ${proxy.type === 'mobile' ? 'Mobile number' : 'UEN'}: ${proxy.normalized}` +
     (cents === undefined ? '' : `\n💰 Default amount: SGD ${formatCents(cents)}`) +
-    (website === undefined ? '' : `\n🌐 Website: ${website}`)
+    (website === undefined ? '' : `\n🌐 Website: ${website}`) +
+    (context.formName === true || context.formEmail === true
+      ? `\n📝 Payers fill in: ${describeFormFields(formOf(context))}`
+      : '')
   );
 }

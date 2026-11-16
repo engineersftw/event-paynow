@@ -28,6 +28,8 @@ export interface Event {
   defaultAmountCents: number | null;
   /** The event's own web page (http or https), shown on the web pages; null when none was set. */
   websiteUrl: string | null;
+  /** JSON of the details the payment page asks for (parse with `parseFormFields`); null = none. */
+  formFields: string | null;
 }
 
 /**
@@ -58,6 +60,10 @@ export interface Payment {
   payerType?: PayeeType | null;
   payerValue?: string | null;
   payerName?: string | null;
+  /** Registrant details: private, returned only by the admin CSV export. */
+  payerEmail?: string | null;
+  /** JSON `[{label, value}]` of custom answers. */
+  answers?: string | null;
   createdAt: string;
   receivedAt: string | null;
   /** Telegram user id of who marked it received / voided it; null for rows from before auditing. */
@@ -113,13 +119,18 @@ export interface EventPatch {
   payeeValue?: string;
   defaultAmountCents?: number | null;
   websiteUrl?: string | null;
+  formFields?: string | null;
 }
 
 export interface EventRepository {
   createEvent(
-    event: Omit<Event, 'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents' | 'websiteUrl'> & {
+    event: Omit<
+      Event,
+      'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents' | 'websiteUrl' | 'formFields'
+    > & {
       defaultAmountCents?: number | null;
       websiteUrl?: string | null;
+      formFields?: string | null;
       timestamp: string;
     }
   ): Promise<Event>;
@@ -156,6 +167,11 @@ export interface Repository {
     eventId: number,
     opts: { status?: PaymentStatus; q?: string; limit: number; cursor?: string }
   ): Promise<{ payments: Payment[]; nextCursor: string | null }>;
+  /** Every payment of the event, oldest first, at most `limit` (`truncated` when more exist), for the CSV export. */
+  listPaymentsForExport(
+    eventId: number,
+    limit: number
+  ): Promise<{ payments: Payment[]; truncated: boolean }>;
   /** paymentId → total of its SENT paybacks, for every payment of the event that has any. */
   sentPaybackTotalsByEvent(eventId: number): Promise<Map<number, number>>;
   updatePaymentStatus(

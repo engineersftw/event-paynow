@@ -149,6 +149,7 @@ ${TOPBAR_HTML}
 <script async src="https://telegram.org/js/telegram-widget.js?22" data-telegram-login="${botUsername.replace(/[^A-Za-z0-9_]/g, '')}" data-size="large" data-auth-url="/api/login?ref=${ref}" data-request-access="write"></script>
 </div>
 <div id="data" hidden>
+<p><button id="export" class="btn">Download CSV</button></p>
 <div class="checkin-stats" aria-label="Check-in statistics">
 <div class="card stat"><span class="muted sm">Checked in</span><b id="checked-in"></b></div>
 <div class="card stat"><span class="muted sm">Not checked in</span><b id="not-checked-in"></b><span class="muted sm" id="not-checked-in-split"></span></div>
@@ -500,6 +501,17 @@ $('np-again').onclick = showForm;
 $('dlg').addEventListener('click', (e) => { if (e.target === $('dlg')) $('dlg').close(); });
 $('dlg-form').addEventListener('keydown', (e) => { if (e.key === 'Enter') createRequest(); });
 $('np-go').onclick = createRequest;
+$('export').onclick = async () => {
+  const b = $('export'); b.disabled = true;
+  try {
+    const r = await fetch('/api/events/${ref}/export.csv', { credentials: 'same-origin' });
+    if (!r.ok) { say('Could not download the file.'); return; }
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(await r.blob()); a.download = 'event-${ref}.csv';
+    document.body.append(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  } catch (e) { say('Could not download the file.'); } finally { b.disabled = false; }
+};
 ${MINI_JS}miniLogin().then(() => { load(); loadMe(); });
 ${ME_JS}</script></body></html>`;
 }
@@ -796,7 +808,9 @@ ${TOPBAR_HTML}
 <p id="event-status" class="muted"></p>
 <div id="form" class="fields">
 <label>Your PayNow mobile / UEN<input id="payer" class="input" autocomplete="off"></label>
-<label>Your name (optional)<input id="name" class="input" maxlength="40" autocomplete="name"></label>
+<label><span id="name-text">Your name (optional)</span><input id="name" class="input" maxlength="40" autocomplete="name"></label>
+<div id="extra" class="fields"></div>
+<p id="organiser-sees" class="muted hidden">The organiser will see the details you give here.</p>
 <label id="amount-field">Amount (SGD)<input id="amount" class="input" inputmode="decimal" autocomplete="off"></label>
 <div id="amount-fixed" class="hidden"><div class="muted">Amount (SGD)</div><div id="amount-text" class="amount"></div></div>
 <p id="err" class="err hidden"></p><button id="create" class="btn">Show payment QR</button>
@@ -811,7 +825,8 @@ ${FOOTER_HTML}
 const $=id=>document.getElementById(id), sgd=c=>'SGD '+(c/100).toFixed(2);
 ${SITE_JS}
 const say=t=>{$('msg').textContent=t;$('msg').classList.toggle('hidden',!t)};
-const errorText={invalid_payer:'Enter a valid mobile number or UEN.',invalid_amount:'Enter a positive amount with up to 2 decimals.',event_closed:'This event is closed.',forbidden:'Not allowed.',not_found:'Event not found.',rate_limited:'This page is busy. Please try again in a few minutes.'};
+const errorText={invalid_payer:'Enter a valid mobile number or UEN.',invalid_amount:'Enter a positive amount with up to 2 decimals.',event_closed:'This event is closed.',forbidden:'Not allowed.',not_found:'Event not found.',rate_limited:'This page is busy. Please try again in a few minutes.',invalid_email:'Enter a valid email address.',invalid_field:'That answer is too long.'};
+let form={name:false,email:false,custom:[]},extra={email:null,custom:[]};
 let defaultCents=null,signedIn=false;
 const MONTHS=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
 const fmtDate=iso=>{const d=new Date(iso);return String(d.getUTCDate()).padStart(2,'0')+'-'+MONTHS[d.getUTCMonth()]+'-'+d.getUTCFullYear()};
@@ -836,8 +851,20 @@ async function loadHistory(){
     return row;
   }));
 }
+function addField(label,type,max,auto){
+  const l=document.createElement('label'),s=document.createElement('span'),i=document.createElement('input');
+  s.textContent=label;i.className='input';i.type=type;i.maxLength=max;i.autocomplete=auto;l.append(s,i);$('extra').append(l);return i;
+}
+function setForm(f){
+  form=f;extra={email:null,custom:[]};$('extra').replaceChildren();
+  $('name-text').textContent=f.name?'Your full name':'Your name (optional)';$('name').maxLength=f.name?80:40;
+  if(f.email)extra.email=addField('Your email','email',120,'email');
+  f.custom.forEach(c=>extra.custom.push(addField(c,'text',100,'off')));
+  $('organiser-sees').classList.toggle('hidden',!(f.name||f.email||f.custom.length));
+}
+function fieldName(k){return k==='name'?'your full name':k==='email'?'your email':(form.custom[Number(String(k).slice(7))]||'every field')}
 function showError(t){$('err').textContent=t;$('err').classList.toggle('hidden',!t)}
-function reset(){showError('');$('result').classList.add('hidden');$('form').classList.remove('hidden');$('payer').value='';$('name').value='';setAmount()}
+function reset(){showError('');$('result').classList.add('hidden');$('form').classList.remove('hidden');$('payer').value='';$('name').value='';if(extra.email)extra.email.value='';extra.custom.forEach(i=>{i.value=''});setAmount()}
 async function load(){
   const res=await fetch('/api/pay/${ref}',{credentials:'same-origin'});
   if(res.status===404){say('Event not found.');return}
@@ -845,14 +872,14 @@ async function load(){
   const d=await res.json(); document.title='Pay: '+d.event.name; $('title').textContent='Pay: '+d.event.name;showSite(d.event.websiteUrl);
   defaultCents=d.event.defaultAmountCents; $('event-status').textContent=d.event.status==='open'?'Make payment for event.':'This event is closed.';
   if(d.event.status!=='open'){$('form').classList.add('hidden');$('app').classList.remove('hidden');return}
-  setAmount(); $('app').classList.remove('hidden');
+  setForm(d.event.form||form); setAmount(); $('app').classList.remove('hidden');
   signedIn=d.signedIn; if(signedIn)loadHistory();else $('signin').classList.remove('hidden');
 }
 async function create(){
   const b=$('create');b.disabled=true;showError('');
-  const res=await fetch('/api/pay/${ref}/payments',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({payer:$('payer').value,name:$('name').value,amount:$('amount').value})});
+  const res=await fetch('/api/pay/${ref}/payments',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},body:JSON.stringify({payer:$('payer').value,name:$('name').value,amount:$('amount').value,email:extra.email?extra.email.value:undefined,answers:extra.custom.map(i=>i.value)})});
   const d=await res.json().catch(()=>({}));b.disabled=false;
-  if(!res.ok){showError(errorText[d.error]||'Something went wrong.');return}
+  if(!res.ok){showError(d.error==='missing_field'?'Please fill in '+fieldName(d.field)+'.':d.error==='invalid_field'&&d.field?'Check '+fieldName(d.field)+': that answer is too long.':errorText[d.error]||'Something went wrong.');return}
   $('form').classList.add('hidden');$('result').classList.remove('hidden');$('dm').classList.toggle('hidden',d.payment.dm!==false);$('note').textContent='Payment '+d.payment.ref+' · '+sgd(d.payment.amountCents);$('qr').replaceChildren(Object.assign(document.createElement('img'),{src:d.payment.qr,alt:'Payment QR'}));if(signedIn)loadHistory();
 }
 $('create').onclick=create;$('again').onclick=reset;load();${ME_JS}${THEME_JS}

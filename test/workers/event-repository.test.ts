@@ -20,7 +20,8 @@ describe('D1EventRepository', () => {
         created_at TEXT NOT NULL,
         closed_at TEXT,
     default_amount_cents INTEGER,
-    website_url TEXT
+    website_url TEXT,
+    form_fields TEXT
       )`,
       `CREATE TABLE IF NOT EXISTS payments (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -37,6 +38,8 @@ describe('D1EventRepository', () => {
         payer_type TEXT,
         payer_value TEXT,
         payer_name TEXT,
+        payer_email TEXT,
+        answers TEXT,
         created_at TEXT NOT NULL,
         received_at TEXT,
         received_by INTEGER,

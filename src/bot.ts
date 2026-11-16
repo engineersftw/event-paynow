@@ -191,7 +191,8 @@ export function createBot(env: Env, config?: BotConfig<Context>): Bot {
       data.startsWith('init_confirm:') ||
       data.startsWith('init_cancel:') ||
       data.startsWith('init_skip_amount:') ||
-      data.startsWith('init_skip_website:')
+      data.startsWith('init_skip_website:') ||
+      data.startsWith('init_form:')
     ) {
       await new InitCommandHandler(conversation(ctx), repository, eventRepository).handleCallback(
         ctx

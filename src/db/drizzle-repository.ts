@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, inArray, isNull, ne, or, sql } from 'drizzle-orm';
+import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type {
   CreatePaybackBoundedResult,
@@ -48,6 +48,8 @@ export class D1Repository implements Repository {
       payerType,
       payerValue,
       payerName,
+      payerEmail,
+      answers,
       timestamp,
     } = input;
 
@@ -64,6 +66,8 @@ export class D1Repository implements Repository {
       payerType: payerType ?? null,
       payerValue: payerValue ?? null,
       payerName: payerName ?? null,
+      payerEmail: payerEmail ?? null,
+      answers: answers ?? null,
       createdAt: timestamp,
     };
     if (eventId !== undefined) {
@@ -186,6 +190,21 @@ export class D1Repository implements Repository {
       payments: page.map(toPayment),
       nextCursor: rows.length > opts.limit && last ? `${last.createdAt}|${last.id}` : null,
     };
+  }
+
+  async listPaymentsForExport(
+    eventId: number,
+    limit: number
+  ): Promise<{ payments: Payment[]; truncated: boolean }> {
+    const t = schema.payments;
+    const rows = await this.db
+      .select()
+      .from(t)
+      .where(eq(t.eventId, eventId))
+      .orderBy(asc(t.createdAt), asc(t.id))
+      .limit(limit + 1)
+      .all();
+    return { payments: rows.slice(0, limit).map(toPayment), truncated: rows.length > limit };
   }
 
   async sentPaybackTotalsByEvent(eventId: number): Promise<Map<number, number>> {
@@ -481,9 +500,13 @@ export class D1EventRepository implements EventRepository {
   }
 
   async createEvent(
-    input: Omit<Event, 'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents' | 'websiteUrl'> & {
+    input: Omit<
+      Event,
+      'id' | 'createdAt' | 'closedAt' | 'defaultAmountCents' | 'websiteUrl' | 'formFields'
+    > & {
       defaultAmountCents?: number | null;
       websiteUrl?: string | null;
+      formFields?: string | null;
       timestamp: string;
     }
   ): Promise<Event> {
@@ -507,6 +530,7 @@ export class D1EventRepository implements EventRepository {
         createdAt: timestamp,
         defaultAmountCents,
         websiteUrl: input.websiteUrl ?? null,
+        formFields: input.formFields ?? null,
       })
       .returning()
       .get();
@@ -625,6 +649,7 @@ function toEvent(row: typeof schema.events.$inferSelect): Event {
     closedAt: row.closedAt,
     defaultAmountCents: row.defaultAmountCents,
     websiteUrl: row.websiteUrl ?? null,
+    formFields: row.formFields ?? null,
   };
 }
 
@@ -644,6 +669,8 @@ function toPayment(row: typeof schema.payments.$inferSelect): Payment {
     payerType: row.payerType as NonNullable<Payment['payerType']> | null,
     payerValue: row.payerValue,
     payerName: row.payerName,
+    payerEmail: row.payerEmail,
+    answers: row.answers,
     createdAt: row.createdAt,
     receivedAt: row.receivedAt,
     receivedBy: row.receivedBy,
