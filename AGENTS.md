@@ -136,6 +136,7 @@ This project uses OpenSpec for change management. All changes are archived:
 68. `add-registrant-details` (14 tasks) — archived 2026-11-17
 69. `send-qr-as-png` (7 tasks) — archived 2026-11-17
 70. `embed-reference-in-qr` (5 tasks) — archived 2026-11-17
+71. `remove-web-admin-pay-button` (5 tasks) — archived 2026-11-17
 
 **Workflow commands:**
 
