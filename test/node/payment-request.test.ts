@@ -52,6 +52,61 @@ describe('createPaymentRequest', () => {
   });
 });
 
+/** Top-level and 26.x / 62.x values of a payload, enough to read the reference and bill number. */
+function fields(tlv: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (let i = 0; i < tlv.length; ) {
+    const len = Number(tlv.slice(i + 2, i + 4));
+    out[tlv.slice(i, i + 2)] = tlv.slice(i + 4, i + 4 + len);
+    i += 4 + len;
+  }
+  return out;
+}
+
+describe('the QR shows the reference to the payee', () => {
+  async function issue(name: string) {
+    const createPayment = vi.fn(async (p: Record<string, unknown>) => p as unknown as Payment);
+    await createPaymentRequest(
+      { createPayment } as unknown as Repository,
+      { ...event, name },
+      {
+        payerType: 'mobile',
+        payerValue: '+6598887777',
+        payerName: null,
+        amountCents: 1250,
+        userId: 42,
+      }
+    );
+    const arg = createPayment.mock.calls[0]![0] as Record<string, unknown>;
+    const payload = fields(arg.qrPayload as string);
+    return {
+      ref: arg.ref as string,
+      billNumber: fields(payload['62']!)['01'],
+      merchantRef: fields(payload['26']!)['05'],
+      description: arg.description,
+    };
+  }
+
+  it('puts the reference, then the event name, in the bill number, and keeps it in 26.05', async () => {
+    const q = await issue('Birthday Party');
+    expect(q.billNumber).toBe(`${q.ref} Birthday Party`);
+    expect(q.merchantRef).toBe(q.ref); // check-in reads it here
+    expect(q.description).toBe('Birthday Party'); // the stored description is unchanged
+  });
+
+  it('cuts a long name at 25 characters but never the reference', async () => {
+    const q = await issue('Annual Company Retreat 2026');
+    expect(q.billNumber).toHaveLength(25);
+    expect(q.billNumber).toBe(`${q.ref} Annual Company Retreat 2026`.slice(0, 25));
+    expect(q.billNumber!.startsWith(q.ref)).toBe(true);
+  });
+
+  it('is the reference alone, with no trailing space, when the name has no printable ASCII', async () => {
+    const q = await issue('生日派对');
+    expect(q.billNumber).toBe(q.ref);
+  });
+});
+
 describe('caption and image lines', () => {
   const payment = (payerName: string | null) =>
     ({

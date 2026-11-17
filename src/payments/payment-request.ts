@@ -2,7 +2,7 @@ import { captionPart } from '../commands/payer-label';
 import { generateRef } from '../db/proxy-validation';
 import type { Event, PayeeType, Payment, Repository } from '../db/repository';
 import { formatCents } from '../sgqr/amount';
-import { buildPayNowPayload } from '../sgqr/paynow';
+import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
 
 export const SHARE_HINT = 'Forward this message to share';
 
@@ -38,7 +38,8 @@ export async function createPaymentRequest(
     amountCents: input.amountCents,
     merchantName: event.name,
     reference: ref,
-    description: event.name,
+    // The bill-number field (62.01) is what banks show the payee: reference first, so a cut only shortens the name
+    description: truncateAnsi(`${ref} ${event.name}`, 25).trim(),
   });
 
   return repo.createPayment({
