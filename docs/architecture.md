@@ -206,7 +206,7 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 
 **`/web_admin` handler**:
 
-- Replies with a link button per event to `${WEB_ADMIN_URL}/events/<ref>` (with `EVENT_APP_NAME`: a Mini App link `t.me/<bot>/<app>?startapp=<ref>`, a 🌐 browser button and Pay); says so when no events exist or the URL isn't configured
+- Replies with a link button per event to `${WEB_ADMIN_URL}/events/<ref>` (with `EVENT_APP_NAME`: a Mini App link `t.me/<bot>/<app>?startapp=<ref>`, and a 🌐 browser button; no Pay button, so the event name keeps more of the row, and the payer link stays in `/web_payment`); says so when no events exist or the URL isn't configured
 
 ### Web Admin (web/, src/web/)
 

@@ -254,8 +254,8 @@ npm run deploy
 **Optional Mini App.** The event page also opens inside Telegram as a Mini App that signs the admin in from Telegram's
 signed launch data (no Login Widget). In BotFather run `/newapp` for the Event bot with the Web App URL
 `https://event-paynow-web.pages.dev/mini`, then set the app's short name as `EVENT_APP_NAME` in `wrangler.toml` and
-redeploy the Worker. `/web_admin` then gives each event a Mini App button, a 🌐 browser button and Pay; without
-`EVENT_APP_NAME` it is as before, and `/events/<ref>` keeps working in a browser.
+redeploy the Worker. `/web_admin` then gives each event a Mini App button, and a 🌐 browser button (the payer link is
+in `/web_payment`); without `EVENT_APP_NAME` each event has the browser button alone, and `/events/<ref>` keeps working in a browser.
 
 Preview deployments cannot sign in (the widget only works on the registered domain).
 

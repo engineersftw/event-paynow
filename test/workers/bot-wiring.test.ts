@@ -180,7 +180,6 @@ describe('bot wiring (src/bot.ts)', () => {
     };
     expect(kb.inline_keyboard.flat()).toEqual([
       { text: '🟢 Web Event', url: 'https://web.test/events/EVT-WEB0021' },
-      { text: '💳 Pay', url: 'https://web.test/pay/EVT-WEB0021' },
     ]);
 
     const appBot = createBot(
@@ -199,7 +198,6 @@ describe('bot wiring (src/bot.ts)', () => {
     expect(appKb.inline_keyboard.flat()).toEqual([
       { text: '🟢 Web Event', url: 'https://t.me/my_bot/admin?startapp=EVT-WEB0021' },
       { text: '🌐', url: 'https://web.test/events/EVT-WEB0021' },
-      { text: '💳 Pay', url: 'https://web.test/pay/EVT-WEB0021' },
     ]);
 
     await bot.handleUpdate(textUpdate(userId, '/web_payment'));
