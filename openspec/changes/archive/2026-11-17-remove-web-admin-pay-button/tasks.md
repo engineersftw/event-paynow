@@ -12,7 +12,7 @@
 
 ## 3. Rollout
 
-- [ ] 3.1 After deploy, send `/web_admin` on a phone: each event row shows the event button and 🌐 only, with the name readable, and `/web_payment` still lists the payer links
+- [x] 3.1 After deploy, send `/web_admin` on a phone: each event row shows the event button and 🌐 only, with the name readable, and `/web_payment` still lists the payer links
 
 ## Workflow follow-up
 
