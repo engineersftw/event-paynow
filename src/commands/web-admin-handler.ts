@@ -40,7 +40,7 @@ export class WebAdminCommandHandler {
       } else {
         keyboard.url(label, page);
       }
-      keyboard.url('💳 Pay', `${base}/pay/${event.ref}`).row();
+      keyboard.row();
     }
     await ctx.reply('🌐 Open an event page (chat admins only):', {
       reply_markup: keyboard,

@@ -27,10 +27,9 @@ describe('WebAdminCommandHandler', () => {
     const kb = ctx.reply.mock.calls[0]![1].reply_markup.inline_keyboard.flat();
     expect(kb).toEqual([
       { text: '🟢 Dinner', url: 'https://web.test/events/AAA' },
-      { text: '💳 Pay', url: 'https://web.test/pay/AAA' },
       { text: '🔴 Trip', url: 'https://web.test/events/BBB' },
-      { text: '💳 Pay', url: 'https://web.test/pay/BBB' },
     ]);
+    expect(JSON.stringify(kb)).not.toContain('/pay/'); // the payer link is in /web_payment
   });
 
   it('adds the Mini App button and a browser button when the Mini App is configured', async () => {
@@ -42,7 +41,6 @@ describe('WebAdminCommandHandler', () => {
     expect(ctx.reply.mock.calls[0]![1].reply_markup.inline_keyboard[0]).toEqual([
       { text: '🟢 Dinner', url: 'https://t.me/my_bot/Admin?startapp=AAA' },
       { text: '🌐', url: 'https://web.test/events/AAA' },
-      { text: '💳 Pay', url: 'https://web.test/pay/AAA' },
     ]);
   });
 
