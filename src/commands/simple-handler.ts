@@ -1,5 +1,5 @@
 import type { Context } from 'grammy';
-import { InlineKeyboard, InputFile } from 'grammy';
+import { InlineKeyboard } from 'grammy';
 import { detectProxyType } from '../db/proxy-validation';
 import {
   SIMPLE_AMOUNT_EDITABLE,
@@ -11,9 +11,9 @@ import {
 } from '../db/usage-repository';
 import { formatCents, parseAmount } from '../sgqr/amount';
 import { buildPayNowPayload, truncateAnsi } from '../sgqr/paynow';
-import { renderQrPng } from '../sgqr/qr-render';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do';
 import { closedRequestTap, SIMPLE_NO_REQUEST } from './closed-request';
+import { qrPhoto } from './qr-photo';
 
 /** Steps of the `simple` flow. */
 const PAYEE = 1;
@@ -263,8 +263,7 @@ export class SimpleCommandHandler {
         ...(description ? { description } : {}),
       });
       const lines = [...(description ? [description] : []), amountLine(amountCents, editable)];
-      const image = await renderQrPng(payload, lines);
-      await ctx.replyWithPhoto(new InputFile(image, 'paynow-qr.bmp'), {
+      await ctx.replyWithPhoto(await qrPhoto(payload, lines), {
         caption: `${lines.join('\n')}\n\nScan with your banking app. Check the payee name before you pay. Send /start for another QR.`,
       });
       sent = true;

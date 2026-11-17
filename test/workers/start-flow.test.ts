@@ -135,7 +135,7 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(stub.sentPhotos).toHaveLength(1);
     const photo = stub.sentPhotos[0]!;
     expect(photo.chatId).toBe(String(userId));
-    expect(photo.filename).toBe('paynow-qr.bmp');
+    expect(photo.filename).toBe('paynow-qr.png');
     expect(photo.bytes[0]).toBe(0x42);
     expect(photo.bytes[1]).toBe(0x4d);
 

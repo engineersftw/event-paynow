@@ -1,5 +1,5 @@
 import type { Context } from 'grammy';
-import { InlineKeyboard, InputFile } from 'grammy';
+import { InlineKeyboard } from 'grammy';
 import { detectProxyType } from '../db/proxy-validation.js';
 import type { EventRepository, PayeeType, Payment, Repository } from '../db/repository.js';
 import {
@@ -8,10 +8,10 @@ import {
   paymentImageLines,
 } from '../payments/payment-request.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
-import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 import { closedRequestTap } from './closed-request.js';
 import { plainPayerLabel } from './payer-label.js';
+import { qrPhoto } from './qr-photo.js';
 
 const MAX_PAYER_NAME = 40;
 
@@ -448,14 +448,14 @@ export class StartCommandHandler {
       createdRef = payment.ref;
 
       // Same name-only rule as the caption: the image is forwarded too
-      const bmpBytes = await renderQrPng(payment.qrPayload, paymentImageLines(event, payment));
+      const photo = await qrPhoto(payment.qrPayload, paymentImageLines(event, payment));
       const caption = paymentCaption(payment);
 
       const keyboard = new InlineKeyboard()
         .text('✓ Received', `mark_received:${payment.ref}`)
         .text('✖ Void', `void:${payment.ref}`);
 
-      await ctx.replyWithPhoto(new InputFile(bmpBytes, 'paynow-qr.bmp'), {
+      await ctx.replyWithPhoto(photo, {
         caption,
         reply_markup: keyboard,
       });

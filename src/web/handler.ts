@@ -388,12 +388,14 @@ async function createPayerPayment(
     amountCents,
     userId: access.userId ?? 0,
   });
-  const bmp = await renderQrPng(payment.qrPayload, paymentImageLines(access.event, payment));
+  const png = await bmpToPng(
+    await renderQrPng(payment.qrPayload, paymentImageLines(access.event, payment))
+  );
   // Private copy only for signed-in users; best-effort (they may never have started the bot)
   const dm =
     access.userId === null
       ? undefined
-      : await sendPaymentDm(env.TELEGRAM_BOT_TOKEN, access.userId, payment, bmp, fetchFn);
+      : await sendPaymentDm(env.TELEGRAM_BOT_TOKEN, access.userId, payment, png, fetchFn);
   return json(
     {
       payment: {
@@ -401,7 +403,7 @@ async function createPayerPayment(
         amountCents: payment.amountCents,
         status: payment.status,
         payerName: payment.payerName ?? null,
-        qr: pngDataUrl(await bmpToPng(bmp)),
+        qr: pngDataUrl(png),
         ...(dm === undefined ? {} : { dm }),
       },
     },
@@ -581,8 +583,10 @@ async function createPaymentRequestRoute(
   });
 
   // Same QR as the page shows, posted to the event's chat; a failure keeps the payment
-  const bmp = await renderQrPng(payment.qrPayload, paymentImageLines(event, payment));
-  const posted = await postPaymentQr(env.TELEGRAM_BOT_TOKEN, event, payment, bmp, fetchFn);
+  const png = await bmpToPng(
+    await renderQrPng(payment.qrPayload, paymentImageLines(event, payment))
+  );
+  const posted = await postPaymentQr(env.TELEGRAM_BOT_TOKEN, event, payment, png, fetchFn);
   return json({ payment: { ref: payment.ref, amountCents, status: payment.status, posted } }, 201);
 }
 

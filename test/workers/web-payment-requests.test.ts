@@ -121,6 +121,11 @@ describe('create a payment request', () => {
     expect(raw).not.toContain('98887777');
     const { payment } = JSON.parse(raw) as { payment: { ref: string; posted: boolean } };
     expect(payment.posted).toBe(true);
+    const photo = tg.posts[0]!.get('photo') as File; // a PNG, as the bots send it
+    expect(photo.name).toBe('paynow-qr.png');
+    expect(new Uint8Array(await photo.arrayBuffer()).slice(1, 4)).toEqual(
+      new Uint8Array([0x50, 0x4e, 0x47])
+    );
 
     const stored = (await repo.getPaymentByRef(payment.ref))!;
     expect(stored).toMatchObject({
