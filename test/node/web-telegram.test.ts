@@ -42,7 +42,8 @@ describe('postPaymentQr', () => {
       { text: '✖ Void', callback_data: 'void:ABC123DEFG' },
     ]);
     const photo = form.get('photo') as File;
-    expect(photo.name).toBe('paynow-qr.bmp');
+    expect(photo.name).toBe('paynow-qr.png');
+    expect(photo.type).toBe('image/png');
     expect(photo.size).toBe(3);
   });
 

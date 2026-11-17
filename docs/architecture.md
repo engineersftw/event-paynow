@@ -176,7 +176,7 @@ A hidden command in Event PayNow Bot, answered only in private chats and only fo
 - Fetches open events for the chat+topic (1 event auto-advances, N shows a picker, 0 prompts `/init`)
 - Steps: event → payer PayNow proxy (required) → payer display name (optional, skippable) → amount → Confirm/Cancel summary (event, payer, pay-to, amount)
 - Nothing is persisted or rendered until Confirm, which claims the conversation through the DO's atomic `/claim`
-- Creates the payment (payee and payer snapshotted, event name as description), renders the SGQR PayNow QR (BMP, PayNow logo, detail text band) and uploads it via `sendPhoto`
+- Creates the payment (payee and payer snapshotted, event name as description), renders the SGQR PayNow QR (PayNow logo, detail text band; uploaded as a PNG through `qrPhoto`, converted from the renderer's BMP) via `sendPhoto`
 - If the QR cannot be delivered after the payment row exists, the payment is voided
 - Caption: `description / SGD amount / ref / Payer: <name> / hint` (name only, never the number)
 - QR photo carries ✓ Received and ✖ Void; both replace the photo with a text status line
@@ -415,7 +415,7 @@ Handler claims the conversation (DO POST /claim); a second tap gets 409 and does
   ↓
 Handler creates the payment (status 'pending', payee and payer snapshotted)
   ↓
-Handler builds the SGQR payload, renders the BMP (logo + detail text) and sends it with ✓ Received / ✖ Void
+Handler builds the SGQR payload, renders the QR (logo + detail text) and sends it as a PNG with ✓ Received / ✖ Void
   ↓  (if delivery fails, the new payment is voided)
 User taps ✓ Received  →  pending-only CAS to 'received', photo replaced by a status line
 User taps ✖ Void      →  pending-only CAS to 'voided', photo replaced by a 🚫 line

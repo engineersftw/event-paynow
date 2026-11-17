@@ -1,10 +1,9 @@
 import type { Context } from 'grammy';
-import { InlineKeyboard, InputFile } from 'grammy';
+import { InlineKeyboard } from 'grammy';
 import { createPaybackFor } from '../db/payback-service.js';
 import { detectProxyType } from '../db/proxy-validation.js';
 import type { PayeeType, Payment, Repository } from '../db/repository.js';
 import { formatCents, parseAmount } from '../sgqr/amount.js';
-import { renderQrPng } from '../sgqr/qr-render.js';
 import type { ConversationDO, ConversationState } from '../worker/conversation-do.js';
 import { closedRequestTap } from './closed-request.js';
 import {
@@ -15,6 +14,7 @@ import {
   recipientName,
 } from './payer-label.js';
 import { ownerOnly, type PaymentAccess } from './payment-access.js';
+import { qrPhoto } from './qr-photo.js';
 
 /**
  * /payback command handler - initiates payback flow for a payment
@@ -507,13 +507,13 @@ export class PaybackCommandHandler {
       }
 
       // Success: row recorded inside the transaction — deliver the QR image
-      const qrBytes = await renderQrPng(result.payback.qrPayload, [
+      const photo = await qrPhoto(result.payback.qrPayload, [
         `Payback for ${paymentRef}`,
         `SGD ${formatCents(result.payback.amountCents)}`,
         result.payback.ref,
         ...captionPart('To', recipient),
       ]);
-      await ctx.replyWithPhoto(new InputFile(qrBytes, 'payback-qr.bmp'), {
+      await ctx.replyWithPhoto(photo, {
         // Name only (no number), segment omitted when the recipient has no known name
         caption: [
           `Payback for ${paymentRef}`,

@@ -47,6 +47,7 @@ function peek(key: string) {
 function decode() {
   expect(stub.sentPhotos).toHaveLength(1);
   const photo = stub.sentPhotos[0]!;
+  expect(photo.filename).toBe('paynow-qr.png');
   const { data, width, height } = bmpToRgba(photo.bytes);
   const result = jsQR(data, width, height);
   expect(result).not.toBeNull();

@@ -115,7 +115,7 @@ describe('payback QR end-to-end (task 7.3)', () => {
     // --- sendPhoto captured -------------------------------------------------
     expect(stub.sentPhotos).toHaveLength(1);
     const photo = stub.sentPhotos[0]!;
-    expect(photo.filename).toBe('payback-qr.bmp');
+    expect(photo.filename).toBe('paynow-qr.png');
 
     const captionParts = photo.caption.split(' / ');
     expect(captionParts[0]).toBe('Payback for PAY73001');

@@ -8,7 +8,7 @@ A Telegram bot on Cloudflare Workers that generates SGQR PayNow QR codes for col
 
 - **Event-based payments**: Create events with a shared PayNow payee; generate payment QRs per event
 - **Payer details**: `/start` takes the payer's PayNow proxy (required) and a display name (optional), then shows a Confirm/Cancel summary before anything is created
-- **SGQR PayNow QR codes**: EMVCo-compliant payloads with CRC16 checksum, rendered as BMP images with the payment details printed below the QR (names only, never PayNow numbers)
+- **SGQR PayNow QR codes**: EMVCo-compliant payloads with CRC16 checksum, rendered as images (sent to Telegram as PNG) with the payment details printed below the QR (names only, never PayNow numbers)
 - **Payment tracking**: List payments; mark received or void a pending request from the QR message; view details with payback history; per-payment amounts and event totals are net of **sent** paybacks, with the paid-back total shown (in the bot and on the web page)
 - **Payback support**: Bounded paybacks (pending + sent cannot exceed the original payment) with an SGQR QR for the payer; confirm a payback as sent or cancel it; the stored payer is proposed as the recipient and can be changed per payback
 - **Chat admins act on any payment**: administrators of an event's chat can view, receive, void, pay back and mark paybacks sent/cancelled on payments they did not create (checked live with `getChatMember`), and `/payments` shows them every payment of the event; ordinary members keep owner-only access

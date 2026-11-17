@@ -6,14 +6,14 @@ async function sendQrPhoto(
   botToken: string,
   fields: Record<string, string>,
   payment: Payment,
-  bmp: Uint8Array,
+  png: Uint8Array,
   fetchFn: typeof fetch
 ): Promise<boolean> {
   try {
     const form = new FormData();
     for (const [key, value] of Object.entries(fields)) form.append(key, value);
     form.append('caption', paymentCaption(payment));
-    form.append('photo', new Blob([bmp], { type: 'image/bmp' }), 'paynow-qr.bmp');
+    form.append('photo', new Blob([png], { type: 'image/png' }), 'paynow-qr.png');
 
     const res = await fetchFn(`https://api.telegram.org/bot${botToken}/sendPhoto`, {
       method: 'POST',
@@ -34,7 +34,7 @@ export function postPaymentQr(
   botToken: string,
   event: Pick<Event, 'chatId' | 'topicId'>,
   payment: Payment,
-  bmp: Uint8Array,
+  png: Uint8Array,
   fetchFn: typeof fetch = fetch
 ): Promise<boolean> {
   const fields: Record<string, string> = {
@@ -49,7 +49,7 @@ export function postPaymentQr(
     }),
   };
   if (event.topicId !== 0) fields.message_thread_id = String(event.topicId);
-  return sendQrPhoto(botToken, fields, payment, bmp, fetchFn);
+  return sendQrPhoto(botToken, fields, payment, png, fetchFn);
 }
 
 /**
@@ -61,8 +61,8 @@ export function sendPaymentDm(
   botToken: string,
   userId: number,
   payment: Payment,
-  bmp: Uint8Array,
+  png: Uint8Array,
   fetchFn: typeof fetch = fetch
 ): Promise<boolean> {
-  return sendQrPhoto(botToken, { chat_id: String(userId) }, payment, bmp, fetchFn);
+  return sendQrPhoto(botToken, { chat_id: String(userId) }, payment, png, fetchFn);
 }
