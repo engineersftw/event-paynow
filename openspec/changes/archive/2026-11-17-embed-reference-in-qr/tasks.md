@@ -12,7 +12,7 @@
 
 ## 3. Rollout
 
-- [ ] 3.1 After deploy, create a payment with `/start` and scan it with the banking app: the chip or reference line under the amount reads the reference then the event name; complete a test payment and confirm the reference shows in the app's transaction history or statement, and that a check-in scan of the new QR still works
+- [x] 3.1 After deploy, create a payment with `/start` and scan it with the banking app: the chip or reference line under the amount reads the reference then the event name; complete a test payment and confirm the reference shows in the app's transaction history or statement, and that a check-in scan of the new QR still works
 
 ## Workflow follow-up
 

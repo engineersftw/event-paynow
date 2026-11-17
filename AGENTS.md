@@ -135,6 +135,7 @@ This project uses OpenSpec for change management. All changes are archived:
 67. `add-web-admin-mini-app` (13 tasks) — archived 2026-11-16
 68. `add-registrant-details` (14 tasks) — archived 2026-11-17
 69. `send-qr-as-png` (7 tasks) — archived 2026-11-17
+70. `embed-reference-in-qr` (5 tasks) — archived 2026-11-17
 
 **Workflow commands:**
 
