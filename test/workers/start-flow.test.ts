@@ -163,6 +163,8 @@ describe('/start end-to-end (task 5.3 stage a)', () => {
     expect(payload).toContain('03010'); // 26.03=0 amount not editable
     expect(payload).toContain('540512.50'); // tag 54 amount
     expect(payload).toContain(ref); // 26.05 embedded reference
+    const bill = `${ref} Dinner split`.slice(0, 25);
+    expect(payload).toContain(`01${String(bill.length).padStart(2, '0')}${bill}`); // 62.01: reference first, as the bank shows it
 
     // --- the persisted payment row matches the delivered QR ---------------
     const payment = await repo.getPaymentByRef(ref);

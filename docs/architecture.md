@@ -349,7 +349,7 @@ paybacks (
 
 - **TLV encoder** (`index.ts`): Encodes EMVCo TLV fields
 - **CRC16 calculator** (`index.ts`): CRC16-CCITT-FALSE checksum
-- **PayNow template builder** (`paynow.ts`): Builds tag 26 (PayNow merchant account)
+- **PayNow template builder** (`paynow.ts`): Builds tag 26 (PayNow merchant account); for an event payment `createPaymentRequest` sets the bill number (62.01, the field banks show the payee) to the payment reference followed by the event name, cut at 25 characters, and keeps the reference in 26.05 for check-in
 - **Amount parser** (`amount.ts`): Converts dollars to integer cents
 - **Proxy validation** (`proxy-validation.ts`): Validates mobile/UEN format
 - **Ref generator** (`proxy-validation.ts`): 10-char base32 reference
