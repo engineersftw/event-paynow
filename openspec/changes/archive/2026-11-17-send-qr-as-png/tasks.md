@@ -17,7 +17,7 @@
 
 ## 4. Rollout
 
-- [ ] 4.1 After deploy, in a real chat: create a payment with `/start`, a payback, a Simple bot QR, and a payment from the web payer page signed in (the direct message) and from the admin page (the chat post); each QR arrives as a photo and scans in a banking app
+- [x] 4.1 After deploy, in a real chat: create a payment with `/start`, a payback, a Simple bot QR, and a payment from the web payer page signed in (the direct message) and from the admin page (the chat post); each QR arrives as a photo and scans in a banking app
 
 ## Workflow follow-up
 

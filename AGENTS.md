@@ -134,6 +134,7 @@ This project uses OpenSpec for change management. All changes are archived:
 66. `explain-expired-requests` (11 tasks) — archived 2026-11-16
 67. `add-web-admin-mini-app` (13 tasks) — archived 2026-11-16
 68. `add-registrant-details` (14 tasks) — archived 2026-11-17
+69. `send-qr-as-png` (7 tasks) — archived 2026-11-17
 
 **Workflow commands:**
 
