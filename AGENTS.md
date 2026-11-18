@@ -183,6 +183,14 @@ This project uses OpenSpec for change management. All changes are archived:
 - **No Node APIs in core** — `src/sgqr/` must run in Workers isolate.
 - **Names in messages** — captions and the text lines that replace photos carry the payer name only (`Payer: <name>` / `To: <name>`, segment omitted when unknown) and never a PayNow number, because they get forwarded; owner-facing messages show `Name (proxy)`. A payback recipient has a name only if its proxy equals the payment's stored payer (`recipientName()` in `src/commands/payer-label.ts`). Use `payerLabel` (Markdown-escaped) only with `parse_mode: 'Markdown'`, `plainPayerLabel` otherwise.
 
+## Code Review
+
+Any reviewer, human or AI agent, follows `docs/code-review.md`: how to review, the finding format,
+and this project's own rules (names only, integer cents, backward-compatible migrations, private
+registrant details, the Pages bundle boundary). Tool-specific wrappers only point to it; Claude
+Code's is the `code-reviewer` subagent in `.claude/agents/code-reviewer.md`, which runs on a
+different model from the main session (Sonnet) and cannot edit files.
+
 ## Blocked Tasks
 
 (none — task 1.3 completed: D1 provisioned, BotFather commands registered, live webhook set, all 29 tasks done)
