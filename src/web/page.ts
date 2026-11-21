@@ -749,8 +749,8 @@ ${cta}
 <h2>Get started</h2>
 <ul>
 <li>Message the bot, or add it to your Telegram group.</li>
-<li><code>/split</code> for an equal or custom split.</li>
-<li><code>/split_custom</code> to go straight to custom amounts.</li>
+<li><code>/split_even</code> for an even split.</li>
+<li><code>/split_custom</code> for custom amounts per person.</li>
 <li><code>/split_receipt</code> to start from a photo of the receipt.</li>
 </ul>
 <h2>What it keeps</h2>

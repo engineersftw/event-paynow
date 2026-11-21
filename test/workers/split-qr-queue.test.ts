@@ -255,7 +255,7 @@ describe('Split_PayNow_Bot QR queue: consumer', () => {
     expect(m.acked).toBe(true);
     expect(m.retried).toBeUndefined();
     expect(stub.lastText()).toBe(
-      'Could not send the QR for SGD 30.00 Bob. Please send /split to try again.'
+      'Could not send the QR for SGD 30.00 Bob. Please send /split_even or /split_custom to try again.'
     );
     expect(errors.join('\n')).toContain('500');
     expect(errors.join('\n')).not.toContain('91234567');
