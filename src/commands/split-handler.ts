@@ -1139,7 +1139,9 @@ export class SplitCommandHandler {
               ? HOW
               : ASSIGN
             : STEP_OF_FIELD[pick as Field];
-      const context = { ...c, amending: pick };
+      // A new list asks about its own leftover again rather than reusing the old choice
+      const { leftover, ...withoutLeftover } = c;
+      const context = { ...(pick === 'split' ? withoutLeftover : c), amending: pick };
       await this.setState({ flow: 'split', step: first, context });
       await this.askStep(ctx, first, context);
     } else if (data === 'split_confirm') {
