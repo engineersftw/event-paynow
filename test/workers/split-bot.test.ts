@@ -88,16 +88,13 @@ describe('Split_PayNow_Bot in a private chat', () => {
   it('splits 187.40 by 4 into a fixed 46.85 QR with no payee number in the caption', async () => {
     const u = uid++;
     const b = bot();
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     await say(b, u, '91234567');
     expect(stub.lastText()).toContain('How much is the bill');
     await say(b, u, '187.40');
     expect(stub.lastText()).toContain('Add a short description'); // right after the total
     await say(b, u, 'Dinner');
-    expect(stub.lastText()).toContain('How do you want to split');
-    expect(buttons()).toEqual(['split_mode:equal', 'split_mode:custom']);
-    await tap(b, u, 'split_mode:equal');
-    expect(stub.lastText()).toContain('How many people');
+    expect(stub.lastText()).toContain('How many people'); // no question about the split type
     expect(buttons()).toBeUndefined(); // no member-count button in a private chat
     await say(b, u, '4');
 
@@ -122,11 +119,10 @@ describe('Split_PayNow_Bot in a private chat', () => {
   it('rounds up and shows the over-collection; skip leaves the description out', async () => {
     const u = uid++;
     const b = bot();
-    await say(b, u, '/start');
+    await say(b, u, '/split_even');
     await say(b, u, '201900000A');
     await say(b, u, '100');
     await tap(b, u, 'split_skip_description');
-    await tap(b, u, 'split_mode:equal');
     await say(b, u, '3');
     expect(stub.lastText()).toContain('Each share: SGD 33.34');
     expect(stub.lastText()).toContain('SGD 0.02 over');
@@ -138,7 +134,7 @@ describe('Split_PayNow_Bot in a private chat', () => {
   it('re-asks on bad input and a double Confirm sends one QR; Cancel sends none', async () => {
     const u = uid++;
     const b = bot();
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     await say(b, u, '12345');
     expect(stub.lastText()).toContain('not a valid payee');
     await say(b, u, '91234567');
@@ -148,7 +144,6 @@ describe('Split_PayNow_Bot in a private chat', () => {
     await say(b, u, 'x'.repeat(26));
     expect(stub.lastText()).toContain('25 characters');
     await tap(b, u, 'split_skip_description');
-    await tap(b, u, 'split_mode:equal');
     for (const v of ['1', '101', 'x', '2.5']) {
       await say(b, u, v);
       expect(stub.lastText()).toContain('2 to 100');
@@ -157,16 +152,15 @@ describe('Split_PayNow_Bot in a private chat', () => {
     await Promise.all([tap(b, u, 'split_confirm'), tap(b, u, 'split_confirm')]);
     expect(stub.sentPhotos).toHaveLength(1);
 
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     await say(b, u, '91234567');
     await say(b, u, '10');
     await tap(b, u, 'split_skip_description');
-    await tap(b, u, 'split_mode:equal');
     await say(b, u, '2');
     stub.reset();
     await tap(b, u, 'split_cancel');
     expect(stub.sentPhotos).toHaveLength(0);
-    expect(stub.lastText()).toContain('/split');
+    expect(stub.lastText()).toContain('/split_even');
     expect((await peek(`split-${u}`)).flow).toBe('idle');
   });
 });
@@ -176,14 +170,13 @@ describe('Split_PayNow_Bot in a group', () => {
     const chat = -uid++;
     const owner = uid++;
     const b = bot();
-    await gsay(b, chat, owner, '/split');
+    await gsay(b, chat, owner, '/split_even');
     await gsay(b, chat, owner, '91234567');
     const first = stub.sentMessages.at(-1)!;
     expect(first.text).toContain('How much is the bill');
     expect(first.replyMarkup).toMatchObject({ force_reply: true, selective: true });
     await gsay(b, chat, owner, '120');
     await gtap(b, chat, owner, 'split_skip_description');
-    await gtap(b, chat, owner, 'split_mode:equal');
     expect(buttons()).toEqual(['split_people:6']);
     await gtap(b, chat, owner, 'split_people:6');
     expect(stub.deletedMessages).toHaveLength(1);
@@ -201,22 +194,20 @@ describe('Split_PayNow_Bot in a group', () => {
     const owner = uid++;
     const b = bot();
     memberCount = 'nope';
-    await gsay(b, chat, owner, '/split');
+    await gsay(b, chat, owner, '/split_even');
     await gsay(b, chat, owner, '91234567');
     await gsay(b, chat, owner, '50');
     await gtap(b, chat, owner, 'split_skip_description');
-    await gtap(b, chat, owner, 'split_mode:equal');
     expect(buttons()).toBeUndefined();
     await gsay(b, chat, owner, '4');
     expect(stub.lastText()).toContain('Please check the split');
 
     memberCount = 2; // only the bot and one person: below 2 people
     const chat2 = -uid++;
-    await gsay(b, chat2, owner, '/split');
+    await gsay(b, chat2, owner, '/split_even');
     await gsay(b, chat2, owner, '91234567');
     await gsay(b, chat2, owner, '50');
     await gtap(b, chat2, owner, 'split_skip_description');
-    await gtap(b, chat2, owner, 'split_mode:equal');
     expect(buttons()).toBeUndefined();
   });
 
@@ -225,7 +216,7 @@ describe('Split_PayNow_Bot in a group', () => {
     const owner = uid++;
     const other = uid++;
     const b = bot();
-    await gsay(b, chat, owner, '/split');
+    await gsay(b, chat, owner, '/split_even');
     await gsay(b, chat, owner, '91234567');
     stub.reset();
     await gsay(b, chat, other, '99');
@@ -233,7 +224,6 @@ describe('Split_PayNow_Bot in a group', () => {
     expect(stub.sentMessages).toHaveLength(0);
     await gsay(b, chat, owner, '60');
     await gtap(b, chat, owner, 'split_skip_description');
-    await gtap(b, chat, owner, 'split_mode:equal');
     await gsay(b, chat, owner, '3');
     stub.reset();
     await gtap(b, chat, other, 'split_confirm');
@@ -260,11 +250,10 @@ describe('Split_PayNow_Bot in a group', () => {
               : stub.fetch(url, init),
       },
     });
-    await gsay(b, chat, owner, '/split');
+    await gsay(b, chat, owner, '/split_even');
     await gsay(b, chat, owner, '91234567');
     await gsay(b, chat, owner, '40');
     await gtap(b, chat, owner, 'split_skip_description');
-    await gtap(b, chat, owner, 'split_mode:equal');
     await gsay(b, chat, owner, '2');
     expect(stub.lastText()).toContain('Please check the split');
   });
@@ -286,11 +275,10 @@ describe('Split_PayNow_Bot a split that is no longer open', () => {
       | undefined;
   };
   async function toSummary(b: B, u: number) {
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     await say(b, u, '91234567');
     await say(b, u, '100');
     await tap(b, u, 'split_skip_description');
-    await tap(b, u, 'split_mode:equal');
     await say(b, u, '4');
     expect(buttons()).toEqual(['split_confirm', 'split_amend', 'split_cancel']);
   }
@@ -304,7 +292,7 @@ describe('Split_PayNow_Bot a split that is no longer open', () => {
     const popup = stub.callbackAlerts.at(-1)!;
     expect(popup).toContain(CLOSED);
     expect(popup).toContain('timed out after 30 minutes');
-    expect(popup).toContain('Send /split to start a new one');
+    expect(popup).toContain('Send /split_even or /split_custom to start a new one');
     expect(stub.callbackAnswers.at(-1)).toBe(popup);
     expect(lastKeyboard()?.inline_keyboard.flat()).toEqual([]); // no buttons left
     expect(stub.sentPhotos).toHaveLength(0); // nothing was created
@@ -331,7 +319,7 @@ describe('Split_PayNow_Bot a split that is no longer open', () => {
     const u = uid++;
     const b = bot();
     await toSummary(b, u);
-    await tap(b, u, 'split_mode:custom'); // a button of an earlier step
+    await tap(b, u, 'split_skip_description'); // a button of an earlier step
     expect(stub.callbackAnswers.at(-1)).toBe('That step is over.');
     expect(stub.callbackAlerts).toEqual([]);
     expect(buttons()).toEqual(['split_confirm', 'split_amend', 'split_cancel']); // still tappable
@@ -352,14 +340,14 @@ describe('Split_PayNow_Bot a split that is no longer open', () => {
   it('replies once to a typed answer in a private chat when no split is open', async () => {
     const u = uid++;
     const b = bot();
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     await say(b, u, '91234567'); // now waiting for the total
     await timeOut(`split-${u}`);
     const sent = stub.sentMessages.length;
     await say(b, u, '100');
     expect(stub.sentMessages).toHaveLength(sent + 1);
     expect(stub.lastText()).toBe(
-      'No split is open. Send /split to start one. (A split is forgotten after 30 minutes without an answer.)'
+      'No split is open. Send /split_even or /split_custom to start one. (A split is forgotten after 30 minutes without an answer.)'
     );
     await say(b, u, '/help'); // a command is not answered by the hint
     expect(stub.lastText()).not.toContain('No split is open');
@@ -377,7 +365,7 @@ describe('Split_PayNow_Bot a split that is no longer open', () => {
   it('still reads a typed answer as the answer while a split is open', async () => {
     const u = uid++;
     const b = bot();
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     await say(b, u, '91234567');
     await say(b, u, '100');
     expect(stub.lastText()).toContain('Add a short description');
@@ -387,7 +375,7 @@ describe('Split_PayNow_Bot a split that is no longer open', () => {
   it('keeps a split open for 30 minutes outside the claiming', async () => {
     const u = uid++;
     const b = bot();
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     await say(b, u, '91234567');
     expect(((await peek(`split-${u}`)) as unknown as { idleMs?: number }).idleMs).toBe(
       30 * 60 * 1000
@@ -408,11 +396,10 @@ describe('Split_PayNow_Bot custom amounts', () => {
       return { payload: jsQR(data, width, height)!.data, caption: photo.caption ?? '' };
     });
   async function toPayee(b: B, u: number, list: string, total = '100') {
-    await say(b, u, '/split');
+    await say(b, u, '/split_custom');
     await say(b, u, '91234567');
     await say(b, u, total);
     await tap(b, u, 'split_skip_description');
-    await tap(b, u, 'split_mode:custom');
     expect(stub.lastText()).toContain('one person per line');
     await say(b, u, list);
   }
@@ -491,15 +478,14 @@ describe('Split_PayNow_Bot custom amounts', () => {
       expect(stub.sentMessages.some((m) => m.text.includes('Is this payee you?'))).toBe(false);
       return u;
     };
-    await first('/split');
+    await first('/split_even');
     await first('/split_custom');
-    await first('/start');
   });
 
   it('accepts an edited payee while the total is awaited and keeps waiting for the total', async () => {
     const u = uid++;
     const b = bot();
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     const payeeId = upd;
     await say(b, u, '91234567');
     expect(stub.lastText()).toContain('How much is the bill');
@@ -624,11 +610,10 @@ describe('Split_PayNow_Bot amend and edited messages', () => {
 
   /** Equal split of `total` between 2 people, payee 91234567, description skipped: at the summary. */
   async function toSummary(b: B, u: number, total = '100') {
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     await say(b, u, '91234567');
     const totalId = await sayId(b, u, total);
     await tap(b, u, 'split_skip_description');
-    await tap(b, u, 'split_mode:equal');
     await say(b, u, '2');
     return { totalId };
   }
@@ -691,18 +676,31 @@ describe('Split_PayNow_Bot amend and edited messages', () => {
     expect(stub.lastText()).toContain('Description: Lunch');
   });
 
-  it('Amend the split type: equal becomes custom', async () => {
+  it('Amend → Split keeps the kind of split: an even split asks for the people again', async () => {
     const u = uid++;
     const b = bot();
     await toSummary(b, u);
     await tap(b, u, 'split_amend');
     await tap(b, u, 'split_pick:split');
-    expect(buttons()).toEqual(['split_mode:equal', 'split_mode:custom', 'split_keep']);
-    await tap(b, u, 'split_mode:custom');
-    expect(stub.lastText()).toContain('one person per line');
+    expect(stub.lastText()).toContain('How many people');
+    expect(buttons()).toEqual(['split_keep']); // no switch to custom amounts
+    await say(b, u, '5');
+    expect(stub.lastText()).toContain('between 5 people');
+  });
+
+  it('Amend → Split on a custom split asks for the list again', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/split_custom');
+    await say(b, u, '91234567');
+    await say(b, u, '100');
+    await tap(b, u, 'split_skip_description');
     await say(b, u, 'Ann 60\nBob 40');
-    expect(stub.lastText()).toContain('Ann: SGD 60.00');
-    expect(stub.lastText()).not.toContain('Each share');
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:split');
+    expect(stub.lastText()).toContain('one person per line');
+    await say(b, u, 'Ann 50\nBob 50');
+    expect(stub.lastText()).toContain('Ann: SGD 50.00');
   });
 
   it('a total that breaks the list asks for the list again; a gap asks about the leftover; a stored choice is kept', async () => {
@@ -746,7 +744,7 @@ describe('Split_PayNow_Bot amend and edited messages', () => {
   it('editing an earlier answer while a later question is open says Updated and does not repeat it', async () => {
     const u = uid++;
     const b = bot();
-    await say(b, u, '/split');
+    await say(b, u, '/split_even');
     await say(b, u, '91234567');
     const totalId = await sayId(b, u, '100');
     expect(stub.lastText()).toContain('Add a short description');
@@ -755,7 +753,6 @@ describe('Split_PayNow_Bot amend and edited messages', () => {
     expect(stub.sentMessages.length).toBe(before + 1);
     expect(stub.lastText()).toBe('Updated.');
     await tap(b, u, 'split_skip_description');
-    await tap(b, u, 'split_mode:equal');
     await say(b, u, '2');
     expect(stub.lastText()).toContain('Each share: SGD 100.00');
   });
@@ -782,13 +779,12 @@ describe('Split_PayNow_Bot amend and edited messages', () => {
     const owner = uid++;
     const other = uid++;
     const b = bot();
-    await gsay(b, chat, owner, '/split');
+    await gsay(b, chat, owner, '/split_even');
     const payeeId = upd;
     await gsay(b, chat, owner, '91234567');
     const totalId = upd;
     await gsay(b, chat, owner, '60');
     await gtap(b, chat, owner, 'split_skip_description');
-    await gtap(b, chat, owner, 'split_mode:equal');
     await gsay(b, chat, owner, '3');
     expect(summaryText().text).toContain('…4567');
 
@@ -903,7 +899,7 @@ describe('Split_PayNow_Bot mentions', () => {
 });
 
 describe('Split_PayNow_Bot /start and /forget', () => {
-  it('/start in a private chat begins a split and remembers nothing', async () => {
+  it('/start in a private chat shows the three commands and starts nothing', async () => {
     const b = bot();
     const u = uid++;
     await b.handleUpdate(
@@ -915,7 +911,37 @@ describe('Split_PayNow_Bot /start and /forget', () => {
         return x as unknown as Update;
       })()
     );
-    expect(stub.lastText()).toContain('Who should be paid');
+    const help = stub.lastText();
+    for (const c of ['/split_even', '/split_custom', '/split_receipt']) expect(help).toContain(c);
+    expect(help).not.toMatch(/\/split(?![_a-z])/);
+    expect((await peek(`split-${u}`)).flow).not.toBe('split');
+  });
+
+  it('/start in a group says nothing', async () => {
+    const b = bot();
+    const chat = -uid++;
+    const before = stub.sentMessages.length;
+    await gsay(b, chat, uid++, '/start');
+    expect(stub.sentMessages.length).toBe(before);
+  });
+
+  it('/split is no longer a command: no reply and no split', async () => {
+    const b = bot();
+    const u = uid++;
+    const before = stub.sentMessages.length;
+    await say(b, u, '/split');
+    expect(stub.sentMessages.length).toBe(before);
+    expect((await peek(`split-${u}`)).flow).not.toBe('split');
+  });
+
+  it('an old Equally / Custom amounts button starts nothing', async () => {
+    const b = bot();
+    const u = uid++;
+    await say(b, u, '/split_even');
+    await say(b, u, '91234567');
+    await tap(b, u, 'split_mode:custom');
+    expect((await peek(`split-${u}`)).context.mode).toBe('equal');
+    expect(stub.sentPhotos).toHaveLength(0);
   });
 
   it('/forget is no longer a command: the bot does not answer it', async () => {
@@ -1203,7 +1229,7 @@ describe('Split_PayNow_Bot receipt scan', () => {
   it('reads a photo sent at the total prompt, and Type the total instead goes back to a normal split', async () => {
     const org = uid++;
     const b = receiptBot();
-    await say(b, org, '/split');
+    await say(b, org, '/split_even');
     await say(b, org, '91234567');
     await photo(b, org);
     expect(stub.lastText()).toContain('I read this receipt');
@@ -1213,7 +1239,7 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(stub.lastText()).toContain('Add a short description');
     expect(stub.lastText()).not.toContain('to use'); // a typed total has no receipt to take a default from
     await tap(b, org, 'split_skip_description');
-    expect(stub.lastText()).toContain('How do you want to split');
+    expect(stub.lastText()).toContain('Send who owes what'); // the typed total continues as a custom split
   });
 
   it('warns when the items exceed the total, and says so when a photo cannot be read', async () => {
@@ -1239,7 +1265,7 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(stub.lastText()).toContain('could not use its answer (reply)');
 
     // at the total prompt a failed photo just asks again, with no extra buttons
-    await say(b, org, '/split');
+    await say(b, org, '/split_even');
     await say(b, org, '91234567');
     await photo(b, org);
     expect(stub.lastText()).toContain('(reply)');
@@ -1634,11 +1660,10 @@ describe("Split_PayNow_Bot the organiser's own share", () => {
   it('equal split: everyone pays the same, with one shared QR', async () => {
     const user = uid++;
     const b = bot();
-    await say(b, user, '/split');
+    await say(b, user, '/split_even');
     await say(b, user, '91234567');
     await say(b, user, '100');
     await tap(b, user, 'split_skip_description');
-    await tap(b, user, 'split_mode:equal');
     await say(b, user, '4');
     expect(stub.lastText()).toContain('Each share: SGD 25.00 (everyone pays this)');
     stub.reset();
@@ -1712,11 +1737,10 @@ describe('Split_PayNow_Bot /stats and counting', () => {
       const u = uid++;
       const b = bot();
       const before = await snap();
-      await say(b, u, '/split');
+      await say(b, u, '/split_even');
       await say(b, u, '91234567');
       await say(b, u, '100');
       await tap(b, u, 'split_skip_description');
-      await tap(b, u, 'split_mode:equal');
       await say(b, u, '4');
       expect(diff(before, await snap()).confirmed).toBe(0); // nothing counted before Confirm
       await tap(b, u, 'split_confirm');
@@ -1754,11 +1778,10 @@ describe('Split_PayNow_Bot /stats and counting', () => {
       const u = uid++;
       const b = bot();
       await env.paynow_db.prepare('ALTER TABLE usage_counters RENAME TO usage_counters_off').run();
-      await say(b, u, '/split');
+      await say(b, u, '/split_even');
       await say(b, u, '91234567');
       await say(b, u, '10');
       await tap(b, u, 'split_skip_description');
-      await tap(b, u, 'split_mode:equal');
       await say(b, u, '2');
       await tap(b, u, 'split_confirm');
       expect(stub.sentPhotos).toHaveLength(1);
@@ -1782,10 +1805,9 @@ describe('Split_PayNow_Bot /stats and counting', () => {
     it('records nothing but a day, a metric and a number', async () => {
       const u = uid++;
       const b = bot();
-      await say(b, u, '/split');
+      await say(b, u, '/split_even');
       await say(b, u, '98765432');
       await say(b, u, '12.34');
-      await tap(b, u, 'split_mode:equal');
       await say(b, u, '3');
       await say(b, u, 'Secret lunch');
       await tap(b, u, 'split_confirm');
@@ -1838,7 +1860,7 @@ describe('acceptUpdate', () => {
     const pending: Promise<unknown>[] = [];
     const request = new Request('https://x.test/webhook/split', {
       method: 'POST',
-      body: JSON.stringify(textUpdate(uid++, '/split', upd++)),
+      body: JSON.stringify(textUpdate(uid++, '/split_even', upd++)),
     });
     const response = await acceptUpdate(b, request, { waitUntil: (p) => void pending.push(p) });
     expect(response.status).toBe(200); // returned although the update is still running
@@ -1860,7 +1882,7 @@ describe('acceptUpdate', () => {
     const pending: Promise<unknown>[] = [];
     const request = new Request('https://x.test/webhook/split', {
       method: 'POST',
-      body: JSON.stringify(textUpdate(uid++, '/split', upd++)),
+      body: JSON.stringify(textUpdate(uid++, '/split_even', upd++)),
     });
     const response = await acceptUpdate(b, request, { waitUntil: (p) => void pending.push(p) });
     expect(response.status).toBe(200);

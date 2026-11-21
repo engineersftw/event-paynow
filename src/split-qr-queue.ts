@@ -83,7 +83,7 @@ async function sendOne(api: Api, counter: D1UsageRepository, msg: QueuedQr): Pro
     await api
       .sendMessage(
         chatId,
-        `Could not send the QR for ${label}. Please send /split to try again.`,
+        `Could not send the QR for ${label}. Please send /split_even or /split_custom to try again.`,
         where
       )
       .catch(() => undefined); // best effort: it may fail for the same reason

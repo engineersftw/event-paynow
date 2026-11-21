@@ -73,7 +73,7 @@ import {
 
 /** Steps of the `split` flow. */
 const TOTAL = 1;
-const MODE = 2; // Equally or Custom amounts (skipped by /split_custom)
+// Step 2 was the Equally / Custom amounts question, removed: each command starts one kind of split
 const PEOPLE = 3; // equal split only
 const LIST = 4; // custom split only: names and amounts
 const LEFTOVER = 5; // custom split only, when the list is short of the bill
@@ -98,9 +98,9 @@ const VOICE_MAX_BYTES = 1_000_000;
 const IDLE_MINUTES = 30;
 const IDLE_MS = IDLE_MINUTES * 60 * 1000;
 /** What a private chat is told when it types an answer and no split is open. */
-const NO_SPLIT_OPEN = `No split is open. Send /split to start one. (A split is forgotten after ${IDLE_MINUTES} minutes without an answer.)`;
+const NO_SPLIT_OPEN = `No split is open. Send /split_even or /split_custom to start one. (A split is forgotten after ${IDLE_MINUTES} minutes without an answer.)`;
 /** What someone is told when they tap a button of a split that is no longer open. */
-const SPLIT_CLOSED = `This split is no longer open: it finished, was cancelled, or timed out after ${IDLE_MINUTES} minutes without an answer. Send /split to start a new one.`;
+const SPLIT_CLOSED = `This split is no longer open: it finished, was cancelled, or timed out after ${IDLE_MINUTES} minutes without an answer. Send /split_even or /split_custom to start a new one.`;
 
 type Field = 'total' | 'people' | 'list' | 'assign' | 'payee' | 'description';
 const FIELD_OF_STEP: Record<number, Field> = {
@@ -121,10 +121,10 @@ const STEP_OF_FIELD: Record<Field, number> = {
 };
 
 export const SPLIT_HELP =
-  'Split PayNow Bot splits a bill equally and makes a PayNow QR for one share.\n\n' +
-  '/split - payee first, then the total, an optional description, and equal or custom amounts\n' +
-  '/split_custom - same, straight to custom amounts (one line per person: name and amount)\n' +
-  '/split_receipt - same, but start from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what; you can also answer that question with a voice note (there is a button for it).\n' +
+  'Split PayNow Bot splits a bill and makes PayNow QRs for the shares. Start with one of:\n\n' +
+  '/split_even - an even split: payee first, then the total, an optional description, and the number of people\n' +
+  '/split_custom - custom amounts: the same first questions, then one line per person (name and amount)\n' +
+  '/split_receipt - the same first questions, but from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what; you can also answer that question with a voice note (there is a button for it).\n' +
   'Every QR is posted in the chat, with the names it is for. You get a QR for your own share too.\n' +
   '/cancel - stop\n\n' +
   'On the summary, tap Amend to change an answer, or edit the message you sent. ' +
@@ -327,8 +327,8 @@ function nextNeed(c: Ctx): { step: number; note?: string } {
   if (total === undefined) return { step: c.entry === 'receipt' ? RECEIPT : TOTAL };
   // Right after the total (a typed one, or the accepted scan), so every QR carries it, early ones too
   if (!c.described) return { step: DESCRIPTION };
-  if (!c.mode) return { step: MODE };
-  if (c.mode === 'equal') {
+  // No mode only for a split begun before /split_even existed: treat it as even
+  if (c.mode !== 'custom') {
     const people = c.people as number | undefined;
     if (people === undefined || parsePeople(String(people), total) === null) {
       return { step: PEOPLE };
@@ -591,15 +591,18 @@ export class SplitCommandHandler {
     };
   }
 
-  /** `/split_custom` passes 'custom': after the total it goes straight to the list. */
-  async start(ctx: Context, mode?: 'custom' | 'receipt'): Promise<void> {
+  /** Each command starts one kind of split: `/split_even` 'even', `/split_custom` 'custom', `/split_receipt` 'receipt'. */
+  async start(ctx: Context, mode: 'even' | 'custom' | 'receipt'): Promise<void> {
     if (!ctx.from) return;
     if (mode === 'receipt' && !this.receipts.reader) {
-      await ctx.reply('Receipt scanning is not available. Send /split and type the total instead.');
+      await ctx.reply(
+        'Receipt scanning is not available. Send /split_custom and type the total instead.'
+      );
       return;
     }
     // Everything starts with the payee; a receipt start is remembered so the photo follows it
-    const context = mode === 'custom' ? { mode } : mode === 'receipt' ? { entry: 'receipt' } : {};
+    const context =
+      mode === 'receipt' ? { entry: 'receipt' } : { mode: mode === 'custom' ? 'custom' : 'equal' };
     await this.setState({ flow: 'split', step: PAYEE, context });
     await this.fetch('/owner', { userId: ctx.from.id, topicId: topicOf(ctx) });
     await this.askStep(ctx, PAYEE, context);
@@ -929,21 +932,19 @@ export class SplitCommandHandler {
                     : step === RECEIPT || step === REVIEW
                       ? step
                       : -1
-                : data.startsWith('split_mode:')
-                  ? MODE
-                  : data.startsWith('split_people:')
-                    ? PEOPLE
-                    : data.startsWith('split_leftover:')
-                      ? LEFTOVER
-                      : data === 'split_skip_description'
-                        ? DESCRIPTION
-                        : onSummary
-                          ? CONFIRM
-                          : onMenu
-                            ? AMEND
-                            : data === 'split_keep' && c.amending
-                              ? step
-                              : -1;
+                : data.startsWith('split_people:')
+                  ? PEOPLE
+                  : data.startsWith('split_leftover:')
+                    ? LEFTOVER
+                    : data === 'split_skip_description'
+                      ? DESCRIPTION
+                      : onSummary
+                        ? CONFIRM
+                        : onMenu
+                          ? AMEND
+                          : data === 'split_keep' && c.amending
+                            ? step
+                            : -1;
     // Summary and menu buttons only count on the latest summary message
     const onLatest =
       !(onSummary || onMenu) ||
@@ -1095,14 +1096,12 @@ export class SplitCommandHandler {
         await this.askStep(ctx, RECEIPT, rest);
       } else if (data === 'split_scan:manual') {
         // Type the total instead: a normal split, without the receipt
-        const { receipt, mode, entry, ...plain } = rest;
+        // The user was splitting by items, so the typed total continues as a custom split
+        const { receipt, mode, entry, ...rest2 } = rest;
+        const plain = { ...rest2, mode: 'custom' };
         await this.setState({ flow: 'split', step: TOTAL, context: plain });
         await this.askStep(ctx, TOTAL, plain);
       }
-    } else if (data.startsWith('split_mode:')) {
-      // A new choice of type starts that type's details afresh
-      const { people, entries, leftover, suggested, own, ...rest } = c;
-      await this.proceed(ctx, { ...rest, mode: data.endsWith(':custom') ? 'custom' : 'equal' });
     } else if (data.startsWith('split_leftover:')) {
       await this.proceed(ctx, { ...c, leftover: data.endsWith(':even') ? 'even' : 'omit' });
     } else if (data.startsWith('split_people:')) {
@@ -1132,7 +1131,9 @@ export class SplitCommandHandler {
       await this.setButtons(ctx, new InlineKeyboard()); // the menu goes; the question replaces it
       const first =
         pick === 'split'
-          ? MODE
+          ? c.mode === 'custom'
+            ? LIST
+            : PEOPLE
           : pick === 'items'
             ? (c.askHow ?? c.group)
               ? HOW
@@ -1146,7 +1147,9 @@ export class SplitCommandHandler {
     } else {
       await this.setState({ flow: 'idle', step: 0, context: {} });
       await this.dropButtons(ctx);
-      await ctx.reply('Cancelled. Nothing was created. Send /split to begin again.');
+      await ctx.reply(
+        'Cancelled. Nothing was created. Send /split_even or /split_custom to begin again.'
+      );
     }
     return true;
   }
@@ -1194,15 +1197,7 @@ export class SplitCommandHandler {
       if (!c.amending) return kb;
       return (kb ? kb.row() : new InlineKeyboard()).text('Keep as is', 'split_keep');
     };
-    if (step === MODE) {
-      await ctx.reply(`Bill: ${sgd(total!)}. How do you want to split it?`, {
-        reply_markup: keep(
-          new InlineKeyboard()
-            .text('Equally', 'split_mode:equal')
-            .text('Custom amounts', 'split_mode:custom')
-        )!,
-      });
-    } else if (step === LEFTOVER) {
+    if (step === LEFTOVER) {
       const sum = sumCents(c.entries as SplitEntry[]);
       await ctx.reply(
         `The list adds up to ${sgd(sum)}, which leaves ${sgd(total! - sum)} of the ${sgd(total!)} bill. What should happen to it?`,
@@ -1473,7 +1468,7 @@ export class SplitCommandHandler {
           ctx,
           payloadFor(job.cents),
           lines,
-          `${lines.join('\n')}\n\n${caution} Send /split for another.`,
+          `${lines.join('\n')}\n\n${caution} Send /split_even or /split_custom for another.`,
           job.lines.join(' ')
         );
       })
@@ -1489,7 +1484,7 @@ export class SplitCommandHandler {
         if (Date.now() > deadline) break;
         const lines = [...(description ? [description] : []), ...job.lines];
         await ctx.replyWithPhoto(await qrPhoto(payloadFor(job.cents), lines), {
-          caption: `${lines.join('\n')}\n\n${caution} Send /split for another.`,
+          caption: `${lines.join('\n')}\n\n${caution} Send /split_even or /split_custom for another.`,
         });
         sent++;
         await countAll(this.counter, [SPLIT_QR_CHAT]);
@@ -1504,8 +1499,8 @@ export class SplitCommandHandler {
         .join('; ');
       await ctx.reply(
         jobs.length === 1
-          ? 'Could not make the QR. Please send /split to try again.'
-          : `Sent ${sent} of ${jobs.length} QRs; the other ${jobs.length - sent} could not be sent (${missing}). Please send /split to try again.`
+          ? 'Could not make the QR. Please send /split_even or /split_custom to try again.'
+          : `Sent ${sent} of ${jobs.length} QRs; the other ${jobs.length - sent} could not be sent (${missing}). Please send /split_even or /split_custom to try again.`
       );
     }
   }

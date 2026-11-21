@@ -104,12 +104,12 @@ export function createSplitBot(
     if (ctx.chat && ctx.chat.type !== 'channel') return next();
   });
 
-  bot.command('split', (ctx) => handler(ctx).start(ctx));
+  bot.command('split_even', (ctx) => handler(ctx).start(ctx, 'even'));
   bot.command('split_custom', (ctx) => handler(ctx).start(ctx, 'custom'));
   bot.command('split_receipt', (ctx) => handler(ctx).start(ctx, 'receipt'));
   bot.command('start', async (ctx) => {
     if (ctx.chat.type !== 'private') return;
-    await handler(ctx).start(ctx);
+    await ctx.reply(SPLIT_HELP); // each command starts one kind of split, so /start just shows them
   });
   // Hidden (not in /help or the BotFather list): usage numbers for the ids in STATS_USER_IDS, the same
   // list as Event PayNow Bot's /stats, private chats only. Anyone else gets no reply at all.

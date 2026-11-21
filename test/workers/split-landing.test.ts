@@ -48,7 +48,7 @@ describe('GET /split', () => {
       'Custom amounts',
       'Receipt scan',
       'Group claiming',
-      '<code>/split</code>',
+      '<code>/split_even</code>',
       '<code>/split_custom</code>',
       '<code>/split_receipt</code>',
       'Receipt photos are read and never stored',
