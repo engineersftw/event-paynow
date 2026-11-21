@@ -688,6 +688,21 @@ describe('Split_PayNow_Bot amend and edited messages', () => {
     expect(stub.lastText()).toContain('between 5 people');
   });
 
+  it('Amend → Split on a custom split asks about the leftover of the new list again', async () => {
+    const u = uid++;
+    const b = bot();
+    await say(b, u, '/split_custom');
+    await say(b, u, '91234567');
+    await say(b, u, '100');
+    await tap(b, u, 'split_skip_description');
+    await say(b, u, 'Ann 30\nBob 30');
+    await tap(b, u, 'split_leftover:even');
+    await tap(b, u, 'split_amend');
+    await tap(b, u, 'split_pick:split');
+    await say(b, u, 'Ann 20\nBob 20');
+    expect(buttons()).toContain('split_leftover:even'); // asked again, not reused
+  });
+
   it('Amend → Split on a custom split asks for the list again', async () => {
     const u = uid++;
     const b = bot();
