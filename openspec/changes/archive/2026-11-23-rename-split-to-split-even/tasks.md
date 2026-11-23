@@ -18,7 +18,7 @@
 
 ## 4. Rollout
 
-- [ ] 4.1 After deploy, update the Split bot's command list in BotFather (`split_even`, `split_custom`, `split_receipt`, `cancel`, `help`), then in a private chat: `/start` shows the help, `/split_even` goes from the description straight to the number of people and makes the QR, `/split` gets no reply; in a group run `/split_even` with the member-count button
+- [x] 4.1 After deploy, update the Split bot's command list in BotFather (`split_even`, `split_custom`, `split_receipt`, `cancel`, `help`), then in a private chat: `/start` shows the help, `/split_even` goes from the description straight to the number of people and makes the QR, `/split` gets no reply; in a group run `/split_even` with the member-count button
 
 ## Workflow follow-up
 

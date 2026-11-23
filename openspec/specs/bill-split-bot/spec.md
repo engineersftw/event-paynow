@@ -8,11 +8,11 @@ A standalone Telegram bot that splits a bill equally between a number of people 
 
 ### Requirement: The bot asks for the bill, the number of people, the payee and a description
 
-The system SHALL, when a user sends `/split` to Split_PayNow_Bot (or `/start` in a private chat), ask in order for the payee (a Singapore mobile number or a UEN), the bill total in SGD, an optional short description, whether to split Equally or with Custom amounts, and then either the number of people (equal split) or the list of names and amounts (custom split). The payee, the total and the split details are required. The description SHALL offer a Skip button and SHALL be at most 25 characters. The bot SHALL work in private chats and in group chats.
+The system SHALL, when a user sends `/split_even` to Split_PayNow_Bot, ask in order for the payee (a Singapore mobile number or a UEN), the bill total in SGD, an optional short description, and then the number of people, without asking whether to split equally or with custom amounts. `/split_custom` SHALL ask the same first three questions and then the list of names and amounts. The payee, the total and the split details are required. The description SHALL offer a Skip button and SHALL be at most 25 characters. The bot SHALL work in private chats and in group chats.
 
 #### Scenario: Full conversation in a private chat
 
-- **WHEN** the user sends `/split`, a valid payee and the total `187.40`, sends the description `Dinner`, taps Equally, sends the number `4`, and then confirms
+- **WHEN** the user sends `/split_even`, a valid payee and the total `187.40`, sends the description `Dinner`, sends the number `4`, and then confirms
 - **THEN** the bot replies with a PayNow QR image for one share of the bill
 
 #### Scenario: Skipping the description
@@ -37,16 +37,16 @@ The system SHALL, when a user sends `/split` to Split_PayNow_Bot (or `/start` in
 
 #### Scenario: Full custom conversation
 
-- **WHEN** the user sends `/split`, a valid payee, the total `100`, taps Skip on the description, taps Custom amounts, sends the lines `Ann 60` and `Bob 40`, and then confirms
+- **WHEN** the user sends `/split_custom`, a valid payee, the total `100`, taps Skip on the description, sends the lines `Ann 60` and `Bob 40`, and then confirms
 - **THEN** the bot replies with PayNow QR images for the amounts listed
 
 ### Requirement: A group's member count is offered as the number of people
 
-The system SHALL, when `/split` runs in a group chat, read the group's member count from Telegram, subtract one for the bot itself, and offer the result as a button on the number-of-people question when it is at least 2. Tapping the button SHALL use that number. The user SHALL always be able to type a different number instead. In a private chat no button is offered.
+The system SHALL, when `/split_even` runs in a group chat, read the group's member count from Telegram, subtract one for the bot itself, and offer the result as a button on the number-of-people question when it is at least 2. Tapping the button SHALL use that number. The user SHALL always be able to type a different number instead. In a private chat no button is offered.
 
 #### Scenario: Group with six members
 
-- **WHEN** `/split` runs in a group that has the bot and 6 other members
+- **WHEN** `/split_even` runs in a group that has the bot and 6 other members
 - **THEN** the number-of-people question has a button "Split by 6"
 
 #### Scenario: Typing another number
@@ -100,7 +100,7 @@ The system SHALL, after the last question, show one summary with Confirm, Amend 
 #### Scenario: Cancel
 
 - **WHEN** the user taps Cancel
-- **THEN** nothing is generated, the conversation is cleared and the user is told to send `/split` to begin again
+- **THEN** nothing is generated, the conversation is cleared and the user is told to send `/split_even` or `/split_custom` to begin again
 
 #### Scenario: Amend button present
 
@@ -119,7 +119,7 @@ The system SHALL send a PayNow QR as a fixed amount that the payer cannot change
 #### Scenario: QR could not be made
 
 - **WHEN** the QR cannot be generated
-- **THEN** the bot says so and asks the user to send `/split` again, without logging the answers
+- **THEN** the bot says so and asks the user to send `/split_even` or `/split_custom` again, without logging the answers
 
 #### Scenario: One QR per distinct amount
 
@@ -134,11 +134,11 @@ The system SHALL send a PayNow QR as a fixed amount that the payer cannot change
 #### Scenario: A send fails part way
 
 - **WHEN** Telegram refuses one of several QR sends
-- **THEN** the other QRs are still sent, the refused one is tried again, and if it still cannot be sent the chat is told which QR is missing and asked to send `/split` again
+- **THEN** the other QRs are still sent, the refused one is tried again, and if it still cannot be sent the chat is told which QR is missing and asked to send `/split_even` or `/split_custom` again
 
 ### Requirement: In a group only the person who started the split can answer
 
-The system SHALL, in a group chat, accept text and button taps for a split only from the user who sent `/split` and only in the same topic, except that any member MAY tap the item buttons of the claim message. Messages from anyone else SHALL be ignored without a reply, and a button tap from someone else, other than a claim tap, is answered with a short "not your split" notice. The bot SHALL try to delete the owner's payee message from the group once it has read it, and a failure to delete SHALL NOT stop the conversation.
+The system SHALL, in a group chat, accept text and button taps for a split only from the user who started the split (with `/split_even`, `/split_custom` or `/split_receipt`) and only in the same topic, except that any member MAY tap the item buttons of the claim message. Messages from anyone else SHALL be ignored without a reply, and a button tap from someone else, other than a claim tap, is answered with a short "not your split" notice. The bot SHALL try to delete the owner's payee message from the group once it has read it, and a failure to delete SHALL NOT stop the conversation.
 
 #### Scenario: Another member replies
 
@@ -196,12 +196,12 @@ The system SHALL keep a split's answers only in the chat's Durable Object until 
 
 ### Requirement: A button of a split that is no longer open says so and stops being tappable
 
-The system SHALL, when a button of a split is tapped and no split is open in that chat (it timed out, was cancelled or already finished), answer with a popup that stays until it is dismissed, saying that the split is no longer open, how long a waiting split is kept and to send /split to start a new one, and SHALL remove the buttons from the message that was tapped. A button of a split that is still open but has moved on SHALL keep the short notice that the step is over.
+The system SHALL, when a button of a split is tapped and no split is open in that chat (it timed out, was cancelled or already finished), answer with a popup that stays until it is dismissed, saying that the split is no longer open, how long a waiting split is kept and to send `/split_even` or `/split_custom` to start a new one, and SHALL remove the buttons from the message that was tapped. A button of a split that is still open but has moved on SHALL keep the short notice that the step is over.
 
 #### Scenario: Tap after the time ran out
 
 - **WHEN** the organiser taps Confirm on a summary 40 minutes after their last answer
-- **THEN** a popup says the split is no longer open and to send /split, the buttons disappear from that message, and nothing is created
+- **THEN** a popup says the split is no longer open and to send `/split_even` or `/split_custom`, the buttons disappear from that message, and nothing is created
 
 #### Scenario: Tap after the split finished
 
@@ -220,12 +220,12 @@ The system SHALL, when a button of a split is tapped and no split is open in tha
 
 ### Requirement: A typed answer in a private chat with no split open gets a hint
 
-The system SHALL, when a user sends text in a private chat that is not a command and no split is open, reply once that no split is open, to send /split to start one, and how long a waiting split is kept. In a group the system SHALL stay silent, as for any other chatter.
+The system SHALL, when a user sends text in a private chat that is not a command and no split is open, reply once that no split is open, to send `/split_even` or `/split_custom` to start one, and how long a waiting split is kept. In a group the system SHALL stay silent, as for any other chatter.
 
 #### Scenario: Answer after the time ran out
 
 - **WHEN** a user types the bill total in a private chat 40 minutes after the bot asked for it
-- **THEN** the bot replies that no split is open and to send /split
+- **THEN** the bot replies that no split is open and to send `/split_even` or `/split_custom`
 
 #### Scenario: Chatter in a group
 
@@ -246,28 +246,14 @@ The system SHALL, in a group chat, ask each text question as a force-reply promp
 - **WHEN** the owner replies to the bot's total question in a group where privacy mode is on
 - **THEN** the bot receives the answer and asks the next question
 
-### Requirement: The user chooses between an equal and a custom split
-
-The system SHALL, after the bill total is accepted, ask whether to split the bill Equally or with Custom amounts, using two buttons. Choosing Equally SHALL continue with the number-of-people question exactly as before. Choosing Custom amounts SHALL continue with the list of people and amounts.
-
-#### Scenario: Choosing equal
-
-- **WHEN** the user taps Equally
-- **THEN** the bot asks how many people share the bill
-
-#### Scenario: Choosing custom
-
-- **WHEN** the user taps Custom amounts
-- **THEN** the bot asks for a list with one person per line as a name followed by an amount
-
 ### Requirement: `/split_custom` starts a custom split directly
 
-The system SHALL accept `/split_custom` as a shortcut that asks for the payee, then the bill total, then the optional description, and then goes straight to the custom list, without asking Equally or Custom amounts. After that it SHALL behave exactly as a custom split started from `/split`, in private chats and in groups, with the same owner-only rules in groups.
+The system SHALL accept `/split_custom`, which asks for the payee, then the bill total, then the optional description, and then goes straight to the custom list. It SHALL work in private chats and in groups, with the same owner-only rules in groups.
 
 #### Scenario: Shortcut skips the choice
 
 - **WHEN** the user sends `/split_custom`, a valid payee, a valid total, and answers or skips the description
-- **THEN** the bot asks for the list of names and amounts and does not offer Equally or Custom amounts
+- **THEN** the bot asks for the list of names and amounts, with no question about the split type
 
 #### Scenario: Invalid total
 
@@ -334,7 +320,7 @@ The system SHALL compare the sum of the listed amounts with the bill total. A su
 
 ### Requirement: The summary can be amended
 
-The system SHALL show an Amend button on the summary, next to Confirm and Cancel. Tapping it SHALL offer Total, Split, Payee, Description and Back. Choosing a field SHALL ask only that question, with a Keep as is button, and then show the updated summary. Choosing Split SHALL ask again for equal or custom and the details that go with the choice. Back SHALL return to the summary unchanged. Amending SHALL NOT generate any QR.
+The system SHALL show an Amend button on the summary, next to Confirm and Cancel. Tapping it SHALL offer Total, Split, Payee, Description and Back. Choosing a field SHALL ask only that question, with a Keep as is button, and then show the updated summary. Choosing Split SHALL ask again for the details of the same kind of split: the number of people for an even split, the list for a custom split. It SHALL NOT offer a switch between even and custom; the user starts the other command instead. Back SHALL return to the summary unchanged. Amending SHALL NOT generate any QR.
 
 #### Scenario: Change the total
 
@@ -348,8 +334,8 @@ The system SHALL show an Amend button on the summary, next to Confirm and Cancel
 
 #### Scenario: Change the split type
 
-- **WHEN** the user amends Split and chooses Custom amounts instead of Equally and sends a valid list
-- **THEN** the summary shows the custom amounts and no longer shows the equal share
+- **WHEN** the user of an even split taps Amend and then Split
+- **THEN** the bot asks for the number of people again and offers no switch to custom amounts
 
 #### Scenario: Back
 
@@ -969,11 +955,11 @@ The system SHALL, in a group chat, ignore the organiser's free text without any 
 
 ### Requirement: The payee is asked first in every split
 
-The system SHALL, in every split that is started with `/split`, `/split_custom`, `/split_receipt` or `/start` in a private chat, ask for the payee before anything about the bill, and SHALL keep the same order when the answers are amended: a payee changed later is checked first, then the rest of the split continues from where it was. The description SHALL be asked as soon as the bill total is known (typed, or accepted from the receipt scan) and before the split type, the people, the list, the assignment or the claiming.
+The system SHALL, in every split that is started with `/split_even`, `/split_custom` or `/split_receipt`, ask for the payee before anything about the bill, and SHALL keep the same order when the answers are amended: a payee changed later is checked first, then the rest of the split continues from where it was. The description SHALL be asked as soon as the bill total is known (typed, or accepted from the receipt scan) and before the people, the list, the assignment or the claiming.
 
 #### Scenario: Payee before total
 
-- **WHEN** the user sends `/split`
+- **WHEN** the user sends `/split_even`
 - **THEN** the first question is who should be paid, then the bill total
 
 #### Scenario: Payee before the photo
@@ -1161,6 +1147,7 @@ The assignment prompt SHALL say that a voice note works as well as typing, when 
 
 - **WHEN** the bot asks who had which item and speech-to-text is configured
 - **THEN** the prompt includes a line that the organiser can also send a voice note
+
 ### Requirement: The description is asked once the bill total is known
 
 The system SHALL ask for the optional description right after the bill total is known: after the typed total, or after the receipt scan is accepted with Use this, and before the split type, the people, the list, the assignment or the claiming. When the split came from a receipt and the user taps Skip, or the answer is empty, the description SHALL be the merchant name read from the receipt (cut to 25 characters), and when no merchant was read there SHALL be none. A description the user types SHALL always win. The question SHALL name the default when there is one. The description SHALL be the same on every QR of the split, including the QRs taken early with Get my QR.
@@ -1297,7 +1284,7 @@ The system SHALL show a Get my QR button on the claim message. When a member who
 
 ### Requirement: QR sends are retried and failures reported
 
-The system SHALL retry a QR that could not be posted: when Telegram asks the bot to slow down it SHALL wait the time Telegram gives, and after another temporary error it SHALL try again after a short delay, up to 5 attempts in all. When Telegram refuses the QR for good (for example the bot was removed from the chat), or the attempts run out, the system SHALL stop trying and, where it still can, post one message in the chat naming the amount and the people whose QR was not sent and asking the user to send `/split` again.
+The system SHALL retry a QR that could not be posted: when Telegram asks the bot to slow down it SHALL wait the time Telegram gives, and after another temporary error it SHALL try again after a short delay, up to 5 attempts in all. When Telegram refuses the QR for good (for example the bot was removed from the chat), or the attempts run out, the system SHALL stop trying and, where it still can, post one message in the chat naming the amount and the people whose QR was not sent and asking the user to send `/split_even` or `/split_custom` again.
 
 #### Scenario: Slowed down by Telegram
 
@@ -1313,6 +1300,7 @@ The system SHALL retry a QR that could not be posted: when Telegram asks the bot
 
 - **WHEN** the bot was removed from the group after the split was confirmed
 - **THEN** the QR is not retried and nothing else is attempted for it
+
 ### Requirement: The organiser chooses how to share out the items
 
 The system SHALL, after the user taps Use this on a receipt scan, ask "How do you want to share out the items?" with buttons for each way that is available: "I'll type who had what", "Say it with a voice note" when speech-to-text is configured, and, in a group chat only, "Let everyone claim their items". In a private chat without speech-to-text the question SHALL NOT be asked and the bot asks for the typed assignment as before. Choosing to type SHALL continue as before, choosing to claim SHALL post the claim message, and choosing voice SHALL ask for a voice note.
@@ -1398,3 +1386,31 @@ The system SHALL read a receipt photo or a voice note in a Cloudflare Workflow, 
 
 - **WHEN** the Workflow binding is missing or an instance cannot be started
 - **THEN** the photo or voice note is read inline, with the same messages as before
+
+### Requirement: `/split_even` is the even-split command and `/split` is gone
+
+The system SHALL offer `/split_even` to start an even split and SHALL NOT treat `/split` as a command any more: the bot SHALL NOT answer it. The help text and the BotFather command list SHALL name `/split_even`, `/split_custom` and `/split_receipt`.
+
+#### Scenario: Old command
+
+- **WHEN** a user sends `/split`
+- **THEN** the bot does not start a split
+
+#### Scenario: Help lists the three commands
+
+- **WHEN** a user sends `/help`
+- **THEN** the reply names `/split_even`, `/split_custom` and `/split_receipt` and not `/split`
+
+### Requirement: `/start` in a private chat shows the commands
+
+The system SHALL answer `/start` in a private chat with the help text listing the three ways to start a split, and SHALL NOT start a split. In a group, `/start` SHALL stay unanswered as before.
+
+#### Scenario: First open
+
+- **WHEN** a user opens the bot and Telegram sends `/start`
+- **THEN** the bot replies with the help text and no question
+
+#### Scenario: Group
+
+- **WHEN** `/start` is sent in a group
+- **THEN** the bot does not answer
