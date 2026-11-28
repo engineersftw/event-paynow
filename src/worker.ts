@@ -5,8 +5,15 @@ import { handleSplitAppApi, handleSplitAppPage, SPLIT_APP_API } from './split-ap
 import { handleSplitWebhook } from './split-bot';
 import { handleSplitQrBatch, SPLIT_QR_QUEUE, type SplitQrMessage } from './split-qr-queue';
 
-export default {
-  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+type BotProviders = {
+  event?: NonNullable<Parameters<typeof handleWebhook>[3]>;
+  simple?: NonNullable<Parameters<typeof handleSimpleWebhook>[3]>;
+  split?: NonNullable<Parameters<typeof handleSplitWebhook>[3]>;
+};
+
+/** Construct the same router with optional bot providers supplied by the caller. */
+export function createWorkerFetch(providers: BotProviders = {}) {
+  return async (request: Request, env: Env, ctx: ExecutionContext): Promise<Response> => {
     const url = new URL(request.url);
 
     // Health check
@@ -20,7 +27,7 @@ export default {
       if (!validateSecret(request, env.TELEGRAM_WEBHOOK_SECRET)) {
         return new Response('Unauthorized', { status: 403 });
       }
-      return handleWebhook(request, env, ctx);
+      return handleWebhook(request, env, ctx, providers.event);
     }
 
     // Simple_PayNow_Bot: own secret, 404 until it is configured
@@ -31,7 +38,7 @@ export default {
       if (!validateSecret(request, env.SIMPLE_WEBHOOK_SECRET)) {
         return new Response('Unauthorized', { status: 403 });
       }
-      return handleSimpleWebhook(request, env, ctx);
+      return handleSimpleWebhook(request, env, ctx, providers.simple);
     }
 
     // Split_PayNow_Bot: own secret, 404 until it is configured
@@ -42,7 +49,7 @@ export default {
       if (!validateSecret(request, env.SPLIT_WEBHOOK_SECRET)) {
         return new Response('Unauthorized', { status: 403 });
       }
-      return handleSplitWebhook(request, env, ctx);
+      return handleSplitWebhook(request, env, ctx, providers.split);
     }
 
     // The Split Mini App's interface for the claim organiser: 404 until the app is configured
@@ -55,8 +62,11 @@ export default {
       return handleSplitAppApi(request, env, { waitUntil: (work) => ctx.waitUntil(work) });
 
     return new Response('Not found', { status: 404 });
-  },
+  };
+}
 
+export default {
+  fetch: createWorkerFetch(),
   /** Queue consumer: Split_PayNow_Bot QR sends, one message per QR. */
   async queue(batch: MessageBatch<SplitQrMessage>, env: Env): Promise<void> {
     if (batch.queue === SPLIT_QR_QUEUE) await handleSplitQrBatch(batch, env);

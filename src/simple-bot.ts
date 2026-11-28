@@ -66,8 +66,9 @@ async function getSimpleBot(env: Env, token: string): Promise<Bot> {
 export async function handleSimpleWebhook(
   request: Request,
   env: Env,
-  ctx: Pick<ExecutionContext, 'waitUntil'>
+  ctx: Pick<ExecutionContext, 'waitUntil'>,
+  provideBot = getSimpleBot
 ): Promise<Response> {
-  const bot = await getSimpleBot(env, env.SIMPLE_BOT_TOKEN as string);
+  const bot = await provideBot(env, env.SIMPLE_BOT_TOKEN as string);
   return acceptUpdate(bot, request, ctx, 'simple');
 }

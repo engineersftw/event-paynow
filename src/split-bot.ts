@@ -161,8 +161,9 @@ export { acceptUpdate };
 export async function handleSplitWebhook(
   request: Request,
   env: Env,
-  ctx: Pick<ExecutionContext, 'waitUntil'>
+  ctx: Pick<ExecutionContext, 'waitUntil'>,
+  provideBot = getSplitBot
 ): Promise<Response> {
-  const bot = await getSplitBot(env, env.SPLIT_BOT_TOKEN as string);
+  const bot = await provideBot(env, env.SPLIT_BOT_TOKEN as string);
   return acceptUpdate(bot, request, ctx, 'split');
 }

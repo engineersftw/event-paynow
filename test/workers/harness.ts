@@ -132,6 +132,7 @@ export interface CapturedSend {
 
 export interface CapturedPhoto {
   chatId: string;
+  messageId: number;
   caption: string;
   filename: string;
   bytes: Uint8Array;
@@ -140,6 +141,7 @@ export interface CapturedPhoto {
 
 export interface CapturedEdit {
   chatId: string;
+  messageId: number;
   text: string;
   replyMarkup?: { inline_keyboard: Array<Array<{ text: string; callback_data?: string }>> };
 }
@@ -294,6 +296,8 @@ export class TelegramStub {
 
   private messageId = 1000;
 
+  constructor(private readonly strict = false) {}
+
   reset(): void {
     this.sentMessages = [];
     this.sentPhotos = [];
@@ -387,6 +391,7 @@ export class TelegramStub {
       }
       this.sentPhotos.push({
         chatId,
+        messageId: this.messageId + 1,
         caption: fields.caption?.value ?? '',
         filename: photoName,
         // A PNG is turned back into the renderer's BMP, so every test decodes photos the same way
@@ -400,11 +405,13 @@ export class TelegramStub {
     if (method === 'editMessageText') {
       const body = JSON.parse(String(init?.body)) as {
         chat_id: number | string;
+        message_id: number;
         text: string;
         reply_markup?: CapturedEdit['replyMarkup'];
       };
       this.editedMessages.push({
         chatId: String(body.chat_id),
+        messageId: body.message_id,
         text: body.text,
         replyMarkup: body.reply_markup,
       });
@@ -452,6 +459,9 @@ export class TelegramStub {
     }
 
     this.otherCalls.push({ method, body: String(init?.body ?? '') });
+    if (this.strict && method !== 'editMessageReplyMarkup') {
+      throw new Error(`Unexpected Telegram method: ${method}`);
+    }
     return this.ok(true);
   };
 
