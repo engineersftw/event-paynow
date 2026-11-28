@@ -15,6 +15,8 @@ export interface Receipt {
   discountCents: number;
   totalCents: number;
   subtotalCents?: number;
+  /** Set after a review reconciles items and identified adjustments. Absent on older flows. */
+  reconciled?: true;
   /** Lines the model returned that could not be read (kept so the warning survives edits). */
   skipped?: number;
 }
@@ -46,21 +48,45 @@ const clean = (v: unknown, max: number) =>
 
 const sumItems = (r: Receipt) => r.items.reduce((s, i) => s + i.cents, 0);
 
+/** Positive when the total exceeds the items and explicitly identified adjustments. */
+export function receiptDifference(r: Receipt): number {
+  return r.totalCents - (sumItems(r) + r.serviceCents + r.gstCents - r.discountCents);
+}
+
+/** Preserve the original total for conversations started before reconciliation was introduced. */
+export function receiptShareTotal(r: Receipt): number {
+  return r.reconciled ? sumItems(r) + r.serviceCents + r.gstCents - r.discountCents : r.totalCents;
+}
+
+/** Apply one correction to a scanned item, charge, discount or total. */
+export function correctReceipt(r: Receipt, text: string): Receipt | null {
+  const match = /^(item\s+\d+|service|gst|discount|total)\s+(\S+)$/i.exec(text.trim());
+  if (!match) return null;
+  const value = match[2]!;
+  const cents = /^\$?0(?:\.0{1,2})?$/.test(value) ? 0 : parseAmount(value.replace(/^\$/, ''));
+  if (cents === null || cents > MAX_CENTS) return null;
+  const field = match[1]!.toLowerCase();
+  if (field.startsWith('item ')) {
+    const index = Number(field.slice(5)) - 1;
+    if (!r.items[index] || (cents === 0 && r.items.length === 1)) return null;
+    return {
+      ...r,
+      items:
+        cents === 0
+          ? r.items.filter((_, i) => i !== index)
+          : r.items.map((item, i) => (i === index ? { ...item, cents } : item)),
+    };
+  }
+  if (field === 'total' && cents === 0) return null;
+  const key = field === 'service' ? 'serviceCents' : `${field}Cents`;
+  return { ...r, [key]: cents };
+}
+
 /**
- * How much the items fall short of what they should add up to, or 0. The expected amount is the
- * printed subtotal or, without one, the total minus service charge and GST plus any discount (only
- * when a charge was read, because otherwise a gap cannot be told apart from charges). Two cents of
- * rounding is ignored; items above the expected amount are not a shortfall.
+ * How much remains unexplained after accounting for identified charges and discounts, or zero.
  */
 export function missingCents(r: Receipt): number {
-  const expected =
-    r.subtotalCents ??
-    (r.serviceCents > 0 || r.gstCents > 0
-      ? r.totalCents - r.serviceCents - r.gstCents + r.discountCents
-      : undefined);
-  if (expected === undefined) return 0;
-  const gap = expected - sumItems(r);
-  return gap > 2 ? gap : 0;
+  return Math.max(0, receiptDifference(r));
 }
 
 /** What the user is told about a scan; worked out again whenever items are added. */
@@ -74,7 +100,7 @@ export function receiptWarnings(r: Receipt): string[] {
   }
   if (missing > 0) {
     warnings.push(
-      `The items add up to SGD ${formatCents(sum)} but ${r.subtotalCents !== undefined ? `the subtotal is SGD ${formatCents(r.subtotalCents)}` : 'they should come to more'}: SGD ${formatCents(missing)} looks missing.`
+      `The items add up to SGD ${formatCents(sum)} but ${r.subtotalCents !== undefined && r.subtotalCents - sum === missing ? `the subtotal is SGD ${formatCents(r.subtotalCents)}` : 'they should come to more'}: SGD ${formatCents(missing)} looks missing.`
     );
   } else if (r.subtotalCents && Math.abs(sum - r.subtotalCents) > 2) {
     warnings.push('The items do not add up to the subtotal printed on the receipt.');

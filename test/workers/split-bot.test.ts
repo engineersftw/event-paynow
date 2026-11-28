@@ -1106,6 +1106,7 @@ describe('Split_PayNow_Bot receipt scan', () => {
         { name: 'Rice', price: 10 },
         { name: 'Beer', price: 20 },
       ],
+      serviceCharge: 12,
       total: 72,
     };
     expect((await run({ ...items, merchant: 'Huevos' }, 'Late lunch')).summary).toContain(
@@ -1134,7 +1135,12 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(review).toContain('Ah Seng Cafe');
     expect(review).toContain('1. Chilli crab: SGD 30.00');
     expect(review).toContain('Total: SGD 72.00');
-    expect(buttons()).toEqual(['split_scan:use', 'split_scan:again', 'split_scan:manual']);
+    expect(buttons()).toEqual([
+      'split_scan:edit',
+      'split_scan:use',
+      'split_scan:again',
+      'split_scan:manual',
+    ]);
     const reviewId = lastId();
     await tap(b, org, 'split_scan:use');
     expect(stub.lastText()).toContain('Add a short description');
@@ -1191,7 +1197,7 @@ describe('Split_PayNow_Bot receipt scan', () => {
     expect(summary).toContain('Your own share: SGD 24.00');
   });
 
-  it('shows the review as three one-button rows and removes the reading notice after a good scan only', async () => {
+  it('shows the review as one-button rows and removes the reading notice after a good scan only', async () => {
     const org = uid++;
     const b = receiptBot();
     await say(b, org, '/split_receipt');
@@ -1199,7 +1205,7 @@ describe('Split_PayNow_Bot receipt scan', () => {
     await photo(b, org);
     const rows = (stub.sentMessages.at(-1)!.replyMarkup as { inline_keyboard: unknown[][] })
       .inline_keyboard;
-    expect(rows.map((r) => r.length)).toEqual([1, 1, 1]);
+    expect(rows.map((r) => r.length)).toEqual([1, 1, 1, 1]);
     const notice = stub.sentMessages.at(-2)!;
     expect(notice.text).toContain('Reading your receipt');
     expect(stub.deletedMessages.map((d) => d.messageId)).toContain(notice.messageId);
@@ -1517,13 +1523,18 @@ describe('Split_PayNow_Bot receipt scan', () => {
       );
       expect(buttons()).toEqual([
         'split_scan:add',
-        'split_scan:use',
+        'split_scan:edit',
         'split_scan:again',
         'split_scan:manual',
       ]);
       await toReview(b, org2, RECEIPT); // 30 + 10 + 20 + 12 charges = 72: it adds up
       expect(stub.lastText()).not.toContain('looks missing');
-      expect(buttons()).toEqual(['split_scan:use', 'split_scan:again', 'split_scan:manual']);
+      expect(buttons()).toEqual([
+        'split_scan:edit',
+        'split_scan:use',
+        'split_scan:again',
+        'split_scan:manual',
+      ]);
     });
 
     it('adds a named item as the next number and clears the warning', async () => {
@@ -1537,7 +1548,59 @@ describe('Split_PayNow_Bot receipt scan', () => {
       expect(stub.lastText()).toContain('10. Sapporo Black: SGD 9.50');
       expect(stub.lastText()).toContain('9. Item 9: SGD 19.80'); // earlier numbers unchanged
       expect(stub.lastText()).not.toContain('looks missing');
-      expect(buttons()).toEqual(['split_scan:use', 'split_scan:again', 'split_scan:manual']);
+      expect(buttons()).toEqual([
+        'split_scan:edit',
+        'split_scan:use',
+        'split_scan:again',
+        'split_scan:manual',
+      ]);
+    });
+
+    it('blocks an unexplained gap until a missing modifier is added', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org, {
+        items: [{ name: 'Tea', price: 1.8 }],
+        gst: 0,
+        total: 2,
+      });
+      expect(buttons()).not.toContain('split_scan:use');
+      await tap(b, org, 'split_scan:use');
+      expect((await peek(`split-${org}`)).step).toBe(11);
+      await tap(b, org, 'split_scan:add');
+      await say(b, org, 'Cup modifier 0.20');
+      expect(buttons()).toContain('split_scan:use');
+      await tap(b, org, 'split_scan:use');
+      expect((await peek(`split-${org}`)).step).not.toBe(11);
+    });
+
+    it('corrects a misread charge before continuing', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org, { items: [{ name: 'Tea', price: 2 }], gst: 1, total: 2 });
+      await tap(b, org, 'split_scan:edit');
+      await say(b, org, 'gst 0');
+      expect(buttons()).toContain('split_scan:use');
+      expect(stub.lastText()).not.toContain('GST:');
+    });
+
+    it('charges only item prices when GST and service charge are absent', async () => {
+      const org = uid++;
+      const b = receiptBot();
+      await toReview(b, org, {
+        items: [
+          { name: 'Tea', price: 1.8 },
+          { name: 'Milo', price: 3.8 },
+        ],
+        gst: 0,
+        total: 5.6,
+      });
+      await tap(b, org, 'split_scan:use');
+      await tap(b, org, 'split_skip_description');
+      expect(stub.lastText()).not.toContain('GST and service charge');
+      await say(b, org, '1 Ann\n2 Bob');
+      expect(stub.lastText()).toContain('Ann: SGD 1.80');
+      expect(stub.lastText()).toContain('Bob: SGD 3.80');
     });
 
     it('Add as one line adds Unread items for exactly the gap', async () => {
@@ -1973,6 +2036,29 @@ describe('Split_PayNow_Bot group claiming', () => {
     expect(stub.lastText()).toContain('1. Chilli crab SGD 30.00: unclaimed');
     return { b, chat, org, ann, bob, msg };
   }
+
+  it('requires reconciliation in a group before claiming', async () => {
+    const chat = -uid++;
+    const org = uid++;
+    const b = createSplitBot(
+      { ...env, AI: undefined } as never,
+      'split-token',
+      { botInfo: TEST_BOT_INFO, client: { fetch: stub.fetch } },
+      {
+        reader: { read: async () => ({ items: [{ name: 'Tea', price: 1.8 }], gst: 0, total: 2 }) },
+        download: async () => new Uint8Array([1]),
+      }
+    );
+    await gsay(b, chat, org, '/split_receipt');
+    await gsay(b, chat, org, '91234567');
+    await b.handleUpdate(photoUpdate(chat, org, 'file-1', upd++));
+    await gtap(b, chat, org, 'split_scan:use');
+    expect((await peek(`split-${chat}`)).step).toBe(11);
+    await gtap(b, chat, org, 'split_scan:add');
+    await gsay(b, chat, org, 'Cup 0.20');
+    await gtap(b, chat, org, 'split_scan:use');
+    expect((await peek(`split-${chat}`)).step).not.toBe(11);
+  });
   const appButton = (markup: unknown) =>
     (
       (markup as { inline_keyboard: Array<Array<{ text: string; url?: string }>> } | undefined)
@@ -2389,7 +2475,9 @@ describe('Split_PayNow_Bot group claiming', () => {
     it('keeps working when the conversation still holds a menu from before', async () => {
       const { b, chat, org, ann, msg } = await startClaiming();
       const cur = (await peek(`split-${chat}`)) as unknown as { context: Record<string, unknown> };
-      await env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`split-${chat}`)).fetch(
+      const response = await env.CHAT_SESSION.get(
+        env.CHAT_SESSION.idFromName(`split-${chat}`)
+      ).fetch(
         new Request('http://localhost/state', {
           method: 'POST',
           body: JSON.stringify({
@@ -2400,6 +2488,7 @@ describe('Split_PayNow_Bot group claiming', () => {
           }),
         })
       );
+      await response.body?.cancel();
       const sent = stub.sentMessages.length;
       await gsay(b, chat, org, 'Uncle Lim'); // what the old menu would have read: now ignored, quietly
       expect(stub.sentMessages.length).toBe(sent);
@@ -2407,6 +2496,31 @@ describe('Split_PayNow_Bot group claiming', () => {
       expect((await stateOf(chat)).context.claims).toEqual({ '0': [ann] });
       await tapOn(b, chat, org, 'split_claim:done', msg);
       expect(stub.lastText()).toContain('not claimed by anyone'); // the flow moves on as usual
+    });
+
+    it('preserves legacy allocation and already issued amounts in an active claim', async () => {
+      const { b, chat, ann, bob, msg } = await startClaiming();
+      const cur = (await peek(`split-${chat}`)) as unknown as { context: Record<string, unknown> };
+      const receipt = cur.context.receipt as Record<string, unknown>;
+      const { reconciled: _reconciled, ...legacy } = receipt;
+      await env.CHAT_SESSION.get(env.CHAT_SESSION.idFromName(`split-${chat}`)).fetch(
+        new Request('http://localhost/state', {
+          method: 'POST',
+          body: JSON.stringify({
+            flow: 'split',
+            step: 17,
+            idleMs: 3_600_000,
+            context: { ...cur.context, receipt: { ...legacy, serviceCents: 0, gstCents: 0 } },
+          }),
+        })
+      );
+      await tapOn(b, chat, ann, 'split_claim:0', msg);
+      await tapOn(b, chat, ann, 'split_claim:qr', msg);
+      const issued = (await peek(`split-${chat}`)).context.served as Record<string, number>;
+      expect(issued[String(ann)]).toBe(3600);
+      await tapOn(b, chat, bob, 'split_claim:1', msg);
+      const after = (await peek(`split-${chat}`)).context.served as Record<string, number>;
+      expect(after[String(ann)]).toBe(3600);
     });
 
     it("merges a typed @username added in the app with that member's own tap", async () => {

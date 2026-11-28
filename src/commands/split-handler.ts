@@ -34,6 +34,7 @@ import {
   applyUnassigned,
   assignmentFromClaims,
   type Claimer,
+  correctReceipt,
   memberAmount,
   missingCents,
   type PersonShare,
@@ -41,6 +42,8 @@ import {
   parseAssignments,
   type Receipt,
   type ReceiptItem,
+  receiptDifference,
+  receiptShareTotal,
   receiptWarnings,
   shareReceipt,
   toEntries,
@@ -87,6 +90,7 @@ const ASSIGN = 12; // waiting for who had which item
 const UNASSIGNED = 13; // items nobody was given: split evenly or the organiser covers them
 const ADD_ITEM = 15; // the user is adding an item the scan missed
 const HOW = 16; // type who had what, say it with a voice note, or (group) let everyone claim
+const EDIT_RECEIPT = 18;
 
 const MAX_DESCRIPTION = 25;
 /** Stop starting new QR sends after this long, so a slow Confirm says what is missing. */
@@ -124,7 +128,7 @@ export const SPLIT_HELP =
   'Split PayNow Bot splits a bill and makes PayNow QRs for the shares. Start with one of:\n\n' +
   '/split_even - an even split: payee first, then the total, an optional description, and the number of people\n' +
   '/split_custom - custom amounts: the same first questions, then one line per person (name and amount)\n' +
-  '/split_receipt - the same first questions, but from a photo of the receipt (I read the items, GST and service charge). In a group everyone can tap the items they had instead of you typing who had what; you can also answer that question with a voice note (there is a button for it).\n' +
+  '/split_receipt - the same first questions, but from a photo of the receipt (I read the items and any charges). Check and correct any difference before splitting. In a group everyone can tap the items they had instead of you typing who had what; you can also answer that question with a voice note (there is a button for it).\n' +
   'Every QR is posted in the chat, with the names it is for. You get a QR for your own share too.\n' +
   '/cancel - stop\n\n' +
   'On the summary, tap Amend to change an answer, or edit the message you sent. ' +
@@ -268,7 +272,7 @@ function assignmentPatchOf(
   };
   if (a.people.every((p) => p.isMe)) return nobody;
   const share = (done: AssignedOk) => {
-    const { shares } = shareReceipt(receipt.items, done, receipt.totalCents);
+    const { shares } = shareReceipt(receipt.items, done, receiptShareTotal(receipt));
     return { entries: toEntries(shares, locked), own: ownOf(shares) };
   };
 
@@ -420,10 +424,10 @@ function receiptDescription(c: Ctx): string | undefined {
 /** The review's buttons; adding a missing item is offered only when the numbers show a gap. */
 function reviewButtons(r: Receipt): InlineKeyboard {
   const kb = new InlineKeyboard();
-  if (missingCents(r) > 0) kb.text('➕ Add a missing item', 'split_scan:add').row();
+  if (receiptDifference(r) > 0) kb.text('➕ Add a missing item', 'split_scan:add').row();
+  kb.text('✏️ Correct a value', 'split_scan:edit').row();
+  if (receiptDifference(r) === 0) kb.text('✅ Use this', 'split_scan:use').row();
   return kb
-    .text('✅ Use this', 'split_scan:use')
-    .row()
     .text('📷 Send another photo', 'split_scan:again')
     .row()
     .text('Type the total instead', 'split_scan:manual');
@@ -437,6 +441,12 @@ function reviewText(r: Receipt, warnings: string[]): string {
   if (r.gstCents) lines.push(`GST: ${sgd(r.gstCents)}`);
   if (r.discountCents) lines.push(`Discount: -${sgd(r.discountCents)}`);
   lines.push(`Total: ${sgd(r.totalCents)}`);
+  const difference = receiptDifference(r);
+  if (difference !== 0)
+    lines.push(
+      '',
+      `⚠️ Items and adjustments differ from the total by ${sgd(Math.abs(difference))} (${difference > 0 ? 'short' : 'over'}). Correct the receipt before continuing.`
+    );
   for (const w of warnings) lines.push('', `⚠️ ${w}`);
   lines.push('', 'Is this right? Prices from a photo can be wrong, so check them.');
   return lines.join('\n');
@@ -816,6 +826,19 @@ export class SplitCommandHandler {
     }
     if (!this.isOwner(ctx, state)) return false;
 
+    if (state.step === EDIT_RECEIPT) {
+      const scan = state.context.scan as { receipt: Receipt };
+      const receipt = correctReceipt(scan.receipt, text);
+      if (!receipt) {
+        await ctx.reply(
+          'I could not read that correction. Try item 2 3.50, gst 0, service 1.00, discount 0 or total 25.40.'
+        );
+        return true;
+      }
+      await this.showReview(ctx, { ...state.context, scan: { receipt } });
+      return true;
+    }
+
     if (state.step === ADD_ITEM) {
       const scan = state.context.scan as { receipt: Receipt };
       const added = parseAddedItems(text, scan.receipt.items.length);
@@ -921,13 +944,13 @@ export class SplitCommandHandler {
             : data === 'split_claim:keep' || data.startsWith('split_unassigned:')
               ? UNASSIGNED
               : data.startsWith('split_scan:')
-                ? data === 'split_scan:add'
+                ? data === 'split_scan:add' || data === 'split_scan:edit'
                   ? step === REVIEW
                     ? REVIEW
                     : -1
                   : data === 'split_scan:oneline' || data === 'split_scan:back'
-                    ? step === ADD_ITEM
-                      ? ADD_ITEM
+                    ? step === ADD_ITEM || (data === 'split_scan:back' && step === EDIT_RECEIPT)
+                      ? step
                       : -1
                     : step === RECEIPT || step === REVIEW
                       ? step
@@ -964,6 +987,17 @@ export class SplitCommandHandler {
         });
         return true;
       }
+    }
+    if (
+      data === 'split_scan:use' &&
+      c.scan &&
+      receiptDifference((c.scan as { receipt: Receipt }).receipt) !== 0
+    ) {
+      await ctx.answerCallbackQuery({
+        text: 'Please correct the receipt first.',
+        show_alert: true,
+      });
+      return true;
     }
     await ctx.answerCallbackQuery();
 
@@ -1016,7 +1050,7 @@ export class SplitCommandHandler {
       const { shares } = shareReceipt(
         lines,
         applyUnassigned(partial, choice, locked),
-        receipt.totalCents
+        receiptShareTotal(receipt)
       );
       const entries = toEntries(shares, locked);
       if (entries.length === 0) {
@@ -1031,6 +1065,14 @@ export class SplitCommandHandler {
         leftover: 'omit',
         unassignedChoice: choice,
       });
+    } else if (data === 'split_scan:edit') {
+      await this.setButtons(ctx, new InlineKeyboard());
+      await this.setState({ flow: 'split', step: EDIT_RECEIPT, context: c });
+      await this.ask(
+        ctx,
+        'Send one correction: item 2 3.50, gst 0, service 1.00, discount 0 or total 25.40. To remove an item, set its price to 0.',
+        new InlineKeyboard().text('Back', 'split_scan:back')
+      );
     } else if (
       data === 'split_scan:add' ||
       data === 'split_scan:oneline' ||
@@ -1085,7 +1127,7 @@ export class SplitCommandHandler {
         } = rest;
         await this.proceed(ctx, {
           ...clean,
-          receipt: scan.receipt,
+          receipt: { ...scan.receipt, reconciled: true },
           totalCents: scan.receipt.totalCents,
           mode: 'custom',
           group: isGroup(ctx), // a group may let everyone claim the items
@@ -1301,7 +1343,8 @@ export class SplitCommandHandler {
         context: { ...c, claimMsg: sent.message_id },
       });
     } else if (step === ASSIGN) {
-      const items = (c.receipt as Receipt).items;
+      const receipt = c.receipt as Receipt;
+      const items = receipt.items;
       // The list gets its own bubble so it can be copied whole, without the instructions
       await ctx.reply(items.map((it, i) => `${i + 1}. ${it.name} ${sgd(it.cents)}`).join('\n'));
       if (c.assignHow === 'voice') {
@@ -1316,7 +1359,11 @@ export class SplitCommandHandler {
       }
       await this.ask(
         ctx,
-        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back (a colon after a name is optional):\n\nAnn\n1. …\n\nAll\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. GST and service charge are shared in proportion. "me" is you, and your share gets a QR too.' +
+        'Who had what? Send one line per group of items, then the people:\n\n1,3 Ann\n2 Ann, Bob (shared)\n4 me\n5 all (shared by everyone named)\n\nOr copy the items above, put a name above each group and send it back (a colon after a name is optional):\n\nAnn\n1. …\n\nAll\n2. …\n\nLeave out any item nobody had and I will ask what to do with it. ' +
+          (receipt.serviceCents || receipt.gstCents || receipt.discountCents
+            ? 'The identified charges and discounts are shared in proportion. '
+            : '') +
+          '"me" is you, and your share gets a QR too.' +
           (this.receipts.voice
             ? '\n\nYou can also send a voice note: say who had which item.'
             : ''),
@@ -1635,7 +1682,7 @@ export class SplitCommandHandler {
           claimsOf(c),
           waysOf(c),
           from.id,
-          receipt.totalCents
+          receiptShareTotal(receipt)
         );
         if (cents <= 0) return { refuse: 'There is nothing to pay for your items.' };
         return {

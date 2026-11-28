@@ -3,6 +3,7 @@ import {
   applyUnassigned,
   assignmentFromClaims,
   claimerName,
+  correctReceipt,
   expandShares,
   MAX_ITEMS,
   memberAmount,
@@ -10,6 +11,8 @@ import {
   parseAddedItems,
   parseAssignments,
   parseScan,
+  receiptDifference,
+  receiptShareTotal,
   receiptWarnings,
   resolveTyped,
   shareReceipt,
@@ -80,6 +83,59 @@ describe('parseScan', () => {
     expect(off.ok && off.warnings.join(' ')).toContain('do not add up');
     const huge = parseScan({ items: [{ name: 'a', price: 5 }], total: 999999999 });
     expect(huge.ok).toBe(false);
+  });
+});
+
+describe('receiptDifference', () => {
+  it('does not treat an unexplained shortfall as GST or service charge', () => {
+    const scan = parseScan({ items: [{ name: 'Tea', price: 1.8 }], gst: 0, total: 2 });
+    if (!scan.ok) throw new Error(scan.error);
+    expect(receiptDifference(scan.receipt)).toBe(20);
+    expect(scan.receipt.gstCents).toBe(0);
+    expect(scan.receipt.serviceCents).toBe(0);
+  });
+
+  it('accounts for identified charges and discounts in cents', () => {
+    const scan = parseScan({
+      items: [{ name: 'Meal', price: 10 }],
+      gst: 0.9,
+      serviceCharge: 1,
+      discount: 0.5,
+      total: 11.4,
+    });
+    if (!scan.ok) throw new Error(scan.error);
+    expect(receiptDifference(scan.receipt)).toBe(0);
+  });
+
+  it('allows correction of a price, charge or total without changing the original', () => {
+    const scan = parseScan({ items: [{ name: 'Tea', price: 1.8 }], total: 2 });
+    if (!scan.ok) throw new Error(scan.error);
+    const corrected = correctReceipt(scan.receipt, 'item 1 2.00');
+    expect(corrected && receiptDifference(corrected)).toBe(0);
+    expect(scan.receipt.items[0]!.cents).toBe(180);
+    expect(correctReceipt(scan.receipt, 'gst 0.20')?.gstCents).toBe(20);
+    expect(correctReceipt(scan.receipt, 'item 8 1.00')).toBeNull();
+  });
+
+  it('uses identified adjustments for reconciled receipts and preserves legacy totals', () => {
+    const receipt = {
+      items: items(3000, 1000),
+      serviceCents: 500,
+      gstCents: 300,
+      discountCents: 100,
+      totalCents: 4900,
+    };
+    expect(receiptShareTotal(receipt)).toBe(4900);
+    expect(receiptShareTotal({ ...receipt, reconciled: true })).toBe(4700);
+    expect(
+      receiptShareTotal({
+        ...receipt,
+        serviceCents: 0,
+        gstCents: 0,
+        discountCents: 0,
+        reconciled: true,
+      })
+    ).toBe(4000);
   });
 });
 
@@ -398,9 +454,9 @@ describe('a scan that dropped an item', () => {
     expect(missingCents(disc.receipt)).toBe(950);
   });
 
-  it('cannot tell a gap from charges when neither a subtotal nor a charge was read', () => {
+  it('flags a gap when neither a subtotal nor a charge was read', () => {
     const r = read({ items: [{ name: 'a', price: 10 }], total: 30 });
-    expect(missingCents(r.receipt)).toBe(0);
+    expect(missingCents(r.receipt)).toBe(2000);
   });
 
   it('ignores two cents of rounding, and items above the expected amount', () => {
