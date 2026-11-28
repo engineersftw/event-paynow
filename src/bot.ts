@@ -315,8 +315,9 @@ async function getBot(env: Env): Promise<Bot> {
 export async function handleWebhook(
   request: Request,
   env: Env,
-  ctx: Pick<ExecutionContext, 'waitUntil'>
+  ctx: Pick<ExecutionContext, 'waitUntil'>,
+  provideBot = getBot
 ): Promise<Response> {
-  const bot = await getBot(env);
+  const bot = await provideBot(env);
   return acceptUpdate(bot, request, ctx, 'event');
 }

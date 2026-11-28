@@ -58,6 +58,26 @@ npm test          # runs all pools
 npm run test:watch  # watch mode
 ```
 
+## Signed webhook journeys in CI
+
+Run the Simple, Event and Split journeys with:
+
+```bash
+npx vitest run --project workers test/workers/webhook-journeys.test.ts
+```
+
+These tests send Telegram-shaped requests through the real Worker router using dummy webhook
+secrets, production bot handlers, and local D1 and Durable Objects. Telegram calls go to the
+test stub. Split uses an in-memory photo and a fixed scan result, then exercises direct QR
+delivery. The existing Workers CI job automatically includes the suite.
+
+To extend it, create a fresh `webhookChat` with a distinct synthetic user ID and the relevant bot
+factory. Put small synthetic fixtures in the test. Await each `say`, `tap`, or `uploadPhoto` call
+before checking the next prompt or payment outcome. The harness drains `waitUntil` work after
+each request and takes callback data and message IDs from captured buttons. Use `qrAmount` to
+verify the encoded amount in cents. The separate Workflow and Queue tests cover their background
+handlers. Use a staging bot to check live OCR or Telegram delivery.
+
 ## Update-fixture replay against `wrangler dev`
 
 Replay recorded Telegram update JSON directly against the local Worker (the webhook route is `/webhook`):
