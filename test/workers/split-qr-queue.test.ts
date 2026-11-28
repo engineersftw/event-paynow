@@ -46,6 +46,7 @@ const RECEIPT = {
     { name: 'Chilli crab', price: 30 },
     { name: 'Rice', price: 10 },
   ],
+  serviceCharge: 8,
   total: 48,
 };
 
